@@ -20,21 +20,39 @@ def _entries(
     return [(c, b, rung) for c, b in ranked if only_ok is None or b.meets_floor == only_ok]
 
 
+def is_local_only(req: PolicyRequest, ctx: PolicyContext) -> bool:
+    """Local scope, a lock, or battery ``local_only``: nothing may leave the machine."""
+    return req.scope.local_only or (ctx.hw is not None and ctx.hw.battery_policy == "local_only")
+
+
 def suggestions_for(
-    chosen: Candidate, req: PolicyRequest, ctx: PolicyContext
+    chosen: Candidate, req: PolicyRequest, ctx: PolicyContext, *, below_floor: bool = False
 ) -> tuple[Suggestion, ...]:
-    """Battery / busy GPU: suggest ``headwaters/cloud``; never leave local automatically."""
+    """Hints that ride on a decision; they never change the choice or leave local.
+
+    A local-only pick below the floor (HDW-123, D10) keeps the old error's advice: split the
+    task, pull a larger model, and (no lock) use ``headwaters/cloud``. Battery or a busy GPU
+    suggest ``headwaters/cloud`` for a local pick unless a lock forbids the hint.
+    """
+    tips: list[Suggestion] = []
+    if below_floor and chosen.is_local and is_local_only(req, ctx):
+        tips.append(Suggestion("pull_model", "Pull a larger local model that fits your GPU."))
+        tips.append(Suggestion("split_task", "Split the task into smaller steps."))
+        if req.scope.local_only and not req.scope.locks:
+            tips.append(Suggestion("use_cloud", "Use headwaters/cloud to allow cloud models."))
     hw = ctx.hw
     if hw is None or not chosen.is_local or req.scope.locks:  # a lock forbids the hint
-        return ()
+        return tuple(tips)
     if hw.battery_policy == "prefer_cloud":
         why = "on battery"
     elif hw.gpu_busy.busy:
         why = "the GPU is busy"
     else:
-        return ()
+        return tuple(tips)
     text = f"Running locally while {why}; pick headwaters/cloud to use cloud models instead."
-    return (Suggestion("use_cloud", text),)
+    if not any(t.code == "use_cloud" for t in tips):
+        tips.append(Suggestion("use_cloud", text))
+    return tuple(tips)
 
 
 def no_route(
@@ -59,9 +77,6 @@ def no_route(
         tips.append(Suggestion("pull_model", "Pull a local model that fits your GPU."))
     if codes & {"no_vision", "no_tools", "no_json"}:
         tips.append(Suggestion("add_capable_model", "No model supports what this needs."))
-    if code == "local_below_floor":
-        tips.append(Suggestion("split_task", "Split the task into smaller steps."))
-        tips.append(Suggestion("pull_model", "Pull a larger local model that fits your GPU."))
     if req.scope.local_only and not req.scope.locks:
         tips.append(Suggestion("use_cloud", "Use headwaters/cloud to allow cloud models."))
     return NoRouteError(code, message, etas=etas, suggestions=tuple(tips), rejected=rejected)
@@ -95,9 +110,10 @@ def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) 
         if near[1].below_floor_by <= rules.floors.optimistic_margin:
             ladder.append((near[0], near[1], "optimistic"))
     ladder += paid
-    battery_local = ctx.hw is not None and ctx.hw.battery_policy == "local_only"
-    if not (req.scope.local_only or battery_local):  # local never goes below the floor: errors
-        ladder += cheap_low
+    # Below-floor local entries come last. In local-only states they are the only below-floor
+    # entries in scope, so local scope serves the best local model, flagged (D10, HDW-123).
+    ladder += cheap_low
+    if not is_local_only(req, ctx):
         cap = rules.tiers.openrouter_free_router
         if cap.enabled and soft.complexity <= cap.max_complexity:
             ladder += _entries(free_router, "free_router")

@@ -65,14 +65,42 @@ def test_pick_explains_why_a_model_is_not_eligible(cli_home: Path) -> None:
 
 def test_pick_scope_local_is_fail_closed(cli_home: Path) -> None:
     # The only local model is weaker than the code floor. Local scope never falls back to cloud:
-    # it reports a structured error that says how to loosen the scope.
+    # it serves that local model flagged below the floor, with verification mandatory (HDW-123).
     add_model(open_database(), "qwen:14b", "local", 60.0, agentic=60.0)
     result, data = invoke_json("pick", CODE_PROMPT, "--scope", "local")
-    assert result.exit_code == 4
-    assert data["error"]["code"] == "local_below_floor"
-    assert "headwaters/cloud" in data["error"]["fix"]
-    rejected = {(r["model"], r["reason"]) for r in data["error"]["rejected"]}
+    assert result.exit_code == 0, data
+    assert data["model"] == "qwen:14b"
+    assert data["tier"] == "local"
+    assert data["rung"] == "best_effort"
+    assert data["below_floor"] is True
+    assert data["verify_required"] is True
+    assert data["fallbacks"] == []
+    codes = {s["code"] for s in data["suggestions"]}
+    assert {"pull_model", "split_task", "use_cloud"} <= codes
+    rejected = {(r["model"], r["reason"]) for r in data["rejected"]}
     assert rejected == {("vendor/free:free", "scope"), ("vendor/big", "scope")}
+
+
+def test_pick_scope_local_below_floor_shows_the_warning(cli_home: Path) -> None:
+    add_model(open_database(), "qwen:14b", "local", 60.0, agentic=60.0)
+    result = invoke("pick", CODE_PROMPT, "--scope", "local")
+    assert result.exit_code == 0, result.output
+    assert "Warning: no model in scope reaches the quality floor" in result.stdout
+    assert "Below floor" in result.stdout
+    assert "required" in result.stdout  # verification is mandatory
+    assert "headwaters/cloud" in result.stdout  # the loosening hint
+
+
+def test_pick_above_the_floor_shows_no_warning(cli_home: Path) -> None:
+    assert "Warning:" not in invoke("pick", CODE_PROMPT).stdout
+
+
+def test_pick_scope_local_with_no_usable_model_still_errors(cli_home: Path) -> None:
+    # Below-floor serving needs a local model that passes the hard filter. With none usable
+    # (the 32k local model cannot hold 100k tokens), local scope errors and never goes to cloud.
+    result, data = invoke_json("pick", CODE_PROMPT, "--scope", "local", "--tokens", "100000")
+    assert result.exit_code == 3
+    assert data["error"]["code"] == "local_unavailable"
 
 
 def test_warm_local_model_is_preferred_over_a_cold_stronger_one(cli_home: Path) -> None:

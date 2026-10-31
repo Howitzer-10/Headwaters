@@ -14,7 +14,9 @@ the rest = fallbacks):
     6. ``NoRouteError`` with reset ETAs and suggestions
 
 ``primary_first`` moves the paid rung to the front. In local scope nothing leaves the machine:
-escalation is the larger local model (it ranks higher) and then an error. Premium (Fusion) is
+escalation is the larger local model (it ranks higher), then the best local model below the
+floor (best effort, verification mandatory, ``pull_model``/``split_task`` suggestions), and an
+error only when no local model passes the hard filter (D10, HDW-123). Premium (Fusion) is
 only chosen by an explicit force. Battery or a busy GPU only add a ``headwaters/cloud``
 suggestion. Pure functions; never touches request text.
 """
@@ -70,7 +72,7 @@ def _decision(
         scope=req.scope,
         reasons=tuple(reasons),
         fallbacks=tuple(e[0].id for e in rest),
-        suggestions=suggestions_for(cand, req, ctx),
+        suggestions=suggestions_for(cand, req, ctx, below_floor=below),
         rung=rung,
         verify_required=below or rung == "optimistic",
         breakdown=b,
@@ -100,11 +102,9 @@ def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
     ladder = build_ladder([k for k in kept if k.role != "premium"], req, ctx)
     if ladder:
         return _decision(ladder[0], ladder[1:], req, ctx, reasons)
-    has_normal = any(k.role == "normal" for k in kept)  # local models that passed the filter
-    battery_local = ctx.hw is not None and ctx.hw.battery_policy == "local_only"
-    if (req.scope.local_only or battery_local) and has_normal:
-        msg = "No local model reaches the quality floor for this request."
-        raise no_route("local_below_floor", msg, rejected, ctx.candidates, req)
+    # Local scope serves below-floor local models (HDW-123), so an empty ladder in a local-only
+    # state means no local model passed the hard filter: ``no_candidates``.
+    has_normal = any(k.role == "normal" for k in kept)
     code = "no_route" if has_normal else "no_candidates"
     msg = "No model can serve this request in the current scope."
     raise no_route(code, msg, rejected, ctx.candidates, req)

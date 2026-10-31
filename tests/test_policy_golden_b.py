@@ -61,16 +61,44 @@ CASES: list[Case] = [
         {"model": "paid1"},
     ),
     (
-        "agentic-local-scope-errors",
+        "agentic-local-scope",
         {"agentic": True, "scope": "local"},
-        {"error": "local_below_floor", "sugg": ["split_task", "pull_model"]},
+        {
+            "model": "loc14",
+            "rung": "best_effort",
+            "below": True,
+            "verify": True,
+            "fallbacks": ["loc7"],
+            "sugg": ["pull_model", "split_task", "use_cloud"],
+        },
     ),
-    # loc7 is below the floor, and local scope never falls back below it.
+    (
+        # HDW-119 probe P2: a trivial agent turn, local model code 88 / agentic 85. The floor is
+        # 70 + 5 + 15 (agentic_bonus) = 90, so it is below the floor but is still served.
+        "agentic-local-scope-p2",
+        {
+            "agentic": True,
+            "tools": True,
+            "complexity": 1,
+            "scope": "local",
+            "only": ["loc14"],
+            "mods": {"loc14": {"scores": {"code": 88.0, "agentic_tools": 85.0}}},
+        },
+        {"model": "loc14", "rung": "best_effort", "below": True, "verify": True},
+    ),
+    # loc7 is below the floor too, so it is only a fallback; nothing leaves the local tier.
     ("scope-local-picks-local", {"scope": "local"}, {"model": "loc14", "fallbacks": []}),
     (
-        "scope-local-too-hard-errors",
+        "scope-local-too-hard",
         {"scope": "local", "complexity": 5},
-        {"error": "local_below_floor", "sugg": ["pull_model", "split_task", "use_cloud"]},
+        {
+            "model": "loc14",
+            "rung": "best_effort",
+            "below": True,
+            "verify": True,
+            "fallbacks": ["loc7"],
+            "sugg": ["pull_model", "split_task", "use_cloud"],
+        },
     ),
     (
         "scope-local-no-model-fits",
@@ -99,7 +127,13 @@ CASES: list[Case] = [
     (
         "private-lock-never-cloud",
         {"locks": ["private_lock"], "complexity": 5},
-        {"error": "local_below_floor"},
+        {
+            "model": "loc14",
+            "rung": "best_effort",
+            "below": True,
+            "verify": True,
+            "sugg": ["pull_model", "split_task"],  # a lock forbids the use_cloud hint
+        },
     ),
     (
         "private-lock-no-pin-escape",

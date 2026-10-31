@@ -90,7 +90,7 @@ FIXTURES_A: list[Fixture] = [
     (
         "agentic_tools_array",
         AnalyzerInput([user("read the readme")], tools=[TOOL]),
-        case(agentic=True, tools=True),
+        case(agentic=True, tools=True, complexity=1),
     ),
     (
         "agentic_anthropic_system_blocks",
@@ -127,7 +127,7 @@ FIXTURES_A: list[Fixture] = [
             ],
             tools=[TOOL],
         ),
-        case(agentic=True, tools=True),
+        case(agentic=True, tools=True, complexity=1),
     ),
     (
         "not_agentic_plain_user_agent",

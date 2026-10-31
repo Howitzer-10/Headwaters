@@ -197,9 +197,10 @@ class Analyzer:
         margin = top - second
         return ranked[0], 0.45 if margin == 0 else 0.7 if margin == 1 else 0.85
 
-    def _complexity(self, est_tokens: int, *, reasoning: bool, agentic: bool) -> int:
+    def _complexity(self, est_tokens: int, *, reasoning: bool) -> int:
+        # Agentic requests are not counted here: the floor already adds ``agentic_bonus`` (F4).
         level = 1 + sum(1 for step in self.hints.complexity_token_steps if est_tokens > step)
-        level += int(reasoning) + int(agentic)
+        level += int(reasoning)
         return max(1, min(5, level))
 
     def analyze(self, inp: AnalyzerInput) -> Requirements:
@@ -247,7 +248,7 @@ class Analyzer:
         )
         soft = SoftRequirements(
             task=task,
-            complexity=self._complexity(est_tokens, reasoning=reasoning_hint, agentic=agentic),
+            complexity=self._complexity(est_tokens, reasoning=reasoning_hint),
             risk=risk,
             agentic=agentic,
             languages=languages,

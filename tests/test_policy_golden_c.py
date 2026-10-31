@@ -6,13 +6,15 @@ from typing import Any
 
 import pytest
 
-from tests.policy_golden_support import COOLDOWN, check
+from headwaters.core.policy.errors import NoRouteError
+from tests.policy_golden_support import COOLDOWN, build, check, run
 from tests.test_policy_golden_a import CASES as TABLE_A
 from tests.test_policy_golden_b import CASES as TABLE_B
 from tests.test_policy_scoring import fit
 
 Case = tuple[str, dict[str, Any], dict[str, Any]]
 MYSTERY = {"new:mystery": {"tier": "free_cloud", "scores": {}}}
+NO_FIT = fit("no_fit", "weights_too_large")
 
 CASES: list[Case] = [
     (
@@ -49,7 +51,19 @@ CASES: list[Case] = [
     (
         "battery-local-only-drops-cloud",
         {"battery": "local_only", "complexity": 5},
-        {"error": "local_below_floor"},
+        {
+            "model": "loc14",
+            "rung": "best_effort",
+            "below": True,
+            "verify": True,
+            "fallbacks": ["loc7"],
+            "sugg": ["pull_model", "split_task"],
+        },
+    ),
+    (
+        "battery-local-only-nothing-fits-errors",
+        {"battery": "local_only", "mods": {"loc14": {"fit": NO_FIT}, "loc7": {"fit": NO_FIT}}},
+        {"error": "no_candidates"},
     ),
     (
         "gpu-busy-suggests-cloud",
@@ -104,13 +118,37 @@ def test_golden_c(spec: dict[str, Any], expect: dict[str, Any]) -> None:
 
 
 def test_no_route_error_as_dict_is_structured() -> None:
-    from tests.policy_golden_support import run
-
-    err = run({"scope": "local", "complexity": 5})
+    err = run({"scope": "local", "mods": {"loc14": {"fit": NO_FIT}, "loc7": {"fit": NO_FIT}}})
     payload = err.as_dict()
-    assert payload["code"] == "local_below_floor"
-    assert {s["code"] for s in payload["suggestions"]} >= {"split_task", "pull_model"}
+    assert payload["code"] == "no_candidates"
+    assert {s["code"] for s in payload["suggestions"]} >= {"pull_model", "use_cloud"}
     assert isinstance(payload["rejected"], list)
+
+
+def test_local_below_floor_is_never_raised() -> None:
+    for spec in (
+        {"scope": "local", "complexity": 5},
+        {"scope": "local", "agentic": True},
+        {"locks": ["private_lock"], "complexity": 5},
+        {"battery": "local_only", "complexity": 5},
+    ):
+        assert not isinstance(run(spec), NoRouteError), spec
+
+
+def test_no_golden_row_leaves_the_local_tier_in_local_scope() -> None:
+    tiers = {c.id: c.tier for c in build(None, (), ())}
+    local_only = [
+        spec
+        for _, spec, _ in [*TABLE_B, *CASES]
+        if spec.get("scope") == "local" or spec.get("locks") or spec.get("battery") == "local_only"
+    ]
+    assert len(local_only) >= 8
+    for spec in local_only:
+        got = run(spec)
+        if isinstance(got, NoRouteError):
+            continue
+        assert tiers[got.model] == "local", spec
+        assert {tiers[m] for m in got.fallbacks} <= {"local"}, spec
 
 
 def test_golden_table_has_at_least_40_scenarios() -> None:

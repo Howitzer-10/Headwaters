@@ -89,6 +89,12 @@ def print_plan(plan: RoutePlan) -> None:
     head.add_row("Request", _request_line(plan))
     console.print(head)
 
+    if d.below_floor:
+        console.print(
+            "\nWarning: no model in scope reaches the quality floor for this request. This is "
+            "the best available one; its answer is verified before you see it."
+        )
+
     console.print("\nWhy:")
     for reason in d.reasons:
         console.print(f"  - {reason}")

@@ -101,7 +101,7 @@ class SizedAnalyzer:
 
     Layer 3 (the CPU classifier) is not used: a dry run must not call any model, not even a
     local one. The complexity formula mirrors layer 1 (one level per token step passed, plus
-    one each for a reasoning hint and an agentic request), so a big ``--tokens`` raises it.
+    one for a reasoning hint; agentic is on the floor, not here), so a big ``--tokens`` raises it.
     """
 
     def __init__(self, base: Analyzer, tokens: int | None = None) -> None:
@@ -115,7 +115,7 @@ class SizedAnalyzer:
             return found
         steps = self._base.hints.complexity_token_steps
         level = 1 + sum(1 for step in steps if size > step)
-        level += int(found.soft.reasoning_hint) + int(found.soft.agentic)
+        level += int(found.soft.reasoning_hint)
         hard = dataclasses.replace(found.hard, min_ctx=size)
         soft = dataclasses.replace(found.soft, complexity=max(1, min(5, level)))
         return dataclasses.replace(found, hard=hard, soft=soft, est_tokens=size)
