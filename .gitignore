@@ -48,6 +48,12 @@ coverage.xml
 htmlcov/
 nosetests.xml
 *.cover
+.import_linter_cache/
+
+# --- Extra ignores ----------------------------------------------------------
+.venv*/
+.tmp*_previous.py
+review_bundle_*/
 *.py,cover
 .hypothesis/
 
