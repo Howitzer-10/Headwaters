@@ -7,20 +7,51 @@ so no cloud client is ever constructed for it. All litellm use stays in this mod
 from __future__ import annotations
 
 import importlib
+import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
 from headwaters.core.executor.cloud_map import delta_from_chunk, map_exception, reasoning_kwargs
 from headwaters.core.executor.errors import ProviderError
 from headwaters.core.executor.types import BackendRequest, Delta
+from headwaters.core.logging import RedactionFilter
+
+LITELLM_LOGGERS = ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy")
+_HANDLER_NAME = "headwaters-litellm"
+
+
+def _quiet_litellm_loggers() -> None:
+    """Route litellm's loggers through redaction and keep them off stdout (F8).
+
+    litellm installs its own handler that writes records below WARNING (and proxy warnings) to
+    ``sys.stdout``, which would corrupt MCP stdio. Its handlers are replaced by one stderr handler
+    carrying ``RedactionFilter``; the level is capped at WARNING. Idempotent.
+    """
+    for name in LITELLM_LOGGERS:
+        logger = logging.getLogger(name)
+        for old in list(logger.handlers):
+            logger.removeHandler(old)  # litellm's own, or ours from an earlier load
+        handler = logging.StreamHandler(sys.stderr)  # current stderr, never stdout
+        handler.set_name(_HANDLER_NAME)
+        handler.addFilter(RedactionFilter())
+        logger.addHandler(handler)
+        if not any(isinstance(f, RedactionFilter) for f in logger.filters):
+            logger.addFilter(RedactionFilter())
+        logger.setLevel(logging.WARNING)
+        logger.propagate = False
 
 
 def _load_litellm() -> Any:
     # No network fetch of the model-cost map at import, and no telemetry.
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
     module = importlib.import_module("litellm")
-    setattr(module, "telemetry", False)  # noqa: B010 - litellm ships no type stubs for it
+    # litellm 1.106.6 attribute names (A-LLM-6); no type stubs, so setattr.
+    setattr(module, "telemetry", False)  # noqa: B010
+    setattr(module, "suppress_debug_info", True)  # noqa: B010 - stops print() in exception mapping
+    setattr(module, "set_verbose", False)  # noqa: B010
+    _quiet_litellm_loggers()
     return module
 
 
