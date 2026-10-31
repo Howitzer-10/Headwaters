@@ -13,7 +13,6 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -24,22 +23,6 @@ from headwaters.core.daemon_control import start_daemon, stop_daemon
 from headwaters.core.daemon_info import read_info, read_token
 
 pytestmark = pytest.mark.slow
-
-
-@pytest.fixture
-def live_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.setenv(paths.HOME_ENV_VAR, str(tmp_path))
-    config = tmp_path / "config"
-    config.mkdir()
-    (config / "rules.yaml").write_text("version: 1\nairplane: true\n", encoding="utf-8")
-    yield tmp_path
-    stop_daemon(timeout_s=20)
-    info = read_info()
-    if info is not None:  # a failed test must not leave a daemon behind
-        import psutil
-
-        if psutil.pid_exists(info.pid):
-            psutil.Process(info.pid).kill()
 
 
 def _start() -> DaemonClient:

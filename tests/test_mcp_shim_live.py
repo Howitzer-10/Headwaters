@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -16,25 +15,8 @@ from mcp import Client, StdioServerParameters
 from headwaters.core import paths
 from headwaters.core.daemon_client import find_running
 from headwaters.core.daemon_control import start_daemon, stop_daemon
-from headwaters.core.daemon_info import read_info
 
 pytestmark = pytest.mark.slow
-
-
-@pytest.fixture
-def live_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.setenv(paths.HOME_ENV_VAR, str(tmp_path))
-    config = tmp_path / "config"
-    config.mkdir()
-    (config / "rules.yaml").write_text("version: 1\nairplane: true\n", encoding="utf-8")
-    yield tmp_path
-    stop_daemon(timeout_s=20)
-    info = read_info()
-    if info is not None:  # a failed test must not leave a daemon behind
-        import psutil
-
-        if psutil.pid_exists(info.pid):
-            psutil.Process(info.pid).kill()
 
 
 def _params(home: Path) -> StdioServerParameters:
