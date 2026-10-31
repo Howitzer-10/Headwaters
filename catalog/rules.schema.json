@@ -810,6 +810,12 @@
           "title": "Cascade If Wait Over S",
           "type": "number"
         },
+        "exhausted_recheck_s": {
+          "default": 900,
+          "exclusiveMinimum": 0,
+          "title": "Exhausted Recheck S",
+          "type": "number"
+        },
         "key_poll_minutes": {
           "default": 10,
           "exclusiveMinimum": 0,

@@ -6,7 +6,10 @@ shared SQLite ``walls`` table, keeps rpm/rpd counters per free model in ``quotas
 
 * ``rate_limit``: cooldown until the hinted reset; exponential backoff with full jitter on repeats;
   cascade at once when the wait exceeds ``walls.cascade_if_wait_over_s``.
-* ``exhausted``: no retry until a balance check passes (``poll_key``) or the reset time.
+* ``exhausted``: no retry until the reset time, a passing balance check (``poll_key``), or, when
+  the provider gave no reset time, ``walls.exhausted_recheck_s`` (HDW-122). Credit walls on a
+  provider or key are split by credit class: ``provider:openrouter:paid`` stops only paid models,
+  ``provider:openrouter:free`` (free-tier daily cap) only free ones.
 * ``overloaded``: ``walls.overloaded_max_retries`` short retries, then cascade and cool down.
 * rpm/rpd limits come from catalog ``free_limits``; soft-exhausted at ``walls.soft_exhaust_pct``.
 
@@ -27,6 +30,7 @@ from headwaters.core import state_limits
 from headwaters.core.catalog.http import HttpClient, SourceError
 from headwaters.core.catalog.schema import FreeLimit, WallScope
 from headwaters.core.rules import WallsRules
+from headwaters.core.scope import PAID_TIERS
 from headwaters.core.state import Database
 from headwaters.core.state_misc import kv_get, kv_set
 from headwaters.core.walls import WallEvent
@@ -35,7 +39,9 @@ OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 ScopeState = Literal["ok", "cooldown", "exhausted"]
 AvailabilityStatus = Literal["ok", "cooldown", "exhausted", "soft"]
 Action = Literal["retry", "cascade", "none"]
+CreditClass = Literal["paid", "free"]
 
+_CREDIT_CLASSES: tuple[CreditClass, ...] = ("paid", "free")
 _TRANSIENT_KINDS = ("rate_limit", "overloaded")
 _STALE_AFTER_S = 3600.0  # a wall that ended this long ago no longer counts as "repeated"
 _RPM = "rpm:"
@@ -44,9 +50,12 @@ _RPD = "rpd:"
 __all__ = [
     "OPENROUTER_KEY_URL",
     "Availability",
+    "CreditClass",
     "KeyStatus",
     "QuotaTracker",
     "WallDecision",
+    "credit_class",
+    "credit_subject",
     "key_subject",
     "model_subject",
     "parse_key_status",
@@ -64,6 +73,17 @@ def provider_subject(provider: str) -> str:
 
 def key_subject(alias: str) -> str:
     return f"key:{alias}"
+
+
+def credit_class(tier: str) -> CreditClass:
+    """Which credit a model of this tier spends: paid tiers use the key's balance, the rest the
+    free allowance (local models never hit a credit wall, so they count as free)."""
+    return "paid" if tier in PAID_TIERS else "free"
+
+
+def credit_subject(subject: str, tier: str) -> str:
+    """``provider:openrouter`` + a paid tier -> ``provider:openrouter:paid``."""
+    return f"{subject}:{credit_class(tier)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,16 +183,32 @@ class QuotaTracker:
             state_limits.clear_walls(self._db, [subject], [kind])
 
     def record_wall(
-        self, event: WallEvent, *, model: str, provider: str, key: str | None = None
+        self,
+        event: WallEvent,
+        *,
+        model: str,
+        provider: str,
+        key: str | None = None,
+        tier: str | None = None,
     ) -> WallDecision:
-        """Persist the wall and say what to do. ``context`` and ``other`` are not walls."""
+        """Persist the wall and say what to do. ``context`` and ``other`` are not walls.
+
+        ``tier`` is the tier of the model that hit the wall. A provider- or key-wide
+        ``exhausted`` wall is recorded for that tier's credit class only (paid or free), so one
+        spent balance cannot stop the free models. Without a tier it stays class-less and stops
+        every model of the provider or key. A wall with no reset time ends after
+        ``walls.exhausted_recheck_s``.
+        """
         if not event.is_wall:
             return WallDecision("none", "ok")
         now = self._clock()
         cfg = self._walls
         subject = self._subject(event.scope, model, provider, key)
         if event.kind == "exhausted":
-            until = event.reset_at if event.reset_at and event.reset_at > now else None
+            if tier is not None and event.scope != "model":
+                subject = credit_subject(subject, tier)
+            reset = event.reset_at
+            until = reset if reset is not None and reset > now else now + cfg.exhausted_recheck_s
             row = state_limits.record_wall(self._db, subject, "exhausted", until=until)
             return WallDecision("cascade", "exhausted", subject, 0.0, until, row.consecutive_count)
         self._forget_stale(subject, event.kind, now)
@@ -195,7 +231,7 @@ class QuotaTracker:
     def record_success(self, *, model: str, provider: str, key: str | None = None) -> None:
         """A good call ends transient walls (and their streak) and counts a request.
 
-        An ``exhausted`` wall is only lifted by a balance check or its reset time.
+        An ``exhausted`` wall is only lifted by a balance check, its reset time or its recheck time.
         """
         subjects = [model_subject(model), provider_subject(provider)]
         if key:
@@ -228,7 +264,10 @@ class QuotaTracker:
         return _RPM + moment.strftime("%Y-%m-%dT%H:%M"), _RPD + moment.strftime("%Y-%m-%d")
 
     def count_request(self, model: str, provider: str) -> None:
-        """Count one request against the model's rpm/rpd (no-op without a catalog limit)."""
+        """Count one request against the model's rpm/rpd (no-op without a catalog limit).
+
+        The router counts every request that reached the provider: successes and 429s.
+        """
         limit = self._limit_for(model, provider)
         if limit is None:
             return
@@ -256,12 +295,21 @@ class QuotaTracker:
 
     # ------------------------------------------------------------ availability
 
-    def availability(self, model: str, provider: str, key: str | None = None) -> Availability:
-        """``ok | cooldown(eta) | exhausted | soft`` for one model (walls beat counters)."""
+    def availability(
+        self, model: str, provider: str, key: str | None = None, tier: str | None = None
+    ) -> Availability:
+        """``ok | cooldown(eta) | exhausted | soft`` for one model (walls beat counters).
+
+        With ``tier``, only the credit walls of that tier's class apply; without it every class
+        does (the cautious reading for a caller that does not know the model's tier).
+        """
         now = self._clock()
-        subjects = {model_subject(model), provider_subject(provider)}
+        shared = [provider_subject(provider)]
         if key:
-            subjects.add(key_subject(key))
+            shared.append(key_subject(key))
+        classes = _CREDIT_CLASSES if tier is None else (credit_class(tier),)
+        subjects = {model_subject(model), *shared}
+        subjects.update(f"{base}:{cls}" for base in shared for cls in classes)
         rows = [r for r in state_limits.active_walls(self._db, now) if r.subject in subjects]
         hard = [r for r in rows if r.kind == "exhausted"]
         if hard:
@@ -277,10 +325,15 @@ class QuotaTracker:
     # ------------------------------------------------------------ key polling
 
     def mark_balance_ok(self, *, provider: str, key: str | None = None) -> int:
-        """A balance check passed: lift exhausted walls on the provider and key scopes."""
+        """A balance check passed: lift exhausted walls on the provider and key scopes.
+
+        That covers the class-less walls and the paid-credit walls; the free-tier allowance is a
+        separate wall that a balance check says nothing about.
+        """
         subjects = [provider_subject(provider)]
         if key:
             subjects.append(key_subject(key))
+        subjects += [credit_subject(s, "paid") for s in subjects]
         return state_limits.clear_walls(self._db, subjects, ["exhausted"])
 
     def _poll_due(self, alias: str, now: float) -> bool:
@@ -318,7 +371,12 @@ class QuotaTracker:
             return None
         kv_set(self._db, f"quota.key_poll.{alias}", now)
         if status.exhausted:
-            state_limits.record_wall(self._db, key_subject(alias), "exhausted", until=None)
+            # A spent balance stops the key's paid models only; free models need no credit.
+            # A class-less key wall with no end would block them and never lift (HDW-119 F3).
+            # Each failing poll renews the wall; if polling stops it ends after the recheck time.
+            subject = credit_subject(key_subject(alias), "paid")
+            until = now + self._walls.exhausted_recheck_s
+            state_limits.record_wall(self._db, subject, "exhausted", until=until)
         else:
             self.mark_balance_ok(provider=provider, key=alias)
         return status

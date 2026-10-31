@@ -150,6 +150,8 @@ class WallsRules(_Model):
     overloaded_backoff_s: float = Field(default=1, gt=0)
     overloaded_cooldown_s: float = Field(default=30, ge=0)
     key_poll_minutes: float = Field(default=10, gt=0)
+    # HDW-122: an exhausted wall with no reset time ends (the model is tried again) after this.
+    exhausted_recheck_s: float = Field(default=900, gt=0)
 
 
 class GatewayRules(_Model):

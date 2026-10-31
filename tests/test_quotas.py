@@ -17,6 +17,8 @@ from headwaters.core.catalog.schema import FreeLimit
 from headwaters.core.quotas import (
     KeyStatus,
     QuotaTracker,
+    credit_class,
+    credit_subject,
     key_subject,
     model_subject,
     parse_key_status,
@@ -172,17 +174,47 @@ def test_scope_key_uses_alias_and_falls_back_to_provider(
     assert t.availability("x", "openai").status == "cooldown"
 
 
-def test_exhausted_never_expires_without_reset_or_check(
+def test_exhausted_without_reset_is_rechecked_after_the_configured_time(
     db: Database, clock: FrozenDateTimeFactory
 ) -> None:
-    t = tracker(db)
+    t = tracker(db, exhausted_recheck_s=900)
     decision = t.record_wall(exhausted(), model=MODEL, provider=PROVIDER, key="work")
     assert (decision.action, decision.state) == ("cascade", "exhausted")
-    clock.tick(30 * 24 * 3600)
+    assert decision.until == pytest.approx(time.time() + 900)
     status = t.availability(MODEL, PROVIDER, key="work")
-    assert (status.status, status.eta) == ("exhausted", None)
+    assert status.status == "exhausted"
+    assert status.eta == pytest.approx(900)
+    clock.tick(600)
     t.record_success(model=MODEL, provider=PROVIDER, key="work")  # success does not lift it
     assert t.availability(MODEL, PROVIDER, key="work").status == "exhausted"
+    clock.tick(301)
+    assert t.availability(MODEL, PROVIDER, key="work").status == "ok"
+
+
+def test_recheck_time_is_a_rule_with_a_default_of_fifteen_minutes() -> None:
+    assert WallsRules().exhausted_recheck_s == 900
+    with pytest.raises(ValueError, match="exhausted_recheck_s"):
+        WallsRules(exhausted_recheck_s=0)
+
+
+def test_exhausted_again_after_a_recheck_waits_the_full_time_again(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db, exhausted_recheck_s=100)
+    t.record_wall(exhausted(), model=MODEL, provider=PROVIDER, key="work")
+    clock.tick(101)
+    assert t.availability(MODEL, PROVIDER, key="work").status == "ok"
+    again = t.record_wall(exhausted(), model=MODEL, provider=PROVIDER, key="work")
+    assert again.until == pytest.approx(time.time() + 100)
+    assert t.availability(MODEL, PROVIDER, key="work").status == "exhausted"
+
+
+def test_a_past_reset_time_falls_back_to_the_recheck_time(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db, exhausted_recheck_s=300)
+    decision = t.record_wall(exhausted(time.time() - 5), model=MODEL, provider=PROVIDER, key="work")
+    assert decision.until == pytest.approx(time.time() + 300)
 
 
 def test_exhausted_lifts_at_reset_time(db: Database, clock: FrozenDateTimeFactory) -> None:
@@ -288,6 +320,111 @@ def test_subject_names_are_namespaced() -> None:
     assert model_subject("a") == "model:a"
     assert provider_subject("OpenRouter") == "provider:openrouter"
     assert key_subject("work") == "key:work"
+
+
+# --- credit classes (HDW-122, HDW-119 F3 / probe P9) -------------------------------------------
+
+FREE_MODEL = "meta/llama:free"
+PAID_MODEL = "anthropic/claude-paid"
+
+
+def test_credit_class_and_subject_names() -> None:
+    assert [credit_class(t) for t in ("paid", "openrouter_auto", "free_cloud", "local")] == [
+        "paid",
+        "paid",
+        "free",
+        "free",
+    ]
+    assert credit_subject(provider_subject("OpenRouter"), "paid") == "provider:openrouter:paid"
+    assert credit_subject(key_subject("work"), "free_cloud") == "key:work:free"
+
+
+def test_p9_paid_402_leaves_free_models_of_the_same_provider_ok(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    """P9: one OpenRouter 402 on a paid model used to block `:free` models for good."""
+    t = tracker(db, exhausted_recheck_s=900)
+    event = exhausted(scope="provider")
+    t.record_wall(event, model=PAID_MODEL, provider=PROVIDER, tier="paid")
+    assert [(w.subject, w.kind) for w in active_walls(db)] == [
+        ("provider:openrouter:paid", "exhausted")
+    ]
+    paid = t.availability(PAID_MODEL, PROVIDER, tier="paid")
+    assert (paid.status, paid.subject) == ("exhausted", "provider:openrouter:paid")
+    assert paid.eta == pytest.approx(900)
+    assert t.availability(FREE_MODEL, PROVIDER, tier="free_cloud").status == "ok"
+    clock.tick(901)  # the wall lifts after the recheck time
+    assert t.availability(PAID_MODEL, PROVIDER, tier="paid").status == "ok"
+
+
+def test_credit_wall_on_the_key_stops_that_keys_paid_models_only(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db)
+    t.record_wall(exhausted(), model=PAID_MODEL, provider=PROVIDER, key="work", tier="paid")
+    assert t.availability(PAID_MODEL, PROVIDER, "work", "paid").subject == "key:work:paid"
+    assert t.availability(FREE_MODEL, PROVIDER, "work", "free_cloud").status == "ok"
+    assert t.availability(PAID_MODEL, PROVIDER, "home", "paid").status == "ok"
+
+
+def test_free_tier_exhaustion_records_a_free_subject(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db)
+    t.record_wall(exhausted(), model=FREE_MODEL, provider=PROVIDER, key="work", tier="free_cloud")
+    assert [w.subject for w in active_walls(db)] == ["key:work:free"]
+    assert t.availability(FREE_MODEL, PROVIDER, "work", "free_cloud").status == "exhausted"
+    assert t.availability("other/free:2", PROVIDER, "work", "free_cloud").status == "exhausted"
+    assert t.availability(PAID_MODEL, PROVIDER, "work", "paid").status == "ok"
+
+
+def test_model_scope_exhaustion_stays_on_the_model(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db)
+    t.record_wall(exhausted(scope="model"), model=FREE_MODEL, provider=PROVIDER, tier="free_cloud")
+    assert [w.subject for w in active_walls(db)] == [f"model:{FREE_MODEL}"]
+    assert t.availability("other/free:2", PROVIDER, tier="free_cloud").status == "ok"
+
+
+def test_tierless_calls_keep_the_cautious_reading(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db)
+    t.record_wall(exhausted(scope="provider"), model=PAID_MODEL, provider=PROVIDER)
+    assert [w.subject for w in active_walls(db)] == ["provider:openrouter"]
+    assert t.availability(FREE_MODEL, PROVIDER).status == "exhausted"
+    assert t.availability(FREE_MODEL, PROVIDER, tier="free_cloud").status == "exhausted"
+
+
+def test_unspecified_tier_sees_every_credit_class(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db)
+    t.record_wall(exhausted(scope="provider"), model=PAID_MODEL, provider="openai", tier="paid")
+    assert t.availability(PAID_MODEL, "openai").status == "exhausted"
+    assert t.availability(PAID_MODEL, "openai", tier="free_cloud").status == "ok"
+
+
+def test_balance_check_lifts_the_paid_wall_not_the_free_one(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db)
+    t.record_wall(exhausted(), model=PAID_MODEL, provider=PROVIDER, key="work", tier="paid")
+    t.record_wall(exhausted(), model=FREE_MODEL, provider=PROVIDER, key="work", tier="free_cloud")
+    assert t.mark_balance_ok(provider=PROVIDER, key="work") == 1
+    assert [w.subject for w in active_walls(db)] == ["key:work:free"]
+
+
+def test_a_failed_balance_poll_marks_only_paid_models_and_it_expires(
+    db: Database, clock: FrozenDateTimeFactory
+) -> None:
+    t = tracker(db, exhausted_recheck_s=900)
+    t.poll_key(FakeHttp(key_payload(0.0)), "k", alias="work")
+    assert [w.subject for w in active_walls(db)] == ["key:work:paid"]
+    assert t.availability(FREE_MODEL, PROVIDER, "work", "free_cloud").status == "ok"
+    clock.tick(901)
+    assert active_walls(db) == []
 
 
 # --- key polling ------------------------------------------------------------------------------

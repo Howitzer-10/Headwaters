@@ -56,6 +56,7 @@ class Executor:
         cloud_factory: Callable[[], Backend] = LiteLLMBackend,
         local_factory: Callable[[str], Backend] = OllamaBackend,
         api_key_for: Callable[[str], str | None] | None = None,
+        key_alias_for: Callable[[str], str | None] | None = None,
     ) -> None:
         self._rules = rules
         self._walls = walls
@@ -64,7 +65,18 @@ class Executor:
         self._cloud_factory = cloud_factory
         self._local_factory = local_factory
         self._api_key_for = api_key_for
+        self._key_alias_for = key_alias_for
         self._cloud: Backend | None = None  # built on first cloud call, never for local scope
+
+    def key_alias(self, provider: str) -> str | None:
+        """Alias (never the secret) of the key a call to ``provider`` uses, if the key store
+        gave one. The router keys wall and quota state by it (HDW-122)."""
+        if self._key_alias_for is None:
+            return None
+        try:
+            return self._key_alias_for(provider) or None
+        except Exception:  # a broken key store must not break routing
+            return None
 
     @overload
     def run(

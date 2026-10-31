@@ -303,7 +303,10 @@ class Router:
         """
         out: list[Candidate] = []
         for c in candidates:
-            live = self._quotas.availability(c.id, c.row.provider)
+            provider = c.row.provider
+            live = self._quotas.availability(
+                c.id, provider, self._executor.key_alias(provider), c.tier
+            )
             out.append(c if live.status == "ok" else replace(c, availability=live))
         return tuple(out)
 
@@ -343,7 +346,15 @@ class Router:
             return None
         cand = run.candidate(decision.model)
         provider = cand.row.provider if cand is not None else exc.provider
-        return self._quotas.record_wall(exc.wall, model=decision.model, provider=provider)
+        if exc.status == 429:  # a rate-limited call still used the model's allowance (F22)
+            self._quotas.count_request(decision.model, provider)
+        return self._quotas.record_wall(
+            exc.wall,
+            model=decision.model,
+            provider=provider,
+            key=self._executor.key_alias(provider),
+            tier=decision.tier,
+        )
 
     async def _recover(
         self, run: RouteRun, decision: RouteDecision, exc: ExecutorError
@@ -463,8 +474,9 @@ class Router:
         verify: VerifyOutcome | None,
     ) -> RouteResult:
         cand = run.candidate(decision.model)
+        provider = cand.row.provider if cand is not None else ""
         self._quotas.record_success(
-            model=decision.model, provider=cand.row.provider if cand is not None else ""
+            model=decision.model, provider=provider, key=self._executor.key_alias(provider)
         )
         cost = (
             router_log.cost_usd(cand.row.price_in, cand.row.price_out, result)

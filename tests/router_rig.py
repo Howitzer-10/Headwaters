@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from headwaters.core.analyzer.requirements import Requirements
+from headwaters.core.catalog.schema import FreeLimit
 from headwaters.core.executor.executor import Executor
 from headwaters.core.features import FeatureRegistry
 from headwaters.core.policy.filters import Candidate
@@ -34,6 +35,9 @@ class Rig:
         config: RouterConfig | None = None,
         secrets: SecretDetector | None = None,
         reqs: Requirements | None = None,
+        key_alias_for: Callable[[str], str | None] | None = None,
+        free_limits: Sequence[FreeLimit] = (),
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self.rules = rules or Rules()
         self.db: Database = open_database(tmp_path / "state.db")
@@ -53,18 +57,20 @@ class Rig:
             lambda d: target_for(d, cold=False),
             cloud_factory=cloud_factory,
             local_factory=lambda host: self.dispatch,
+            key_alias_for=key_alias_for,
         )
 
         async def sleep(seconds: float) -> None:
             self.waits.append(seconds)
 
+        self.quotas = QuotaTracker(self.db, self.rules.walls, free_limits, clock=clock)
         self.router = Router(
             self.rules,
             self.db,
             self.analyzer,
             lambda _reqs: pool,
             executor,
-            QuotaTracker(self.db, self.rules.walls),
+            self.quotas,
             secrets=secrets,
             verifiers=verifiers,
             registry=registry if registry is not None else registry_with(),
