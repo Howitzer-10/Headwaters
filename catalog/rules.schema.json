@@ -1,0 +1,968 @@
+{
+  "$defs": {
+    "AttributionRules": {
+      "additionalProperties": false,
+      "properties": {
+        "referer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Referer"
+        },
+        "title": {
+          "default": "Headwaters",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "title": "AttributionRules",
+      "type": "object"
+    },
+    "BudgetRules": {
+      "additionalProperties": false,
+      "properties": {
+        "confirm_above_usd": {
+          "default": 0.25,
+          "minimum": 0,
+          "title": "Confirm Above Usd",
+          "type": "number"
+        },
+        "paid_daily_usd": {
+          "default": 5.0,
+          "minimum": 0,
+          "title": "Paid Daily Usd",
+          "type": "number"
+        },
+        "premium_max_usd_per_call": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Premium Max Usd Per Call",
+          "type": "number"
+        }
+      },
+      "title": "BudgetRules",
+      "type": "object"
+    },
+    "CatalogRules": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_update": {
+          "default": true,
+          "title": "Auto Update",
+          "type": "boolean"
+        },
+        "disable_when_local": {
+          "default": false,
+          "title": "Disable When Local",
+          "type": "boolean"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "CatalogRules",
+      "type": "object"
+    },
+    "ClassifierRules": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "default": "auto_small",
+          "title": "Model",
+          "type": "string"
+        },
+        "num_gpu": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Num Gpu",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "default": 2,
+          "exclusiveMinimum": 0,
+          "title": "Timeout S",
+          "type": "number"
+        }
+      },
+      "title": "ClassifierRules",
+      "type": "object"
+    },
+    "DashboardRules": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "port": {
+          "default": 4001,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "title": "DashboardRules",
+      "type": "object"
+    },
+    "EnabledFlag": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "EnabledFlag",
+      "type": "object"
+    },
+    "FloorRule": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "minimum": 0,
+          "title": "Base",
+          "type": "integer"
+        },
+        "per_complexity": {
+          "minimum": 0,
+          "title": "Per Complexity",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "base",
+        "per_complexity"
+      ],
+      "title": "FloorRule",
+      "type": "object"
+    },
+    "FloorsRules": {
+      "additionalProperties": false,
+      "properties": {
+        "agentic_bonus": {
+          "default": 15,
+          "minimum": 0,
+          "title": "Agentic Bonus",
+          "type": "integer"
+        },
+        "chat": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 50,
+            "per_complexity": 3
+          }
+        },
+        "code": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 70,
+            "per_complexity": 5
+          }
+        },
+        "creative": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 50,
+            "per_complexity": 3
+          }
+        },
+        "extract": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 55,
+            "per_complexity": 3
+          }
+        },
+        "high_risk_bonus": {
+          "default": 10,
+          "minimum": 0,
+          "title": "High Risk Bonus",
+          "type": "integer"
+        },
+        "optimistic_margin": {
+          "default": 8,
+          "minimum": 0,
+          "title": "Optimistic Margin",
+          "type": "integer"
+        },
+        "reasoning": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 70,
+            "per_complexity": 6
+          }
+        },
+        "summarize": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 50,
+            "per_complexity": 3
+          }
+        },
+        "vision": {
+          "$ref": "#/$defs/FloorRule",
+          "default": {
+            "base": 60,
+            "per_complexity": 4
+          }
+        }
+      },
+      "title": "FloorsRules",
+      "type": "object"
+    },
+    "FreeCloudTier": {
+      "additionalProperties": false,
+      "properties": {
+        "opencode_free": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Opencode Free",
+          "type": "array"
+        },
+        "ranking": {
+          "const": "catalog",
+          "default": "catalog",
+          "title": "Ranking",
+          "type": "string"
+        }
+      },
+      "title": "FreeCloudTier",
+      "type": "object"
+    },
+    "FreeRouterRules": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "max_complexity": {
+          "default": 2,
+          "minimum": 0,
+          "title": "Max Complexity",
+          "type": "integer"
+        }
+      },
+      "title": "FreeRouterRules",
+      "type": "object"
+    },
+    "FusionRules": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "preset": {
+          "default": "quality",
+          "title": "Preset",
+          "type": "string"
+        }
+      },
+      "title": "FusionRules",
+      "type": "object"
+    },
+    "GatewayRules": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "port": {
+          "default": 4000,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "title": "GatewayRules",
+      "type": "object"
+    },
+    "HostsRules": {
+      "additionalProperties": false,
+      "properties": {
+        "subscription": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Subscription",
+          "type": "object"
+        }
+      },
+      "title": "HostsRules",
+      "type": "object"
+    },
+    "LocalTier": {
+      "additionalProperties": false,
+      "properties": {
+        "classifier": {
+          "$ref": "#/$defs/ClassifierRules"
+        },
+        "host": {
+          "default": "http://localhost:11434",
+          "title": "Host",
+          "type": "string"
+        },
+        "keep_alive": {
+          "default": "30m",
+          "title": "Keep Alive",
+          "type": "string"
+        },
+        "keep_warm_model": {
+          "default": "auto",
+          "title": "Keep Warm Model",
+          "type": "string"
+        },
+        "kv_cache_type": {
+          "default": "q8_0",
+          "title": "Kv Cache Type",
+          "type": "string"
+        },
+        "on_battery": {
+          "default": "prefer_cloud",
+          "enum": [
+            "prefer_cloud",
+            "normal",
+            "local_only"
+          ],
+          "title": "On Battery",
+          "type": "string"
+        },
+        "profile": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "laptop_12gb",
+            "desktop_16gb",
+            "custom"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
+        "reserve_gb": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reserve Gb"
+        }
+      },
+      "title": "LocalTier",
+      "type": "object"
+    },
+    "McpRules": {
+      "additionalProperties": false,
+      "properties": {
+        "async_threshold_s": {
+          "default": 20,
+          "minimum": 0,
+          "title": "Async Threshold S",
+          "type": "number"
+        },
+        "roots": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "off"
+          ],
+          "title": "Roots",
+          "type": "string"
+        },
+        "transport": {
+          "const": "stdio",
+          "default": "stdio",
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "title": "McpRules",
+      "type": "object"
+    },
+    "ModelOverride": {
+      "additionalProperties": false,
+      "description": "Per-model user override (applied last). Scores are 0..100, like the floors.",
+      "properties": {
+        "ctx": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ctx"
+        },
+        "json_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Ok"
+        },
+        "scores": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Scores",
+          "type": "object"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "enum": [
+                "local",
+                "free_cloud",
+                "paid"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier"
+        },
+        "tools_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tools Ok"
+        }
+      },
+      "title": "ModelOverride",
+      "type": "object"
+    },
+    "ModelsRules": {
+      "additionalProperties": false,
+      "properties": {
+        "openai_compatible": {
+          "items": {
+            "$ref": "#/$defs/OpenAICompatEndpoint"
+          },
+          "title": "Openai Compatible",
+          "type": "array"
+        },
+        "opencode_config": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opencode Config"
+        },
+        "overrides": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ModelOverride"
+          },
+          "title": "Overrides",
+          "type": "object"
+        },
+        "refresh_ttl_s": {
+          "default": 3600,
+          "minimum": 60,
+          "title": "Refresh Ttl S",
+          "type": "number"
+        }
+      },
+      "title": "ModelsRules",
+      "type": "object"
+    },
+    "OpenAICompatEndpoint": {
+      "additionalProperties": false,
+      "description": "A free OpenAI-compatible endpoint. The key is read from an env var, never stored here.",
+      "properties": {
+        "api_key_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key Env"
+        },
+        "base_url": {
+          "minLength": 1,
+          "title": "Base Url",
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Models",
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "base_url"
+      ],
+      "title": "OpenAICompatEndpoint",
+      "type": "object"
+    },
+    "PaidTier": {
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Models",
+          "type": "array"
+        },
+        "use_floor_variant": {
+          "default": false,
+          "title": "Use Floor Variant",
+          "type": "boolean"
+        }
+      },
+      "title": "PaidTier",
+      "type": "object"
+    },
+    "PickerRules": {
+      "additionalProperties": false,
+      "properties": {
+        "show_extras": {
+          "default": false,
+          "title": "Show Extras",
+          "type": "boolean"
+        }
+      },
+      "title": "PickerRules",
+      "type": "object"
+    },
+    "PremiumTier": {
+      "additionalProperties": false,
+      "properties": {
+        "fusion": {
+          "$ref": "#/$defs/FusionRules"
+        }
+      },
+      "title": "PremiumTier",
+      "type": "object"
+    },
+    "ScoringRules": {
+      "additionalProperties": false,
+      "description": "Policy engine weights (HDW-113). Scores are on the same 0..100 scale as the floors.",
+      "properties": {
+        "assumed_output_tokens": {
+          "default": 1000,
+          "minimum": 0,
+          "title": "Assumed Output Tokens",
+          "type": "integer"
+        },
+        "complexity_penalty_per_level": {
+          "default": 3.0,
+          "minimum": 0,
+          "title": "Complexity Penalty Per Level",
+          "type": "number"
+        },
+        "ctx_headroom": {
+          "default": 1.2,
+          "minimum": 1,
+          "title": "Ctx Headroom",
+          "type": "number"
+        },
+        "gpu_busy_local_penalty": {
+          "default": 15.0,
+          "minimum": 0,
+          "title": "Gpu Busy Local Penalty",
+          "type": "number"
+        },
+        "latency_max_penalty": {
+          "default": 20.0,
+          "minimum": 0,
+          "title": "Latency Max Penalty",
+          "type": "number"
+        },
+        "latency_ref_tps": {
+          "default": 30.0,
+          "exclusiveMinimum": 0,
+          "title": "Latency Ref Tps",
+          "type": "number"
+        },
+        "latency_weight": {
+          "default": 5.0,
+          "minimum": 0,
+          "title": "Latency Weight",
+          "type": "number"
+        },
+        "on_battery_local_penalty": {
+          "default": 20.0,
+          "minimum": 0,
+          "title": "On Battery Local Penalty",
+          "type": "number"
+        },
+        "residency_scale": {
+          "default": 100.0,
+          "minimum": 0,
+          "title": "Residency Scale",
+          "type": "number"
+        },
+        "soft_quota_penalty": {
+          "default": 10.0,
+          "minimum": 0,
+          "title": "Soft Quota Penalty",
+          "type": "number"
+        },
+        "strategies": {
+          "$ref": "#/$defs/StrategiesRules"
+        }
+      },
+      "title": "ScoringRules",
+      "type": "object"
+    },
+    "SecretsRules": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "default": "local",
+          "enum": [
+            "local",
+            "refuse",
+            "off"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "title": "SecretsRules",
+      "type": "object"
+    },
+    "StrategiesRules": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_saver": {
+          "$ref": "#/$defs/StrategyWeights",
+          "default": {
+            "cost_weight": 400.0,
+            "evict_mult": 1.0,
+            "latency_mult": 1.0,
+            "primary_bonus": 0.0,
+            "warm_mult": 1.0
+          }
+        },
+        "primary_first": {
+          "$ref": "#/$defs/StrategyWeights",
+          "default": {
+            "cost_weight": 0.0,
+            "evict_mult": 1.0,
+            "latency_mult": 1.0,
+            "primary_bonus": 30.0,
+            "warm_mult": 1.0
+          }
+        },
+        "quality_first": {
+          "$ref": "#/$defs/StrategyWeights",
+          "default": {
+            "cost_weight": 40.0,
+            "evict_mult": 0.5,
+            "latency_mult": 0.5,
+            "primary_bonus": 0.0,
+            "warm_mult": 0.5
+          }
+        }
+      },
+      "title": "StrategiesRules",
+      "type": "object"
+    },
+    "StrategyWeights": {
+      "additionalProperties": false,
+      "description": "How one strategy adjusts the score terms (HDW-113). All values are first-draft.",
+      "properties": {
+        "cost_weight": {
+          "minimum": 0,
+          "title": "Cost Weight",
+          "type": "number"
+        },
+        "evict_mult": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Evict Mult",
+          "type": "number"
+        },
+        "latency_mult": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Latency Mult",
+          "type": "number"
+        },
+        "primary_bonus": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Primary Bonus",
+          "type": "number"
+        },
+        "warm_mult": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Warm Mult",
+          "type": "number"
+        }
+      },
+      "required": [
+        "cost_weight"
+      ],
+      "title": "StrategyWeights",
+      "type": "object"
+    },
+    "TiersRules": {
+      "additionalProperties": false,
+      "properties": {
+        "free_cloud": {
+          "$ref": "#/$defs/FreeCloudTier"
+        },
+        "local": {
+          "$ref": "#/$defs/LocalTier"
+        },
+        "openrouter_auto": {
+          "$ref": "#/$defs/EnabledFlag"
+        },
+        "openrouter_free_router": {
+          "$ref": "#/$defs/FreeRouterRules"
+        },
+        "paid": {
+          "$ref": "#/$defs/PaidTier"
+        },
+        "premium": {
+          "$ref": "#/$defs/PremiumTier"
+        }
+      },
+      "title": "TiersRules",
+      "type": "object"
+    },
+    "WallsRules": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff_base_s": {
+          "default": 2,
+          "exclusiveMinimum": 0,
+          "title": "Backoff Base S",
+          "type": "number"
+        },
+        "backoff_max_s": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Backoff Max S",
+          "type": "number"
+        },
+        "cascade_if_wait_over_s": {
+          "default": 8,
+          "minimum": 0,
+          "title": "Cascade If Wait Over S",
+          "type": "number"
+        },
+        "key_poll_minutes": {
+          "default": 10,
+          "exclusiveMinimum": 0,
+          "title": "Key Poll Minutes",
+          "type": "number"
+        },
+        "overloaded_backoff_s": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Overloaded Backoff S",
+          "type": "number"
+        },
+        "overloaded_cooldown_s": {
+          "default": 30,
+          "minimum": 0,
+          "title": "Overloaded Cooldown S",
+          "type": "number"
+        },
+        "overloaded_max_retries": {
+          "default": 2,
+          "minimum": 0,
+          "title": "Overloaded Max Retries",
+          "type": "integer"
+        },
+        "soft_exhaust_pct": {
+          "default": 90,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Soft Exhaust Pct",
+          "type": "number"
+        }
+      },
+      "title": "WallsRules",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The whole ``rules.yaml`` document.",
+  "properties": {
+    "advice": {
+      "default": "off",
+      "enum": [
+        "off",
+        "inline",
+        "header_only"
+      ],
+      "title": "Advice",
+      "type": "string"
+    },
+    "airplane": {
+      "default": false,
+      "title": "Airplane",
+      "type": "boolean"
+    },
+    "attribution": {
+      "$ref": "#/$defs/AttributionRules"
+    },
+    "budget": {
+      "$ref": "#/$defs/BudgetRules"
+    },
+    "catalog": {
+      "$ref": "#/$defs/CatalogRules"
+    },
+    "dashboard": {
+      "$ref": "#/$defs/DashboardRules"
+    },
+    "default_scope": {
+      "default": "auto",
+      "enum": [
+        "auto",
+        "free",
+        "local",
+        "cloud"
+      ],
+      "title": "Default Scope",
+      "type": "string"
+    },
+    "features": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "title": "Features",
+      "type": "object"
+    },
+    "floors": {
+      "$ref": "#/$defs/FloorsRules"
+    },
+    "gateway": {
+      "$ref": "#/$defs/GatewayRules"
+    },
+    "hosts": {
+      "$ref": "#/$defs/HostsRules"
+    },
+    "mcp": {
+      "$ref": "#/$defs/McpRules"
+    },
+    "models": {
+      "$ref": "#/$defs/ModelsRules"
+    },
+    "picker": {
+      "$ref": "#/$defs/PickerRules"
+    },
+    "private_lock": {
+      "default": false,
+      "title": "Private Lock",
+      "type": "boolean"
+    },
+    "scoring": {
+      "$ref": "#/$defs/ScoringRules"
+    },
+    "secrets": {
+      "$ref": "#/$defs/SecretsRules"
+    },
+    "strategy": {
+      "default": "cost_saver",
+      "enum": [
+        "cost_saver",
+        "quality_first",
+        "primary_first"
+      ],
+      "title": "Strategy",
+      "type": "string"
+    },
+    "telemetry": {
+      "const": false,
+      "default": false,
+      "title": "Telemetry",
+      "type": "boolean"
+    },
+    "tiers": {
+      "$ref": "#/$defs/TiersRules"
+    },
+    "verify": {
+      "default": "agentic",
+      "enum": [
+        "always",
+        "agentic",
+        "off"
+      ],
+      "title": "Verify",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "walls": {
+      "$ref": "#/$defs/WallsRules"
+    }
+  },
+  "title": "Headwaters rules.yaml",
+  "type": "object"
+}

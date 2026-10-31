@@ -1,0 +1,782 @@
+{
+  "$defs": {
+    "AnalyzerHints": {
+      "additionalProperties": false,
+      "description": "Data for the deterministic analyzer (HDW-106): keywords, agent user-agents, thresholds.\n\nEvery list is data so it can be updated without a release. Regexes are matched\ncase-insensitively against the last user message. All defaults are empty or neutral.",
+      "properties": {
+        "agent_user_agents": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Agent User Agents",
+          "type": "array"
+        },
+        "agentic_system_prompt_tokens": {
+          "default": 1500,
+          "exclusiveMinimum": 0,
+          "title": "Agentic System Prompt Tokens",
+          "type": "integer"
+        },
+        "chars_per_token_code": {
+          "default": 3.5,
+          "exclusiveMinimum": 0,
+          "title": "Chars Per Token Code",
+          "type": "number"
+        },
+        "chars_per_token_prose": {
+          "default": 4.0,
+          "exclusiveMinimum": 0,
+          "title": "Chars Per Token Prose",
+          "type": "number"
+        },
+        "complexity_token_steps": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Complexity Token Steps",
+          "type": "array"
+        },
+        "confidence_threshold": {
+          "default": 0.6,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence Threshold",
+          "type": "number"
+        },
+        "duck_keywords": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Duck Keywords",
+          "type": "array"
+        },
+        "extension_languages": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Extension Languages",
+          "type": "object"
+        },
+        "fence_aliases": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Fence Aliases",
+          "type": "object"
+        },
+        "image_tokens": {
+          "default": 800,
+          "minimum": 0,
+          "title": "Image Tokens",
+          "type": "integer"
+        },
+        "reasoning_keywords": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasoning Keywords",
+          "type": "array"
+        },
+        "risk_keywords": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Risk Keywords",
+          "type": "array"
+        },
+        "task_keywords": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Task Keywords",
+          "type": "object"
+        }
+      },
+      "title": "AnalyzerHints",
+      "type": "object"
+    },
+    "Arch": {
+      "additionalProperties": false,
+      "properties": {
+        "head_dim": {
+          "exclusiveMinimum": 0,
+          "title": "Head Dim",
+          "type": "integer"
+        },
+        "n_kv_heads": {
+          "exclusiveMinimum": 0,
+          "title": "N Kv Heads",
+          "type": "integer"
+        },
+        "n_layers": {
+          "exclusiveMinimum": 0,
+          "title": "N Layers",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "n_layers",
+        "n_kv_heads",
+        "head_dim"
+      ],
+      "title": "Arch",
+      "type": "object"
+    },
+    "FreeLimit": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "rpd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rpd"
+        },
+        "rpm": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rpm"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "FreeLimit",
+      "type": "object"
+    },
+    "GpuProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "recommended": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "propertyNames": {
+            "enum": [
+              "agentic_coder",
+              "general",
+              "vision",
+              "classifier"
+            ]
+          },
+          "title": "Recommended",
+          "type": "object"
+        },
+        "vram_gb": {
+          "exclusiveMinimum": 0,
+          "title": "Vram Gb",
+          "type": "number"
+        }
+      },
+      "required": [
+        "vram_gb"
+      ],
+      "title": "GpuProfile",
+      "type": "object"
+    },
+    "ModelEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "arch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Arch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ctx": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ctx"
+        },
+        "deprecated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deprecated By"
+        },
+        "expected_tps": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Expected Tps",
+          "type": "object"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "json_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Ok"
+        },
+        "modalities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Modalities",
+          "type": "array"
+        },
+        "price_date": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Date"
+        },
+        "price_in": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "USD per million tokens",
+          "title": "Price In"
+        },
+        "price_out": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "USD per million tokens",
+          "title": "Price Out"
+        },
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "retains_data": {
+          "default": false,
+          "title": "Retains Data",
+          "type": "boolean"
+        },
+        "scores": {
+          "$ref": "#/$defs/Scores"
+        },
+        "size_gb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Gb"
+        },
+        "tier_hints": {
+          "items": {
+            "enum": [
+              "paid",
+              "free",
+              "local"
+            ],
+            "type": "string"
+          },
+          "title": "Tier Hints",
+          "type": "array"
+        },
+        "tools_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tools Ok"
+        },
+        "unscored": {
+          "default": false,
+          "title": "Unscored",
+          "type": "boolean"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "provider"
+      ],
+      "title": "ModelEntry",
+      "type": "object"
+    },
+    "NamedPattern": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "regex": {
+          "title": "Regex",
+          "type": "string"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "regex"
+      ],
+      "title": "NamedPattern",
+      "type": "object"
+    },
+    "Scores": {
+      "additionalProperties": false,
+      "properties": {
+        "agentic_tools": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentic Tools"
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "creative": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Creative"
+        },
+        "extract": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extract"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning"
+        },
+        "summarize": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summarize"
+        },
+        "vision": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vision"
+        }
+      },
+      "title": "Scores",
+      "type": "object"
+    },
+    "SubscriptionRate": {
+      "additionalProperties": false,
+      "properties": {
+        "included_credits": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Included Credits"
+        },
+        "plan": {
+          "minLength": 1,
+          "title": "Plan",
+          "type": "string"
+        },
+        "price_date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Price Date",
+          "type": "string"
+        },
+        "usd_per_month": {
+          "minimum": 0,
+          "title": "Usd Per Month",
+          "type": "number"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "plan",
+        "usd_per_month",
+        "price_date"
+      ],
+      "title": "SubscriptionRate",
+      "type": "object"
+    },
+    "UnknownModelDefaults": {
+      "additionalProperties": false,
+      "description": "Conservative values given to a model the catalog does not know.",
+      "properties": {
+        "ctx": {
+          "exclusiveMinimum": 0,
+          "title": "Ctx",
+          "type": "integer"
+        },
+        "json_ok": {
+          "default": false,
+          "title": "Json Ok",
+          "type": "boolean"
+        },
+        "scores": {
+          "$ref": "#/$defs/Scores"
+        },
+        "tools_ok": {
+          "default": false,
+          "title": "Tools Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scores",
+        "ctx"
+      ],
+      "title": "UnknownModelDefaults",
+      "type": "object"
+    },
+    "WallPattern": {
+      "additionalProperties": false,
+      "description": "One wall signal. ``provider`` is a provider id or ``*`` (any provider).",
+      "properties": {
+        "body_regex": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body Regex"
+        },
+        "kind": {
+          "enum": [
+            "rate_limit",
+            "exhausted",
+            "overloaded",
+            "context",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "model",
+            "provider",
+            "key"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "status_codes": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Status Codes",
+          "type": "array"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "kind",
+        "scope"
+      ],
+      "title": "WallPattern",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "analyzer_hints": {
+      "$ref": "#/$defs/AnalyzerHints"
+    },
+    "catalog_version": {
+      "minLength": 1,
+      "title": "Catalog Version",
+      "type": "string"
+    },
+    "free_limits": {
+      "items": {
+        "$ref": "#/$defs/FreeLimit"
+      },
+      "title": "Free Limits",
+      "type": "array"
+    },
+    "gpu_profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/GpuProfile"
+      },
+      "title": "Gpu Profiles",
+      "type": "object"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/ModelEntry"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "placeholder_patterns": {
+      "items": {
+        "$ref": "#/$defs/NamedPattern"
+      },
+      "title": "Placeholder Patterns",
+      "type": "array"
+    },
+    "prompt_bank_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompt Bank Ref"
+    },
+    "schema_version": {
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "secret_patterns": {
+      "items": {
+        "$ref": "#/$defs/NamedPattern"
+      },
+      "title": "Secret Patterns",
+      "type": "array"
+    },
+    "secret_placeholders": {
+      "items": {
+        "$ref": "#/$defs/NamedPattern"
+      },
+      "title": "Secret Placeholders",
+      "type": "array"
+    },
+    "subscription_rates": {
+      "items": {
+        "$ref": "#/$defs/SubscriptionRate"
+      },
+      "title": "Subscription Rates",
+      "type": "array"
+    },
+    "unknown_model_defaults": {
+      "$ref": "#/$defs/UnknownModelDefaults"
+    },
+    "wall_patterns": {
+      "items": {
+        "$ref": "#/$defs/WallPattern"
+      },
+      "title": "Wall Patterns",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "catalog_version",
+    "unknown_model_defaults"
+  ],
+  "title": "Headwaters catalog",
+  "type": "object"
+}

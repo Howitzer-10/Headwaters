@@ -1,0 +1,6 @@
+$ uv run python --version
+(exit 0)
+Python 3.13.17
+$ uv --version
+(exit 0)
+uv 0.13.5 (46776a95d 2026-10-21 x86_64-pc-windows-msvc)

@@ -1,0 +1,142 @@
+# ---------------------------------------------------------------------------
+# Headwaters
+# Python app (gateway / MCP server / executor) with SQLite state.
+# ---------------------------------------------------------------------------
+
+# --- Virtual environments ---------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+virtualenv/
+
+# --- Byte-compiled / cache --------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# --- Build / packaging ------------------------------------------------------
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Test / tooling caches --------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+nosetests.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# --- pyenv / pipenv / poetry / uv -------------------------------------------
+# Lock files ARE committed (uv.lock, poetry.lock); these are the local extras.
+.python-version
+pip-wheel-metadata/
+__pypackages__/
+
+# --- Jupyter ----------------------------------------------------------------
+.ipynb_checkpoints/
+
+# --- Nuitka / PyInstaller (frozen builds) -----------------------------------
+*.build/
+*.dist/
+*.onefile-build/
+*.spec.bak
+
+# --- Headwaters runtime state (SQLite + WAL + local logs) -------------------
+# DB files are matched anywhere; the runtime folders are ROOT-ONLY so a source
+# folder such as headwaters/data/ (seed catalog) is never ignored by accident.
+*.db
+*.db3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite*
+*.db.bak
+*.db3.bak
+/state/
+/runtime/
+/data/
+/logs/
+*.log
+*.log.*
+
+# --- Local model / Ollama blobs (never commit weights) ----------------------
+/models/
+/ollama-models/
+*.gguf
+*.ggml
+*.safetensors
+*.onnx
+
+# --- Secrets & local config -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+/secrets/
+config.local.*
+*.local.yaml
+*.local.yml
+
+# --- uv / litellm scratch ---------------------------------------------------
+.cache/
+.uv/
+litellm_cache/
+*.sqlite.litellm*
+
+# --- Editor / IDE -----------------------------------------------------------
+.idea/
+.vscode/
+!.vscode/settings.json.example
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# --- OS junk ----------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# --- Coverage / reports -----------------------------------------------------
+/reports/
+*.junit.xml
+/results/
+
+# Extra uv environments (e.g. .venv313 when the default Python is too new for a dependency)
+.venv*/

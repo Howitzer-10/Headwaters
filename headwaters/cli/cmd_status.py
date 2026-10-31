@@ -1,0 +1,151 @@
+"""``headwaters status``: scope, locks, walls with ETAs and the warm model.
+
+Reads only local state (rules, project rule, the shared SQLite database); no network call.
+"""
+
+import time
+from typing import Annotated, Any
+
+import typer
+
+from headwaters.cli import runtime
+from headwaters.cli.output import emit_json, fmt_eta, make_console, table
+from headwaters.core.scope import ScopeDecision, ScopeError, paid_scopes_available, resolve_scope
+from headwaters.core.state_limits import WallRow, active_walls
+from headwaters.core.state_models import ModelRow, list_models
+
+_KIND_TEXT = {
+    "rate_limit": "rate limited",
+    "exhausted": "out of credit",
+    "overloaded": "overloaded",
+}
+
+
+def effective_scope(rt: runtime.Runtime) -> tuple[ScopeDecision | None, ScopeError | None]:
+    """The scope a plain request gets right now (rules default, Private lock, project rule)."""
+    try:
+        decision = resolve_scope(
+            rt.rules,
+            rt.project,
+            paid_scopes=paid_scopes_available(rt.registry),
+            local_available=True,
+        )
+    except ScopeError as exc:
+        return None, exc
+    return decision, None
+
+
+def locks_in_force(rt: runtime.Runtime, decision: ScopeDecision | None) -> list[str]:
+    found = list(decision.locks) if decision is not None else []
+    if rt.rules.private_lock and "private_lock" not in found:
+        found.append("private_lock")
+    if rt.rules.airplane:
+        found.append("airplane")
+    return found
+
+
+def _wall_eta(row: WallRow, now: float) -> float | None:
+    return None if row.until is None else max(0.0, row.until - now)
+
+
+def _wall_payload(row: WallRow, now: float) -> dict[str, Any]:
+    return {
+        "subject": row.subject,
+        "kind": row.kind,
+        "since": row.since,
+        "eta_s": _wall_eta(row, now),
+        "consecutive": row.consecutive_count,
+    }
+
+
+def _warm_payload(row: ModelRow) -> dict[str, Any]:
+    return {"model": row.id, "vram_gb": row.size_vram_gb}
+
+
+def register(app: typer.Typer) -> None:
+    @app.command("status")
+    def status(
+        as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
+    ) -> None:
+        """Show the scope in force, locks, walls with their reset times, and the warm model."""
+        rt = runtime.load_runtime(as_json=as_json)
+        now = time.time()
+        decision, scope_error = effective_scope(rt)
+        locks = locks_in_force(rt, decision)
+        walls = active_walls(rt.db, now)
+        warm = [m for m in list_models(rt.db) if m.warm]
+
+        if as_json:
+            emit_json(
+                {
+                    "ok": True,
+                    "default_scope": rt.rules.default_scope,
+                    "strategy": rt.rules.strategy,
+                    "effective": None
+                    if decision is None
+                    else {
+                        "scope": decision.scope,
+                        "tiers": sorted(decision.tiers),
+                        "reasons": list(decision.reasons),
+                    },
+                    "scope_error": scope_error.as_dict() if scope_error else None,
+                    "locks": locks,
+                    "private_lock": rt.rules.private_lock,
+                    "airplane": rt.rules.airplane,
+                    "project_rule": rt.project.privacy,
+                    "project_file": str(rt.project_path) if rt.project_path else None,
+                    "walls": [_wall_payload(w, now) for w in walls],
+                    "warm_models": [_warm_payload(m) for m in warm],
+                    "catalog": {"source": rt.catalog_source, "version": rt.catalog.catalog_version},
+                }
+            )
+            return
+
+        console = make_console()
+        top = table("Status", "Item", "Value", no_wrap=["Item"])
+        top.add_row("Default scope", f"{rt.rules.default_scope}  (strategy: {rt.rules.strategy})")
+        if decision is not None:
+            tiers = ", ".join(sorted(decision.tiers))
+            top.add_row("Effective scope", f"{decision.scope}  (tiers: {tiers})")
+        else:
+            top.add_row("Effective scope", "none: " + (scope_error.message if scope_error else ""))
+        top.add_row("Private lock", "on" if rt.rules.private_lock else "off")
+        top.add_row(
+            "Project rule",
+            f"privacy: {rt.project.privacy}"
+            + (f"  ({rt.project_path})" if rt.project_path else "  (no .headwaters.yaml here)"),
+        )
+        top.add_row("Airplane mode", "on (local models only)" if rt.rules.airplane else "off")
+        top.add_row("Locks in force", ", ".join(locks) or "none")
+        top.add_row("Catalog", f"{rt.catalog_source}, version {rt.catalog.catalog_version}")
+        console.print(top)
+        if scope_error is not None:
+            console.print(f"\nfix: {scope_error.fix_hint}")
+
+        if walls:
+            wall_table = table(
+                "Walls", "Subject", "State", "Resets in", "Hits", no_wrap=["Subject"]
+            )
+            for row in walls:
+                eta = _wall_eta(row, now)
+                wall_table.add_row(
+                    row.subject,
+                    _KIND_TEXT.get(row.kind, row.kind),
+                    fmt_eta(eta) if eta is not None else "after a balance check",
+                    str(row.consecutive_count),
+                )
+            console.print()
+            console.print(wall_table)
+        else:
+            console.print("\nWalls: none. Every model is available.")
+
+        if warm:
+            console.print(
+                "\nWarm model: "
+                + ", ".join(
+                    m.id + (f" ({m.size_vram_gb:.1f} GB on the GPU)" if m.size_vram_gb else "")
+                    for m in warm
+                )
+            )
+        else:
+            console.print("\nWarm model: none (as of the last `headwaters models refresh`).")

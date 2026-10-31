@@ -1,0 +1,88 @@
+# Headwaters ticket packets: index
+
+Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only the design sections that ticket references** (from its `Refs` field). Work in order and follow each ticket's `Depends` field.
+
+- The full design (all documents) is about **21.4k tokens**. An average Sonnet packet is about **1.8k tokens** (largest 2.7k), including the Context Pack.
+- Review-gate tickets (Opus) are the exception: attach the full design plus the phase's code diff.
+- If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
+- Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
+- **Decisions override packets.** Every packet carries a `DECISIONS OVERRIDE PACKET TEXT` block (just above `WORKFLOW FOR THIS TICKET`) that tells the session to read `docs/DECISIONS.md` and `docs/ASSUMPTIONS.md` first; D7 and later win over conflicting packet text, and tickets listed under "Deferred tickets" are not built. **If you regenerate the packets, put this block back into the Context Pack template**, or the protection is lost.
+- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback).
+
+| Ticket | Title | Model | Design sections included | ≈ k tokens |
+| --- | --- | --- | --- | --- |
+| HDW-001 | Repo scaffold, tooling, CI | Sonnet | v3.4 §J, v3.5 §F | 1.8 |
+| HDW-002 | External API verification spike | Opus | v3 §14, v3.2 §A, v3.4 §B3 | 2.4 |
+| HDW-003 | Paths, logging, stdio safety | Sonnet | v3.1 §C4, v3.1 §C5, v3.3 §D | 2.0 |
+| HDW-004 | Feature registry and plugin interfaces | Sonnet | v3.5 §B, v3.5 §F | 2.3 |
+| HDW-101 | Rules config (`rules.yaml`) and project config (`.headwaters.yaml`) | Sonnet | v3 §8, v3.1 §C1, v3.3 §E | 2.5 |
+| HDW-102 | SQLite state layer | Sonnet | v3 §3 | 1.6 |
+| HDW-103 | Catalog schema, seed catalog, loader | Sonnet | v3 §4.2, v3 §7.4, v3.4 §C | 2.1 |
+| HDW-104 | Catalog updater (signed, ETag, offline) | Sonnet | v3 §4.2, v3.3 §D | 2.0 |
+| HDW-105 | Live discovery and catalog merge | Sonnet | v3 §4.2 | 1.7 |
+| HDW-106 | Analyzer layer 1 (deterministic requirements) | Sonnet | v3 §4.1 | 1.6 |
+| HDW-107 | Analyzer layer 3 (tiny CPU classifier) and layer interface | Sonnet | v3.4 §C | 1.5 |
+| HDW-108 | Hardware A: GPU, display, battery, GPU-busy detection | Sonnet | v3 §7, v3.1 §C1 | 2.3 |
+| HDW-109 | Hardware B: KV math, fit, `num_ctx`, sysmem-fallback detection | Sonnet | v3 §7.1, v3 §7.2, v3 §7.3, v3.1 §C1 | 2.2 |
+| HDW-110 | Wall classifier | Sonnet | v3 §4.4 | 1.7 |
+| HDW-111 | Quota tracker and cooldowns | Sonnet | v3 §4.4 | 1.7 |
+| HDW-112 | Scope resolver, locks, secret detection | Sonnet | v3.3 §A, v3.3 §B, v3.3 §C, v3.3 §D, v3.3 §E | 2.7 |
+| HDW-113 | Policy engine A: filters, floors, scores | Sonnet | v3 §4.5 | 1.8 |
+| HDW-114 | Policy engine B: decision ladder and golden tests | Sonnet + Opus | v3 §4.5, v3.3 §B4 | 1.9 |
+| HDW-115 | Executor (cloud + local, streaming, reasoning capture) | Sonnet | v3 §4.8, v3.3 §D | 1.9 |
+| HDW-116 | Basic verification (core) | Sonnet | v3 §4.6, v3.1 §C4 | 1.7 |
+| HDW-117 | Router façade (shared core API) | Sonnet | v3 §2, v3.4 §A | 2.3 |
+| HDW-118 | CLI basics | Sonnet | v3 §5.4, v3.3 §C, v3.5 §B | 2.2 |
+| HDW-119 | Phase 1 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-201 | Shared daemon, internal API, port handling | Sonnet | v3.1 §C3, v3.4 §B3 | 1.8 |
+| HDW-202 | stdio MCP shim | Sonnet | v3.1 §C5, v3.4 §B3 | 1.7 |
+| HDW-203 | Workspace roots and files-by-path | Sonnet | v3 §5.2.2, v3.1 §C4, v3.4 §D | 1.9 |
+| HDW-204 | Front-door tools: `headwaters_do`, `headwaters_ask`, `headwaters_check` | Sonnet | v3.4 §B1, v3.4 §B2 | 1.9 |
+| HDW-205 | Front-door tools: `_status`, `_scope`, `_handoff` (basic), `_think` (basic), `_more` | Sonnet | v3.3 §C, v3.4 §B1 | 2.0 |
+| HDW-206 | Progress, async jobs, elicitation | Sonnet | v3 §5.2.2, v3.4 §B3 | 1.8 |
+| HDW-207 | MCP prompts, command files, rules packs | Sonnet | v3 §5.2.3, v3.3 §C | 1.8 |
+| HDW-208 | MCP integration tests and host-eval harness skeleton | Sonnet | v3.4 §B2 | 1.4 |
+| HDW-301 | OpenAI-compatible endpoints and virtual models | Sonnet | v3 §5.1, v3.3 §B | 1.9 |
+| HDW-302 | Streaming failover, headers, session key | Sonnet | v3 §4.8, v3 §5.1 | 1.7 |
+| HDW-303 | Anthropic `/v1/messages` endpoint | Sonnet | v3 §5.1, v3.2 §D | 1.9 |
+| HDW-304 | Tools, agentic handling, aliases, pin, suffixes | Sonnet | v3 §5.1, v3.3 §B3 | 1.6 |
+| HDW-305 | Gateway integration tests: credits gone → multi-wall chain | Sonnet | v3.2 §F | 1.5 |
+| HDW-306 | Privacy egress test suite (local scope proof) | Sonnet + Opus | v3.3 §D | 1.7 |
+| HDW-401 | Key management | Sonnet | v3 §11, v3.1 §C7 | 1.9 |
+| HDW-402 | `doctor` | Sonnet | v3 §5.3, v3.1 §C1, v3.1 §C2, v3.1 §C3 | 2.2 |
+| HDW-403 | Host installer framework + first 4 hosts | Sonnet | v3.1 §C5, v3.1 §C6, v3.2 §D, v3.4 §H | 2.1 |
+| HDW-404 | Status page (core, read-only) | Sonnet | v3.5 §B | 1.9 |
+| HDW-405 | Windows installer, autostart, itch packaging | Sonnet | v3 §10.2, v3.1 §C7 | 2.1 |
+| HDW-406 | Linux service (second target) | Sonnet | v3.1 §D | 1.5 |
+| HDW-407 | Beta 0.1 docs and release gate | Sonnet + Opus | Full design + phase diff (attach) | 1.3 |
+| HDW-501 | Ledger and savings ★ | Sonnet | v3 §4.9, v3.2 §E3 | 1.5 |
+| HDW-502 | Paid scopes, budgets, handback advice ★ | Sonnet | v3 §6, v3.2 §E2, v3.3 §B | 2.1 |
+| HDW-503 | Dashboard ★ | Sonnet | v3 §5.3 | 1.4 |
+| HDW-504 | Tray app ★ | Sonnet | v3.1 §C7, v3.3 §C | 1.9 |
+| HDW-505 | Setup wizard ★ | Sonnet | v3 §5.3 | 1.5 |
+| HDW-506 | VS Code extension: model provider ★ | Sonnet | v3.2 §E1 | 1.5 |
+| HDW-507 | VS Code extension: status bar, commands, publishing ★ | Sonnet | v3.2 §E1 | 1.5 |
+| HDW-508 | Opt-in usage report, feedback, survey ★ | Sonnet | v3.5 §D2, v3.5 §D4 | 1.7 |
+| HDW-509 | Beta 0.2 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-601 | Repo context engine A: symbol index ★ | Sonnet | v3.4 §D | 1.4 |
+| HDW-602 | Context engine B: embeddings and packing ★ | Sonnet | v3.4 §D | 1.5 |
+| HDW-603 | Analyzer layer 2: embedding kNN ★ | Sonnet | v3.4 §C | 1.5 |
+| HDW-604 | Verification v2 ★ | Sonnet | v3 §4.6, v3.4 §F | 1.6 |
+| HDW-605 | Worktree execution ★ | Sonnet | v3.4 §E | 1.5 |
+| HDW-606 | Verify-then-escalate loop ★ | Sonnet + Opus | v3 §4.5, v3 §4.6 | 2.0 |
+| HDW-607 | Handoff packets and sticky sessions ★ | Sonnet | v3 §4.5, v3 §4.7 | 2.0 |
+| HDW-608 | Beta 0.3 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-701 | Hooks engine framework + Claude Code ★ | Sonnet | v3.4 §G | 1.5 |
+| HDW-702 | Hooks for additional hosts ★ (repeat per host) | Sonnet | v3.4 §G | 1.5 |
+| HDW-703 | Installers for remaining hosts ★ (repeat per host) | Sonnet | v3 §9, v3.4 §H | 1.7 |
+| HDW-704 | SpillBench | Sonnet | v3.4 §I, v3.5 §E1 | 1.8 |
+| HDW-705 | Host tool-call eval suite (full) | Sonnet | v3.4 §B2 | 1.4 |
+| HDW-706 | Beta 0.4 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-801 | RC hardening and open-source readiness | Opus | Full design + phase diff (attach) | 1.3 |
+| HDW-802 | Decision evidence report | Sonnet + Opus | Full design + phase diff (attach) | 1.3 |
+| HDW-803 | Apply the 1.0 decision (conditional) | Sonnet | v3.5 §D3, v3.5 §E2, v3.5 §F | 1.8 |
+| HDW-901 | Fusion "deliberate" ★ | Sonnet | v3 §6, v3.4 §B1 | 1.8 |
+| HDW-902 | Rubber duck overlay ★ | Sonnet | v3 §4.5, v3.3 §B2 | 1.7 |
+| HDW-903 | Image generation tool ★ | Sonnet | v3 §5.2.1 | 1.6 |
+| HDW-904 | Learning ★ | Sonnet | v3 §4.9, v3.4 §C | 1.6 |
+| HDW-905 | MCP sampling tier ★ | Sonnet | v3.4 §B3 | 1.5 |

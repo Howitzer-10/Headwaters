@@ -1,0 +1,15 @@
+[importlinter]
+root_package = headwaters
+include_external_packages = False
+
+[importlinter:contract:core-is-a-leaf]
+name = Core must not import features, gateway, mcp, control or installer
+type = forbidden
+source_modules =
+    headwaters.core
+forbidden_modules =
+    headwaters.features
+    headwaters.gateway
+    headwaters.mcp
+    headwaters.control
+    headwaters.installer

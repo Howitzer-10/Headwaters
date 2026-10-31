@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "catalog_version": "0.0.0-seed",
+  "unknown_model_defaults": {
+    "scores": {
+      "code": 0.3, "reasoning": 0.3, "chat": 0.4, "summarize": 0.4,
+      "extract": 0.3, "creative": 0.3, "vision": 0.0, "agentic_tools": 0.2
+    },
+    "tools_ok": false,
+    "json_ok": false,
+    "ctx": 8192
+  },
+  "models": [
+    {
+      "id": "example-paid/model-large",
+      "aliases": ["example-large"],
+      "tier_hints": ["paid"],
+      "provider": "example-paid",
+      "modalities": ["text"],
+      "tools_ok": true,
+      "json_ok": true,
+      "ctx": 200000,
+      "price_in": 3.0,
+      "price_out": 15.0,
+      "price_date": "2026-01-01",
+      "scores": {"code": 0.9, "reasoning": 0.9, "chat": 0.9, "agentic_tools": 0.9},
+      "deprecated_by": null,
+      "retains_data": false,
+      "verify": true
+    },
+    {
+      "id": "example-openrouter/model-free:free",
+      "aliases": [],
+      "tier_hints": ["free"],
+      "provider": "example-openrouter",
+      "modalities": ["text"],
+      "tools_ok": true,
+      "json_ok": true,
+      "ctx": 131072,
+      "price_in": 0,
+      "price_out": 0,
+      "price_date": "2026-01-01",
+      "scores": {"code": 0.6, "reasoning": 0.6, "chat": 0.7, "agentic_tools": 0.5},
+      "retains_data": true,
+      "verify": true
+    },
+    {
+      "id": "example-local:14b",
+      "aliases": ["example-local-14b"],
+      "tier_hints": ["local"],
+      "provider": "ollama",
+      "modalities": ["text"],
+      "tools_ok": true,
+      "json_ok": true,
+      "ctx": 32768,
+      "size_gb": 9.0,
+      "arch": {"n_layers": 48, "n_kv_heads": 8, "head_dim": 128},
+      "scores": {"code": 0.7, "reasoning": 0.6, "chat": 0.7, "agentic_tools": 0.6},
+      "expected_tps": {"laptop_12gb": 35.0, "desktop_16gb": 50.0},
+      "verify": true
+    },
+    {
+      "id": "example-local-vision:7b",
+      "aliases": [],
+      "tier_hints": ["local"],
+      "provider": "ollama",
+      "modalities": ["text", "image"],
+      "tools_ok": false,
+      "json_ok": true,
+      "ctx": 32768,
+      "size_gb": 6.0,
+      "arch": {"n_layers": 28, "n_kv_heads": 4, "head_dim": 128},
+      "scores": {"vision": 0.6, "chat": 0.5},
+      "expected_tps": {"laptop_12gb": 45.0, "desktop_16gb": 60.0},
+      "verify": true
+    }
+  ],
+  "free_limits": [
+    {"provider": "example-openrouter", "model": null, "rpm": 20, "rpd": 50, "verify": true}
+  ],
+  "wall_patterns": [
+    {"provider": "*", "status_codes": [429], "body_regex": null, "kind": "rate_limit", "scope": "model", "verify": true},
+    {"provider": "*", "status_codes": [402], "body_regex": null, "kind": "exhausted", "scope": "key", "verify": true},
+    {"provider": "*", "status_codes": [503, 529], "body_regex": null, "kind": "overloaded", "scope": "model", "verify": true},
+    {"provider": "*", "status_codes": [], "body_regex": "(?i)overloaded_error|\\boverloaded\\b", "kind": "overloaded", "scope": "model", "verify": true},
+    {"provider": "*", "status_codes": [400, 413, 422], "body_regex": "(?i)context[_ ]length|context window|maximum context|prompt is too long|too many tokens|input is too long|input length exceeds|exceeds the (maximum|context)", "kind": "context", "scope": "model", "verify": true},
+    {"provider": "openai", "status_codes": [429], "body_regex": "insufficient_quota", "kind": "exhausted", "scope": "key", "verify": true},
+    {"provider": "anthropic", "status_codes": [400, 402], "body_regex": "(?i)credit balance is too low", "kind": "exhausted", "scope": "key", "verify": true},
+    {"provider": "anthropic", "status_codes": [429], "body_regex": "rate_limit_error", "kind": "rate_limit", "scope": "model", "verify": true},
+    {"provider": "anthropic", "status_codes": [529], "body_regex": "overloaded_error", "kind": "overloaded", "scope": "provider", "verify": true},
+    {"provider": "gemini", "status_codes": [429], "body_regex": "(?is)RESOURCE_EXHAUSTED.*(per ?day|daily)", "kind": "exhausted", "scope": "model", "verify": true},
+    {"provider": "gemini", "status_codes": [429], "body_regex": "RESOURCE_EXHAUSTED", "kind": "rate_limit", "scope": "model", "verify": true},
+    {"provider": "openrouter", "status_codes": [402], "body_regex": "(?i)credits|afford", "kind": "exhausted", "scope": "provider", "verify": true},
+    {"provider": "openrouter", "status_codes": [429], "body_regex": "(?i)free-models-per-day", "kind": "exhausted", "scope": "key", "verify": true},
+    {"provider": "openrouter", "status_codes": [429], "body_regex": "(?i)rate.?limit", "kind": "rate_limit", "scope": "model", "verify": true},
+    {"provider": "ollama", "status_codes": [503], "body_regex": "(?i)server busy|maximum pending requests", "kind": "overloaded", "scope": "provider", "verify": true},
+    {"provider": "opencode", "status_codes": [401, 402, 429], "body_regex": "(?i)CreditsError|insufficient balance", "kind": "exhausted", "scope": "provider", "verify": true},
+    {"provider": "opencode", "status_codes": [429], "body_regex": "(?i)FreeUsageLimitError|rate limit", "kind": "rate_limit", "scope": "provider", "verify": true}
+  ],
+  "placeholder_patterns": [
+    {"name": "example-placeholder", "regex": "(?i)\\byour[_-]?api[_-]?key\\b", "verify": true}
+  ],
+  "gpu_profiles": {
+    "laptop_12gb": {
+      "vram_gb": 12,
+      "recommended": {
+        "agentic_coder": ["example-local:14b"],
+        "general": ["example-local:14b"],
+        "vision": ["example-local-vision:7b"],
+        "classifier": ["example-local-vision:7b"]
+      }
+    },
+    "desktop_16gb": {
+      "vram_gb": 16,
+      "recommended": {
+        "agentic_coder": ["example-local:14b"],
+        "general": ["example-local:14b"],
+        "vision": ["example-local-vision:7b"]
+      }
+    }
+  },
+  "secret_patterns": [
+    {"name": "sk-style-api-key", "regex": "\\bsk-[A-Za-z0-9_-]{20,}", "verify": true},
+    {"name": "aws-access-key-id", "regex": "\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b", "verify": true},
+    {"name": "github-token", "regex": "\\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})", "verify": true},
+    {"name": "slack-token", "regex": "\\bxox[abprs]-[A-Za-z0-9-]{10,}", "verify": true},
+    {"name": "google-api-key", "regex": "\\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])", "verify": true},
+    {"name": "json-web-token", "regex": "\\beyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}", "verify": true},
+    {"name": "bearer-token", "regex": "(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]{20,}", "verify": true},
+    {"name": "private-key-block", "regex": "-----BEGIN [A-Z ]*PRIVATE KEY-----", "verify": true}
+  ],
+  "secret_placeholders": [
+    {"name": "dummy-sk-key", "regex": "(?i)sk-(x{4,}|\\.{3}|your)", "verify": true},
+    {"name": "filler-characters", "regex": "(?i)(x{8,}|\\*{4,}|\\.{3}|0{8,}|1234567890)", "verify": true},
+    {"name": "placeholder-words", "regex": "(?i)(example|dummy|placeholder|changeme|redacted|your[_-]?(api[_-]?)?(key|token|secret))", "verify": true}
+  ],
+  "subscription_rates": [
+    {"plan": "example-plan", "usd_per_month": 20.0, "included_credits": null,
+     "price_date": "2026-01-01", "verify": true}
+  ],
+  "analyzer_hints": {
+    "agentic_system_prompt_tokens": 1500,
+    "confidence_threshold": 0.6,
+    "chars_per_token_code": 3.5,
+    "chars_per_token_prose": 4.0,
+    "image_tokens": 800,
+    "complexity_token_steps": [2000, 8000],
+    "agent_user_agents": ["cline", "roo-code", "roocode", "opencode", "claude-cli", "claude-code", "continue", "aider", "kilo"],
+    "reasoning_keywords": [
+      "\\bprove\\b", "\\bproof\\b", "\\btheorem\\b", "\\bderive\\b", "\\barchitecture\\b",
+      "\\bdesign (a|an|the)\\b", "security audit", "\\btrade-?offs?\\b", "\\bcomplexity analysis\\b"
+    ],
+    "duck_keywords": [
+      "help me think", "\\bwhy does\\b", "\\bwhy is\\b", "explain my bug", "rubber duck",
+      "\\bwalk me through\\b", "i'?m stuck"
+    ],
+    "risk_keywords": [
+      "\\bproduction\\b", "\\bmigration\\b", "\\bdelete\\b", "\\bdrop table\\b", "\\bcredentials?\\b",
+      "\\bsecurity\\b", "\\bpayments?\\b"
+    ],
+    "task_keywords": {
+      "code": ["\\bfunction\\b", "\\bclass\\b", "\\brefactor\\b", "\\bimplement\\b", "\\bbug\\b", "\\bstack ?trace\\b", "\\bunit tests?\\b", "\\bcompile\\b"],
+      "reasoning": ["\\bprove\\b", "\\bproof\\b", "\\bderive\\b", "\\btheorem\\b", "\\barchitecture\\b"],
+      "summarize": ["\\bsummari[sz]e\\b", "\\btl;?dr\\b", "\\bsummary\\b"],
+      "extract": ["\\bextract\\b", "\\bparse\\b", "\\bas json\\b", "\\bjson (object|array)\\b"],
+      "creative": ["\\bwrite (a )?(poem|story|song)\\b", "\\bbrainstorm\\b"]
+    },
+    "fence_aliases": {"py": "python", "js": "javascript", "ts": "typescript", "sh": "shell", "bash": "shell", "ps1": "powershell", "rs": "rust", "yml": "yaml", "c++": "cpp", "cs": "csharp", "golang": "go"},
+    "extension_languages": {
+      ".py": "python", ".js": "javascript", ".jsx": "javascript", ".ts": "typescript", ".tsx": "typescript",
+      ".rs": "rust", ".go": "go", ".java": "java", ".cs": "csharp", ".cpp": "cpp", ".cc": "cpp",
+      ".c": "c", ".h": "c", ".rb": "ruby", ".php": "php", ".kt": "kotlin", ".swift": "swift",
+      ".sh": "shell", ".ps1": "powershell", ".sql": "sql", ".yaml": "yaml", ".yml": "yaml",
+      ".json": "json", ".toml": "toml", ".html": "html", ".css": "css", ".md": "markdown"
+    }
+  },
+  "prompt_bank_ref": null
+}

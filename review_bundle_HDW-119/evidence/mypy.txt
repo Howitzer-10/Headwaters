@@ -1,0 +1,3 @@
+$ uv run mypy
+(exit 0)
+Success: no issues found in 166 source files

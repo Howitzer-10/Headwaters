@@ -1,0 +1,54 @@
+"""Request, context and result types of the decision ladder (HDW-114)."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Literal
+
+from headwaters.core.analyzer.requirements import Requirements
+from headwaters.core.hardware.state import HardwareState
+from headwaters.core.plugins import EscalationPlugin
+from headwaters.core.policy.errors import Suggestion
+from headwaters.core.policy.filters import Candidate
+from headwaters.core.policy.scoring import ScoreBreakdown
+from headwaters.core.rules import Rules
+from headwaters.core.scope import ScopeDecision, TierName
+
+Rung = Literal["pin", "force", "cheap", "optimistic", "paid", "best_effort", "free_router"]
+FORCE_PREMIUM = "premium"
+
+
+@dataclass(frozen=True)
+class PolicyRequest:
+    requirements: Requirements
+    scope: ScopeDecision
+    pin: str | None = None  # a model id the user pinned
+    force: str | None = None  # "premium" (Fusion) is the only force flag in the core
+
+
+@dataclass(frozen=True)
+class PolicyContext:
+    candidates: Sequence[Candidate]
+    rules: Rules
+    hw: HardwareState | None = None
+    escalation: EscalationPlugin | None = None
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    model: str
+    tier: TierName
+    score: float
+    floor: float
+    below_floor: bool
+    scope: ScopeDecision
+    reasons: tuple[str, ...]
+    fallbacks: tuple[str, ...]
+    suggestions: tuple[Suggestion, ...]
+    rung: Rung
+    verify_required: bool  # the verification gate is mandatory (below floor or optimistic)
+    breakdown: ScoreBreakdown
+
+
+Entry = tuple[Candidate, ScoreBreakdown, Rung]
