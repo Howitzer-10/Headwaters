@@ -441,7 +441,7 @@ Output uses Rich tables; `--json` for scripts.
 
 ## Phase 1.5: HDW-119 review fixes
 
-Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/HDW-119_REVIEW.md`, section 8). The backlog numbers tickets SPW-xxx and the packets HDW-xxx; **HDW = SPW numbering**, so HDW-120 is SPW-120 and every Depends/Refs below uses the same numbers. Decisions D10 to D13 are in `docs/DECISIONS.md`. **Blocks Phase 2** = merge before SPW-201; "Before HDW-xxx" = merge before that ticket; **Can wait** = any time before the Beta 0.1 gate (SPW-407). Ticket text is verbatim from the review, except HDW-124, which also carries owner answer 6.
+Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/HDW-119_REVIEW.md`, section 8). The backlog numbers tickets SPW-xxx and the packets HDW-xxx; **HDW = SPW numbering**, so HDW-120 is SPW-120 and every Depends/Refs below uses the same numbers. Decisions D10 to D13 are in `docs/DECISIONS.md`. **Blocks Phase 2** = merge before SPW-201; "Before HDW-xxx" = merge before that ticket; **Can wait** = any time before the Beta 0.1 gate (SPW-407). Ticket text is verbatim from the review, except HDW-124, which also carries owner answer 6. HDW-142 and later come from the triage session (`docs/FOLLOWUPS.md`) and are new text.
 
 ### HDW-120 · Secret scan covers every message part · **Blocks Phase 2**
 **Model** Sonnet · **Effort** Medium · **Depends** 112, 117 · **Class** Core · **Refs** v3.3 §D8, F1
@@ -498,8 +498,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 
 ### HDW-127 · litellm never writes to stdout and logs through redaction · **Before HDW-202**
 **Model** Sonnet · **Effort** Low · **Depends** 003, 115 · **Class** Core · **Refs** v3.1 §C5, F8
-**Build:** in `_load_litellm` set `suppress_debug_info = True` and `set_verbose = False`, and attach `RedactionFilter` (plus a level cap) to the `LiteLLM`, `LiteLLM Router` and `LiteLLM Proxy` loggers; record the attribute names in ASSUMPTIONS (A-LLM-6).
-**Accept when:** under `guard_stdout(strict=True)`, a cloud call that raises a mapped litellm exception (fake module) writes nothing to stdout; a key in a litellm log record is redacted.
+**Build:** in `_load_litellm` set `suppress_debug_info = True` and `set_verbose = False`, and attach `RedactionFilter` (plus a level cap) to the `LiteLLM`, `LiteLLM Router` and `LiteLLM Proxy` loggers; record the attribute names in ASSUMPTIONS (A-LLM-6). (FU-124-2) Also check call time, not only import time: with the HTTP layer mocked, a full streaming cloud call that fails opens connections only to the provider's own API host (no telemetry, cost-map or callback host).
+**Accept when:** under `guard_stdout(strict=True)`, a cloud call that raises a mapped litellm exception (fake module) writes nothing to stdout; a key in a litellm log record is redacted; a mocked cloud call contacts no host other than the provider's.
 
 ### HDW-128 · Hints honour every active lock · **Before HDW-205**
 **Model** Sonnet · **Effort** Low · **Depends** 112, 114 · **Class** Core · **Refs** v3.3 §B4, F9
@@ -511,7 +511,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 **Build:**
 - `_escalate` and the new core retry (D10: one retry when `verify_required` and the check failed, no plugin needed) redecide over candidates whose task score is above the failed model's, with `escalation=None` so the optimistic rung can't fire again.
 - The retry is counted in `max_attempts`, stays in scope, and is skipped after the first streamed token.
-**Accept when:** tests cover cheap fail then stronger pass; no stronger candidate gives the original answer flagged; local scope retries only locally; the existing escalation test is updated so it goes up.
+- (FU-123-1) Cover the HDW-123 case: a below-floor local pick in local scope whose mandatory verification fails retries once on a stronger *local* model; with none stronger, the answer comes back flagged `verify_failed` (D10) and no cloud client is built.
+**Accept when:** tests cover cheap fail then stronger pass; no stronger candidate gives the original answer flagged; local scope retries only locally; the existing escalation test is updated so it goes up; the HDW-123 below-floor local case (the `agentic-local-scope-p2` shape) is tested both ways: a stronger local model passes, and with none stronger the answer is flagged `verify_failed`.
 
 ### HDW-130 · A mandatory gate that checked nothing is not a pass · **Before HDW-204**
 **Model** Sonnet · **Effort** Low · **Depends** 116, 117 · **Class** Core · **Refs** v3 §4.5 step 4, F11
@@ -523,7 +524,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 **Build:**
 - `Router`, `Executor` and `QuotaTracker` take a rules provider (`Callable[[], Rules]`, `RulesManager.current`), read once per request in `_select` and in `enforce_scope`. `enforce_scope` re-checks `rules.private_lock` and `airplane` itself.
 - The daemon schedules `poll_key` with the live `airplane`/lock state.
-**Accept when:** a test toggles `private_lock` between two requests on one Router and the second never builds a cloud client; airplane set mid-run blocks the next cloud call.
+- (FU-122-2) `QuotaTracker.poll_key` is the only way a spent paid wall lifts early, and nothing calls it. The daemon calls it on a timer for each key that has a paid wall (`key:<alias>:paid` or `provider:<p>:paid`), under the same blocking rule as discovery (`_network_block`: airplane, Private lock, default local scope). It acts on the paid class only.
+**Accept when:** a test toggles `private_lock` between two requests on one Router and the second never builds a cloud client; airplane set mid-run blocks the next cloud call; a test shows the timer calls `poll_key` for a key with a paid wall, a passing check lifts the paid wall and leaves a `:free` wall alone, and nothing is polled under airplane or a Private lock.
 
 ### HDW-132 · `primary_first` means the primary first · **Can wait**
 **Model** Sonnet · **Effort** Low · **Depends** 114 · **Class** Core · **Refs** v3.3 §A, F13
@@ -541,7 +543,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Separate the session preference from residency: never zero `eviction_penalty`, never give a VRAM bonus to cloud models.
 - The D11 rule: the last *successful* model leads while usable, in scope, passes the hard filter and still meets the floor (or is the same local best-effort choice). Pin only on `ok`.
 - The reason line says "kept session model".
-**Accept when:** P5 shows no cloud warm bonus and keeps the evict penalty; a three-turn test keeps one model across a small ranking change and moves on a wall and on `verify_failed`.
+- (FU-120-4) `router_session.text_of` reads only message `content` (right for session keys and the executor system message) but looks like a scan helper. Rename it (for example `content_text`) or document that it is never the secret-scan path; the scan path is `_extract.collect(...).scan_text`.
+**Accept when:** P5 shows no cloud warm bonus and keeps the evict penalty; a three-turn test keeps one model across a small ranking change and moves on a wall and on `verify_failed`; the helper's name or docstring says it is not the secret-scan path.
 
 ### HDW-135 · Remote images are refused, not dropped, for local models · **Can wait**
 **Model** Sonnet · **Effort** Low · **Depends** 115 · **Class** Core · **Refs** v3.3 §D2, F17
@@ -566,9 +569,9 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 **Accept when:** the section 5 table rows are gone from code; schema checks pass; an invalid file with `private_lock: true` starts locked.
 
 ### HDW-139 · Seed catalog: classifier and laziness patterns · **Can wait**
-**Model** Sonnet · **Effort** Low · **Depends** 103 · **Class** Core (data) · **Refs** v3 §4.6, F21
-**Build:** a tiny text classifier entry for both GPU profiles; `placeholder_patterns` for the v3 4.6 laziness markers (`rest of (the )?code`, `// existing code`, `... remaining`, `TODO: implement`), all `verify: true`.
-**Accept when:** the seed validates; the verify fixtures catch each marker.
+**Model** Sonnet · **Effort** Medium · **Depends** 103 · **Class** Core (data) · **Refs** v3 §4.6, F21
+**Build:** a tiny text classifier entry for both GPU profiles; `placeholder_patterns` for the v3 4.6 laziness markers (`rest of (the )?code`, `// existing code`, `... remaining`, `TODO: implement`), all `verify: true`. (FU-122-5) Also check every seed `wall_patterns` row (OpenRouter 402 and `free-models-per-day`, OpenAI `insufficient_quota`, Anthropic credit balance, Gemini `RESOURCE_EXHAUSTED`, the generic 402/429/503 rows) against the provider's current API docs and record source and date in ASSUMPTIONS. The credit-class split in `quotas.py` (HDW-122) depends on these matching; a miss falls back to a provider-wide wall.
+**Accept when:** the seed validates; the verify fixtures catch each marker; each wall pattern has a fixture body that classifies to the expected kind, scope and credit class.
 
 ### HDW-140 · Core hooks for `headwaters_think` (D12) · **Before HDW-205**
 **Model** Sonnet · **Effort** Medium · **Depends** 106, 115, 117 · **Class** Core · **Refs** v3.4 §B1, D12
@@ -577,8 +580,24 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 
 ### HDW-141 · Pin Python 3.13 for development · **Can wait**
 **Model** Sonnet · **Effort** Low · **Depends** 001 · **Class** – · **Refs** owner question 2026-10-31, gap 12
-**Build:** add `.python-version` with `3.13`; delete `.venv313`; add `.venv*/` to `.gitignore`; keep `requires-python = ">=3.11"`; add an allowed-to-fail CI job on the newest Python.
-**Accept when:** a fresh `uv sync` builds a 3.13 env on a machine where 3.15 is the default; `ruff check .` passes on the whole tree.
+**Build:** add `.python-version` with `3.13`; delete `.venv313`; add `.venv*/` to `.gitignore`; keep `requires-python = ">=3.11"`; add an allowed-to-fail CI job on the newest Python. (FU-120-6) Also add a `.gitattributes` with `* text=auto eol=lf` and renormalize once (`git add --renormalize .`) in a commit of its own; the repo mixes LF and CRLF with `core.autocrlf=true` and Git warns on every touch. Already in place at triage (2026-10-31): `.python-version` 3.13, no `.venv313`, `.venv*/` in `.gitignore`; what remains is the allowed-to-fail CI job and the line-ending rule.
+**Accept when:** a fresh `uv sync` builds a 3.13 env on a machine where 3.15 is the default; `ruff check .` passes on the whole tree; `git status` shows no LF/CRLF warnings on a fresh Windows checkout.
+
+### HDW-142 · Secret detection sees joined and encoded secrets · **Before HDW-306**
+**Model** Sonnet · **Effort** Medium · **Depends** 120 · **Class** Core · **Refs** v3.3 §D8, FU-120-2
+**Build:**
+- Per message, also scan the string leaves joined in order (with and without a separator) so a key split across adjacent JSON fields or content parts is seen. Results still hold pattern name and span only, never the text.
+- Also scan decoded forms of candidate leaves: percent-encoded text and base64 blobs, one level deep, bounded in length and decoded size. A decode failure is ignored. The bounds are rules (`secrets.scan_*`), not code constants.
+- Fuzz tests: a seed key split at every position across two fields; the same key base64-encoded and percent-encoded; benign base64 (hashes, long ids) does not trigger; a 1 MB `tool_result` scans within a time budget set in rules.
+**Accept when:** the split and encoded forms of every seed secret pattern are detected and route local; no secret text in reasons or rows; the 1 MB case stays inside the time budget; the benign fixtures give no false positive.
+
+### HDW-143 · CI runs on the real default branch and is green on ubuntu · **Before HDW-201**
+**Model** Sonnet · **Effort** Low · **Depends** 001, 124 · **Class** – · **Refs** FU-122-6, triage
+**Build:**
+- `.github/workflows/ci.yml` runs on `push` to `main` only, but this repo's branch is `master` (origin has only `master`), so a push starts no CI. Trigger on `[main, master]` and add `workflow_dispatch`.
+- The commits are already pushed (`573b612..8d0728e`, 2026-10-31), but that push started no CI because of the branch filter above. After the trigger fix, push it and give the session the first run's result for every cell: windows-latest and ubuntu-latest, Python 3.11 and 3.13. Fix what fails on Linux; likely causes are POSIX paths, `nvidia-smi` or `ollama` missing, cp1252 assumptions and CRLF.
+- List every test that skips on Linux, each with its reason, in the report.
+**Accept when:** a push to `master` starts CI; the head commit is green on all four cells; no test skips on ubuntu except ones marked Windows-only with a reason; the report names the run.
 
 ---
 
@@ -591,7 +610,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - An internal JSON API on 127.0.0.1 (token-authenticated via a per-user secret file) plus a **streamable HTTP MCP endpoint** for hosts that support it.
 - Port selection: check the Hyper-V/WSL excluded ranges (`netsh int ipv4 show excludedportrange protocol=tcp`), fall back to the next free port, and write the chosen ports to a state file other components read.
 - Health endpoint; graceful shutdown; `headwaters start|stop` commands.
-**Accept when:** two clients share one daemon; the excluded-range parser is tested with sample output; the daemon refuses non-loopback binds.
+- (FU-124-1, triage) `.importlinter` (HDW-124) lets only `headwaters.gateway` import `fastapi`/`starlette` and only `headwaters.mcp` import `mcp`. The repo layout puts the daemon and its internal HTTP API under `headwaters/mcp/`, and the daemon shares one process with the gateway (D7). Before writing code, settle which package owns the HTTP server and change the contract in this ticket if needed; record it in ASSUMPTIONS, or in DECISIONS if a package boundary moves. When the first web-framework import lands, show the contracts still bite.
+**Accept when:** two clients share one daemon; the excluded-range parser is tested with sample output; the daemon refuses non-loopback binds; `lint-imports` keeps every contract with the real daemon code in place, and a throwaway `import starlette` from `headwaters.core` fails it.
 
 ### SPW-202 · stdio MCP shim
 **Model** Sonnet · **Effort** Medium · **Depends** 201, 003 · **Class** Core · **Refs** v3.1 §C5, v3.4 §B3
@@ -600,7 +620,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Auto-starts the daemon if it isn't running.
 - Strict stdout discipline (`guard_stdout`); UTF-8.
 - Resolves absolute paths for host configs (`headwaters mcp-path`).
-**Accept when:** an integration test drives the shim with an MCP client; the stdout-cleanliness test passes; a cold start launches the daemon.
+- (FU-124-1) Once `mcp>=2.3,<3` is a dependency, show the `mcp` contract bites: a throwaway `import mcp` in `headwaters.core` fails `lint-imports` (it passes vacuously today).
+**Accept when:** an integration test drives the shim with an MCP client; the stdout-cleanliness test passes; a cold start launches the daemon; a throwaway import of the `mcp` SDK from `headwaters.core` fails `lint-imports`.
 
 ### SPW-203 · Workspace roots and files-by-path
 **Model** Sonnet · **Effort** Medium · **Depends** 201 · **Class** Core · **Refs** v3 §5.2.2, v3.1 §C4, v3.4 §D
@@ -623,7 +644,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - **Relay contract** `relay: verbatim|apply_diff|summarize_ok`.
 - Compact results: unified diffs plus a `headwaters://result/<id>` resource for full detail.
 - Tool descriptions are short, imperative and example-led, written for weak dispatcher models.
-**Accept when:** MCP client tests validate the schemas; diffs are produced against real temp repos; local scope is honored through the tools.
+- (FU-123-2) The structured result also carries `suggestions[]` (`code`, `text`: `pull_model`, `split_task`, and `use_cloud` only when no lock applies), and the short text rendering starts with a warning line when `below_floor` is true, as `headwaters pick` does.
+**Accept when:** MCP client tests validate the schemas; diffs are produced against real temp repos; local scope is honored through the tools; a local-scope request below the floor shows `below_floor`, `suggestions` and the warning line in the tool result.
 
 ### SPW-205 · Front-door tools: `_status`, `_scope`, `_handoff` (basic), `_think` (basic), `_more`
 **Model** Sonnet · **Effort** Medium · **Depends** 204 · **Class** Core · **Refs** v3.4 §B1, v3.3 §C
@@ -683,7 +705,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Response headers `x-headwaters-model`, `x-headwaters-tier`, `x-headwaters-scope`, `x-headwaters-reason`.
 - Session key from `x-session-id` or a hash.
 - Advice header and inline note when `advice` is configured (handback advice itself is in SPW-502).
-**Accept when:** tests cover a 429 / 402 / 503 before the first token (transparent retry) and a mid-stream failure (clean error).
+- (FU-123-2) Add `x-headwaters-below-floor: true` (and `x-headwaters-suggestion` with the first suggestion code) when the decision is below the floor. The body is not changed for it, so clients keep parsing.
+**Accept when:** tests cover a 429 / 402 / 503 before the first token (transparent retry) and a mid-stream failure (clean error); a below-floor local response carries the below-floor header.
 
 ### SPW-303 · Anthropic `/v1/messages` endpoint
 **Model** Sonnet · **Effort** High · **Depends** 302 · **Class** Core · **Refs** v3 §5.1, v3.2 §D
@@ -719,7 +742,9 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Runs local-scoped requests through the gateway, MCP tools, the classifier, verification, cascades, handoff and error paths.
 - Also covers airplane mode (zero egress, including the catalog).
 - Private-lock precedence across engines.
-**Accept when:** the suite passes; Opus signs off that no code path constructs a cloud client in local scope.
+- (FU-120-3) Besides the monkeypatched socket spy (`tests/net_spy.py`), install a `sys.addaudithook` that fails on `socket.connect` and `socket.getaddrinfo` to a non-loopback host. Record in ASSUMPTIONS that a C extension opening its own sockets is still out of reach.
+- (FU-120-1) After a secret-locked request, read the decision and outcome rows back from SQLite and assert no secret text in any column (reasons, alternatives, notes), for every HDW-120 shape: content part, `tool_calls` arguments, `tool_use` input, `tool_result`, system block. This closes the one HDW-120 accept-when item that was left open.
+**Accept when:** the suite passes; Opus signs off that no code path constructs a cloud client in local scope; stored decision and outcome rows hold no secret text for every HDW-120 shape, and the audit hook records no non-loopback connect.
 
 ---
 
@@ -732,7 +757,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - `headwaters keys set|list|remove|test` with masked display.
 - Validation pings per provider (no prompt content).
 - Never written to logs or diagnostic bundles.
-**Accept when:** tests run with a fake keyring backend; masking is verified.
+- (FU-122-1) Supply the callbacks the executor already accepts: `api_key_for(provider)` and `key_alias_for(provider)` (the alias only, never the secret), wired wherever the daemon, gateway and CLI build the `Executor`. No production code passes either today, so key-scoped walls (`key:<alias>:paid`) fall back to the provider subject.
+**Accept when:** tests run with a fake keyring backend; masking is verified; a 402 on a stored key records `key:<alias>:paid` in a test that builds the Executor from the key store (fake keyring).
 
 ### SPW-402 · `doctor`
 **Model** Sonnet · **Effort** Medium · **Depends** 108, 109, 201, 401 · **Class** Core · **Refs** v3.1 §C1–C3, v3 §5.3
@@ -760,8 +786,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 
 ### SPW-404 · Status page (core, read-only)
 **Model** Sonnet · **Effort** Medium · **Depends** 201 · **Class** Core · **Refs** v3.5 §B
-**Build:** a minimal page on the dashboard port showing scope, locks, walls with ETAs, warm model, recent decisions (metadata), and the features list with the ★ legend. No editing controls (those are ★ dashboard, SPW-503). Loopback only.
-**Accept when:** it renders with test data; nothing is reachable from a non-loopback address.
+**Build:** a minimal page on the dashboard port showing scope, locks, walls with ETAs, warm model, recent decisions (metadata), and the features list with the ★ legend. No editing controls (those are ★ dashboard, SPW-503). Loopback only. (FU-122-4) Show wall subjects readably (for example `OpenRouter: paid credits`) instead of the raw `...:paid` / `...:free` ids, and give `headwaters status` the same labels. Drop its "after a balance check" text for a wall with no end time; every wall now gets an end time (HDW-122).
+**Accept when:** it renders with test data; nothing is reachable from a non-loopback address; wall labels are readable in the page and in `headwaters status`.
 
 ### SPW-405 · Windows installer, autostart, itch packaging
 **Model** Sonnet · **Effort** High · **Depends** 402, 403 · **Class** Core · **Refs** v3.1 §C7

@@ -7,7 +7,7 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 - If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
 - Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
 - **Decisions override packets.** Every packet carries a `DECISIONS OVERRIDE PACKET TEXT` block (just above `WORKFLOW FOR THIS TICKET`) that tells the session to read `docs/DECISIONS.md` and `docs/ASSUMPTIONS.md` first; D7 and later win over conflicting packet text, and tickets listed under "Deferred tickets" are not built. **If you regenerate the packets, put this block back into the Context Pack template**, or the protection is lost.
-- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings.
+- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings. HDW-142 and later come from triage sessions (`docs/FOLLOWUPS.md`); their Part 3 names the follow-up.
 
 | Ticket | Title | Model | Design sections included | ≈ k tokens |
 | --- | --- | --- | --- | --- |
@@ -56,6 +56,8 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-139 | Seed catalog: classifier and laziness patterns | Sonnet | v3 §4.6, F21 | 1.5 |
 | HDW-140 | Core hooks for `headwaters_think` (D12) | Sonnet | v3.4 §B1, D12 | 1.5 |
 | HDW-141 | Pin Python 3.13 for development | Sonnet | owner question 2026-10-31, gap 12 | 1.4 |
+| HDW-142 | Secret detection sees joined and encoded secrets | Sonnet | v3.3 §D8, FU-120-2 | 1.6 |
+| HDW-143 | CI runs on the real default branch and is green on ubuntu | Sonnet | FU-122-6, triage | 1.5 |
 | HDW-201 | Shared daemon, internal API, port handling | Sonnet | v3.1 §C3, v3.4 §B3 | 1.8 |
 | HDW-202 | stdio MCP shim | Sonnet | v3.1 §C5, v3.4 §B3 | 1.7 |
 | HDW-203 | Workspace roots and files-by-path | Sonnet | v3 §5.2.2, v3.1 §C4, v3.4 §D | 1.9 |
