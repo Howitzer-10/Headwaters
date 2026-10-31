@@ -136,3 +136,24 @@ def test_smi_picks_largest_gpu() -> None:
 def test_run_nvidia_smi_without_exe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gpu_mod, "find_nvidia_smi", lambda: None)
     assert gpu_mod.run_nvidia_smi(["-L"]) is None
+
+
+def test_smi_parses_non_ascii_process_name() -> None:
+    info = probe_nvidia_smi(
+        _smi("GPU X, 8192, 8000, Enabled\n", "7, C:\\Games\\Sp\u00e9cial\u30c4.exe, 100\n")
+    )
+    assert info is not None
+    assert info.processes[0].name == "Sp\u00e9cial\u30c4.exe"
+
+
+def test_run_nvidia_smi_decodes_utf8_regardless_of_code_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gpu_mod, "find_nvidia_smi", lambda: sys.executable)
+    code = (
+        "import sys; sys.stdout.buffer.write("
+        "'1, Sp\u00e9cial\u30c4.exe, 5\\n'.encode('utf-8') + b'\\x81\\xff')"
+    )
+    out = gpu_mod.run_nvidia_smi(["-c", code])
+    assert out is not None
+    assert "Sp\u00e9cial\u30c4.exe" in out

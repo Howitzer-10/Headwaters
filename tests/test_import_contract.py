@@ -1,5 +1,6 @@
 """The import-linter contract must pass on the real repo and fail on a deliberate violation."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,14 @@ def _lint_imports(cwd: Path, config: Path) -> subprocess.CompletedProcess[str]:
     exe = shutil.which("lint-imports", path=str(Path(sys.executable).parent))
     assert exe, "lint-imports not installed in the active environment"
     return subprocess.run(
-        [exe, "--config", str(config)], cwd=cwd, capture_output=True, text=True, check=False
+        [exe, "--config", str(config)],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        check=False,
     )
 
 

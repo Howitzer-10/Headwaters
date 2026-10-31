@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import textwrap
@@ -130,6 +131,9 @@ def test_two_processes_write_concurrently(tmp_path: Path) -> None:
             [sys.executable, "-c", WORKER, str(path), tag, str(n)],
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         for tag in ("a", "b")
     ]

@@ -145,7 +145,14 @@ def run_nvidia_smi(args: Sequence[str]) -> str | None:
         return None
     try:
         done = subprocess.run(
-            [exe, *args], capture_output=True, text=True, timeout=_SMI_TIMEOUT_S, check=False
+            [exe, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            timeout=_SMI_TIMEOUT_S,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
