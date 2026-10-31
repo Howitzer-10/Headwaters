@@ -9,7 +9,15 @@ can serve it right now.
 import typer
 
 import headwaters
-from headwaters.cli import cmd_catalog, cmd_features, cmd_models, cmd_pick, cmd_scope, cmd_status
+from headwaters.cli import (
+    cmd_catalog,
+    cmd_daemon,
+    cmd_features,
+    cmd_models,
+    cmd_pick,
+    cmd_scope,
+    cmd_status,
+)
 from headwaters.cli.output import emit_json
 from headwaters.core.stdio import configure_utf8
 
@@ -55,6 +63,7 @@ def version_command(
 
 cmd_pick.register(app)
 cmd_status.register(app)
+cmd_daemon.register(app)
 cmd_scope.register(app)
 cmd_features.register(app)
 cmd_models.register(models_app)

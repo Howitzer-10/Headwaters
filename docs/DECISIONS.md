@@ -15,7 +15,7 @@
 | D11 | Sticky sessions in core: **core gets basic stickiness**. Inside a session, keep the model that last answered successfully while it stays usable and in scope; switch only on a wall, a scope or lock change, a failed verification, or the hard filter. Handoff packets, summaries and context-threshold re-tiering stay ★ (HDW-607). | Decided (2026-10-31, HDW-119) |
 | D12 | `headwaters_think` in 0.1: **ship it in core as single-model reasoning** (best reasoning-capable model in scope, reasoning on, reasoning text never returned or stored). Fusion `deliberate` and duck are ★ 1.x modes of the same tool. | Decided (2026-10-31, HDW-119) |
 | D13 | Ollama cloud models are not routable in 0.1: **Headwaters never routes to Ollama `:cloud` / `-cloud` models, in any tier.** Discovery drops them (never `local`, never `free_cloud` or `paid`), and the executor refuses them as defence in depth. Owner answer to HDW-119 question 1 ("never"). Where HDW-121 says "`tier=free_cloud`/`paid` per catalog, or drops them", only "drops them" applies. | Decided (2026-10-31, owner, HDW-119) |
-
+| D14 | Daemon packages: **`headwaters.gateway` owns the HTTP server** (the only package allowed to import `fastapi`, `starlette` and `uvicorn`), **`headwaters.mcp` owns the MCP SDK** and hands its streamable-HTTP app out as a plain ASGI callable, and a new **`headwaters.daemon` is the composition root** that wires core, gateway and mcp into one process. Nothing imports `headwaters.daemon`; the CLI starts it as a child process. The internal API and health endpoint live in `gateway/server.py`, not under `headwaters/mcp/`. | Decided (2026-10-31, HDW-201) |
 
 ## Deferred tickets (do not build)
 
@@ -143,3 +143,34 @@ support in 0.1.
 
 **Revisit** at the Beta 0.2 gate (HDW-509) if hosts mostly call `think` for work that
 `headwaters_do` should do.
+
+### D14 detail: daemon package boundary
+
+**Decision.** FU-124-1 / FU-TRI-3 found that `.importlinter` lets only `headwaters.gateway` import
+`fastapi` / `starlette` and only `headwaters.mcp` import `mcp`, while the repo layout put the daemon
+and its internal HTTP API under `headwaters/mcp/`. Rather than loosen a contract, the work is split
+by what each package already owns:
+
+- `headwaters/gateway/server.py`: the Starlette app (`/health`, `/v1/status`, `/v1/shutdown`), the
+  loopback `Host` / `Origin` and bearer-token guard, and the `uvicorn` server. D7 already says the
+  gateway and the daemon share one process, so the HTTP server belongs to the gateway package.
+  `uvicorn` joined that contract because it is part of the web framework.
+- `headwaters/mcp/endpoint.py`: builds the SDK `MCPServer` and returns its streamable-HTTP app as an
+  ASGI callable plus its lifespan. It imports no web framework, so D8 ("all SDK imports inside
+  `headwaters/mcp/`") holds.
+- `headwaters/daemon/`: the composition root (lock, rules, ports, background tasks, wiring). It may
+  import core, gateway and mcp, but not the SDK or the web framework directly (two
+  `allow_indirect_imports` contracts), and nothing may import it (`daemon-is-a-root`).
+- `headwaters/core/`: what the CLI and the daemon share and that needs no server: port selection,
+  the state file and token, the instance lock, the keep-warm ping, the engine wiring, the daemon
+  client and start/stop control.
+
+**Reason.** Every existing contract keeps its meaning and gets a sharper edge instead of an
+exception. The CLI never imports the web or MCP stacks (tested), so `headwaters status` stays fast.
+
+**Cost.** One more top-level package, and `headwaters.daemon` appears in the core-is-a-leaf and the
+two external-package contracts.
+
+**Tickets.** HDW-201. HDW-202 onward add MCP tools inside `headwaters/mcp/` and routes inside
+`headwaters/gateway/`.
+

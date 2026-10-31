@@ -3,7 +3,7 @@ root_package = headwaters
 include_external_packages = True
 
 [importlinter:contract:core-is-a-leaf]
-name = Core must not import features, gateway, mcp, control, installer or cli
+name = Core must not import features, gateway, mcp, daemon, control, installer or cli
 type = forbidden
 source_modules =
     headwaters.core
@@ -11,6 +11,7 @@ forbidden_modules =
     headwaters.features
     headwaters.gateway
     headwaters.mcp
+    headwaters.daemon
     headwaters.control
     headwaters.installer
     headwaters.cli
@@ -42,7 +43,7 @@ forbidden_modules =
     mcp
 
 [importlinter:contract:web-framework-only-in-gateway]
-name = Only headwaters.gateway may import fastapi or starlette
+name = Only headwaters.gateway may import fastapi, starlette or uvicorn
 type = forbidden
 source_modules =
     headwaters.core
@@ -54,3 +55,42 @@ source_modules =
 forbidden_modules =
     fastapi
     starlette
+    uvicorn
+
+# The daemon is the composition root (D14): it may import everything, nothing may import it. The CLI
+# starts it as a child process, so the web framework and the MCP SDK never reach the CLI.
+[importlinter:contract:daemon-is-a-root]
+name = Nothing imports headwaters.daemon
+type = forbidden
+source_modules =
+    headwaters.core
+    headwaters.cli
+    headwaters.control
+    headwaters.features
+    headwaters.gateway
+    headwaters.installer
+    headwaters.mcp
+forbidden_modules =
+    headwaters.daemon
+
+# The daemon reaches the SDK and the web framework only through headwaters.mcp and
+# headwaters.gateway, so these two count direct imports only.
+[importlinter:contract:daemon-no-direct-mcp-sdk]
+name = headwaters.daemon does not import the mcp SDK directly
+type = forbidden
+source_modules =
+    headwaters.daemon
+forbidden_modules =
+    mcp
+allow_indirect_imports = True
+
+[importlinter:contract:daemon-no-direct-web-framework]
+name = headwaters.daemon does not import fastapi, starlette or uvicorn directly
+type = forbidden
+source_modules =
+    headwaters.daemon
+forbidden_modules =
+    fastapi
+    starlette
+    uvicorn
+allow_indirect_imports = True
