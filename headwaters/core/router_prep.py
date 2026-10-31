@@ -8,11 +8,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
+from headwaters.core.analyzer._extract import collect
 from headwaters.core.analyzer.requirements import AnalyzerInput
 from headwaters.core.executor.types import ExecOptions, Message
 from headwaters.core.hardware.residency import ResidencyConfig, ResidencyInputs
 from headwaters.core.policy.filters import Candidate
-from headwaters.core.router_session import system_text, text_of
+from headwaters.core.router_session import text_of
 from headwaters.core.router_types import RouteRequest
 from headwaters.core.router_verify import schema_of
 
@@ -47,10 +48,13 @@ def executor_options(request: RouteRequest) -> ExecOptions:
 
 
 def scan_texts(request: RouteRequest) -> list[str]:
-    """Every text the secret scan must see: the system prompt and each message."""
-    texts = [system_text(request.system, request.messages)]
-    texts.extend(text_of(m.get("content")) for m in request.messages)
-    return [t for t in texts if t]
+    """Every string leaf the secret scan must see (HDW-120).
+
+    System blocks, content parts, OpenAI ``tool_calls[].function.arguments``, Anthropic
+    ``tool_use.input`` and nested ``tool_result`` content: agent loops carry file contents and
+    shell output exactly there.
+    """
+    return [t for t in collect(request.messages, request.system).scan_text if t]
 
 
 def with_warm_preference(

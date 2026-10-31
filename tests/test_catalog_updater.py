@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import io
 import json
-import socket
 import urllib.error
 import urllib.request
 from email.message import Message
@@ -19,6 +18,7 @@ from headwaters.cli.main import app
 from headwaters.core.catalog import trust, updater
 from headwaters.core.catalog.updater import FetchResult
 from headwaters.core.rules import Rules
+from tests.net_spy import forbid_network
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 URL = "https://example.invalid/catalog.json"
@@ -66,20 +66,6 @@ def rules(**kw: Any) -> Rules:
 
 def run_update(r: Rules, server: Any, tmp_path: Path, **kw: Any) -> updater.UpdateResult:
     return updater.update(r, fetch=server, public_key_b64=PUB, directory=tmp_path, **kw)
-
-
-def forbid_network(monkeypatch: pytest.MonkeyPatch) -> list[object]:
-    """Socket-level mock: any attempt to connect is recorded and fails the call."""
-    opened: list[object] = []
-
-    def spy(*a: Any, **k: Any) -> Any:
-        opened.append(a)
-        raise AssertionError("network used")
-
-    monkeypatch.setattr(socket, "create_connection", spy)
-    monkeypatch.setattr(socket.socket, "connect", spy)
-    monkeypatch.setattr(urllib.request, "urlopen", spy)
-    return opened
 
 
 def test_update_installs_signed_catalog(tmp_path: Path) -> None:

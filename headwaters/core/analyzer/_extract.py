@@ -10,6 +10,7 @@ IMAGE_PART_TYPES = frozenset({"image_url", "image", "input_image"})
 TEXT_PART_TYPES = frozenset({"text", "input_text", "output_text"})
 JSON_FORMAT_TYPES = frozenset({"json_object", "json_schema", "json"})
 MAX_DEPTH = 6
+MAX_LEAF_DEPTH = 32
 
 
 def dumps(value: Any) -> str:
@@ -27,17 +28,49 @@ class Collected:
         "code_extra_chars",
         "image_count",
         "last_user_text",
+        "scan_text",
         "system_text",
         "user_side_text",
     )
 
     def __init__(self) -> None:
         self.all_text: list[str] = []
+        # Every string leaf of the system blocks and of every message (content parts, tool-call
+        # arguments, tool_use input, nested tool_result content). For the secret scan (HDW-120).
+        self.scan_text: list[str] = []
         self.system_text: list[str] = []
         self.user_side_text: list[str] = []  # everything except system prompts (for languages)
         self.last_user_text = ""
         self.code_extra_chars = 0  # tool-call arguments: JSON/code-like, counted at code rate
         self.image_count = 0
+
+
+def _leaves(value: Any, out: list[str], depth: int = 0) -> None:
+    """Append every string leaf of ``value``; image parts are skipped (base64 payloads).
+
+    Deeper than ``MAX_LEAF_DEPTH`` the rest is serialized and kept whole, so nesting can never
+    hide a string from the secret scan.
+    """
+    if value is None or isinstance(value, bool | int | float | bytes | bytearray):
+        return
+    if isinstance(value, str):
+        if value:
+            out.append(value)
+        return
+    if depth > MAX_LEAF_DEPTH:
+        text = dumps(value)
+        if text:
+            out.append(text)
+        return
+    if isinstance(value, Mapping):
+        if value.get("type") in IMAGE_PART_TYPES:
+            return
+        for item in value.values():
+            _leaves(item, out, depth + 1)
+        return
+    if isinstance(value, Iterable):
+        for item in value:
+            _leaves(item, out, depth + 1)
 
 
 def _scan_content(content: Any, texts: list[str], out: Collected, depth: int) -> None:
@@ -81,10 +114,12 @@ def collect(
     if system is not None:
         texts: list[str] = []
         _scan_content(system, texts, out, 0)
+        _leaves(system, out.scan_text)
         out.system_text.extend(texts)
         out.all_text.extend(texts)
     for message in messages:
         role = str(message.get("role", "user"))
+        _leaves([v for k, v in message.items() if k != "role"], out.scan_text)
         texts = []
         _scan_content(message.get("content"), texts, out, 0)
         tool_calls = message.get("tool_calls")
