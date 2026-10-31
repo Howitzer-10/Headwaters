@@ -62,10 +62,28 @@ class Database:
         conn = sqlite3.connect(str(safe), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
-        conn.execute("PRAGMA journal_mode = WAL")
+        self._enable_wal(conn)
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
+    @staticmethod
+    def _enable_wal(conn: sqlite3.Connection) -> None:
+        """Switch to WAL, retrying while another process holds the lock.
+
+        Changing a fresh database to WAL needs an exclusive lock and SQLite does not apply
+        ``busy_timeout`` to that switch, so two first-run processes can get "database is
+        locked" at once (seen on Linux CI). Retry until the same deadline instead.
+        """
+        deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+        while True:
+            try:
+                conn.execute("PRAGMA journal_mode = WAL")
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
