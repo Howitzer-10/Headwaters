@@ -10,8 +10,11 @@ import ipaddress
 from urllib.parse import urlparse
 
 from headwaters.core.executor.errors import LocalScopeViolation, ScopeViolation
+from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.policy.types import RouteDecision
 from headwaters.core.rules import Rules
+
+REMOTE_MODEL_MESSAGE = "Model is cloud-proxied by Ollama; it is never used as a local model."
 
 
 def assert_loopback_url(url: str) -> str:
@@ -38,8 +41,14 @@ def assert_loopback_url(url: str) -> str:
     return url.rstrip("/")
 
 
-def enforce_scope(decision: RouteDecision, rules: Rules) -> None:
-    """Raise unless ``decision`` may run. Called before any backend is constructed."""
+def enforce_scope(
+    decision: RouteDecision, rules: Rules, remote_patterns: RemotePatterns = ()
+) -> None:
+    """Raise unless ``decision`` may run. Called before any backend is constructed.
+
+    A local call to an Ollama cloud-proxied model is refused whatever the scope (A-OLL-9, D13):
+    the hop to ollama.com happens inside Ollama, so the loopback check alone proves nothing.
+    """
     tier = decision.tier
     model = decision.model
     if decision.scope.local_only and tier != "local":
@@ -49,6 +58,8 @@ def enforce_scope(decision: RouteDecision, rules: Rules) -> None:
     if rules.airplane and tier != "local":
         raise ScopeViolation("Airplane mode blocks all network egress.", model=model)
     if tier == "local":
+        if is_remote_name(model, remote_patterns):
+            raise LocalScopeViolation(REMOTE_MODEL_MESSAGE, model=model)
         try:
             assert_loopback_url(rules.tiers.local.host)
         except LocalScopeViolation as exc:

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from headwaters.core.catalog.http import HttpClient, SourceError, is_loopback_url
+from headwaters.core.ollama_remote import RemotePatterns, has_remote_fields, is_remote_name
 from headwaters.core.rules import OpenAICompatEndpoint
 
 LiveTier = Literal["local", "free_cloud", "paid"]
@@ -83,8 +84,14 @@ def _arch_from_show(info: Mapping[str, Any]) -> tuple[dict[str, int] | None, int
     return None, ctx
 
 
-def ollama_models(http: HttpClient, host: str) -> tuple[list[LiveModel], list[str]]:
-    """Installed Ollama models plus warm state. Returns (models, warnings)."""
+def ollama_models(
+    http: HttpClient, host: str, remote_patterns: RemotePatterns = ()
+) -> tuple[list[LiveModel], list[str]]:
+    """Installed Ollama models plus warm state. Returns (models, warnings).
+
+    Cloud-proxied models (``remote_model``/``remote_host`` in ``/api/tags`` or ``/api/show``, or a
+    name matching ``remote_patterns``) are dropped, never listed as local (A-OLL-9, D13).
+    """
     if not is_loopback_url(host):
         raise SourceError(f"Ollama host {host!r} is not loopback; local discovery refuses it")
     base = host.rstrip("/")
@@ -94,6 +101,9 @@ def ollama_models(http: HttpClient, host: str) -> tuple[list[LiveModel], list[st
     for item in _as_list(tags.get("models")):
         name = _as_dict(item).get("name") or _as_dict(item).get("model")
         if not isinstance(name, str) or not name:
+            continue
+        if has_remote_fields(_as_dict(item)) or is_remote_name(name, remote_patterns):
+            warnings.append(f"ollama: skipped cloud-proxied model {name} (never routed)")
             continue
         size = _num(_as_dict(item).get("size"))
         live = LiveModel(
@@ -109,6 +119,9 @@ def ollama_models(http: HttpClient, host: str) -> tuple[list[LiveModel], list[st
         except SourceError as exc:
             warnings.append(f"ollama: /api/show failed for {name}: {exc}")
             models[name] = live
+            continue
+        if has_remote_fields(show):
+            warnings.append(f"ollama: skipped cloud-proxied model {name} (never routed)")
             continue
         caps = show.get("capabilities")
         if isinstance(caps, list):

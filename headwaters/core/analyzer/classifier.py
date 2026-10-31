@@ -29,6 +29,7 @@ from headwaters.core.analyzer.ollama_client import (
 )
 from headwaters.core.analyzer.requirements import AnalyzerInput, Requirements
 from headwaters.core.catalog.schema import Catalog
+from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.rules import ClassifierRules, LocalTier
 
 SOURCE_CLASSIFIER = "classifier"
@@ -123,8 +124,11 @@ class TinyLlmClassifier:
         host: str = "http://localhost:11434",
         settings: ClassifierRules | None = None,
         cache_size: int = 256,
+        remote_patterns: RemotePatterns = (),
     ) -> None:
         self.model = model
+        # A cloud-proxied model would send the prompt to ollama.com (A-OLL-9): never call it.
+        self.refused = is_remote_name(model, remote_patterns)
         self.settings = settings or ClassifierRules()
         self._client: OllamaChatClient = client or OllamaHttpClient(host)
         self._cache: OrderedDict[str, Label] = OrderedDict()
@@ -167,6 +171,8 @@ class TinyLlmClassifier:
 
     def classify(self, prompt: str) -> Label | None:
         """Label ``prompt`` (cache first, then one CPU-only model call); ``None`` on failure."""
+        if self.refused:
+            return None
         key = self.cache_key(prompt)
         cached = self._get(key)
         if cached is not None:

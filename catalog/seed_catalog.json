@@ -100,6 +100,9 @@
   "placeholder_patterns": [
     {"name": "example-placeholder", "regex": "(?i)\\byour[_-]?api[_-]?key\\b", "verify": true}
   ],
+  "ollama_remote_patterns": [
+    {"name": "ollama-cloud-tag", "regex": "(?i)[:-]cloud$", "verify": true}
+  ],
   "gpu_profiles": {
     "laptop_12gb": {
       "vram_gb": 12,

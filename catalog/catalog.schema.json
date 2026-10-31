@@ -716,6 +716,13 @@
       "title": "Models",
       "type": "array"
     },
+    "ollama_remote_patterns": {
+      "items": {
+        "$ref": "#/$defs/NamedPattern"
+      },
+      "title": "Ollama Remote Patterns",
+      "type": "array"
+    },
     "placeholder_patterns": {
       "items": {
         "$ref": "#/$defs/NamedPattern"

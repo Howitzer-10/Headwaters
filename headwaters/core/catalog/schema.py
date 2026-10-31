@@ -207,6 +207,7 @@ class Catalog(_Model):
     free_limits: list[FreeLimit] = Field(default_factory=list)
     wall_patterns: list[WallPattern] = Field(default_factory=list)
     placeholder_patterns: list[NamedPattern] = Field(default_factory=list)
+    ollama_remote_patterns: list[NamedPattern] = Field(default_factory=list)
     gpu_profiles: dict[str, GpuProfile] = Field(default_factory=dict)
     secret_patterns: list[NamedPattern] = Field(default_factory=list)
     secret_placeholders: list[NamedPattern] = Field(default_factory=list)

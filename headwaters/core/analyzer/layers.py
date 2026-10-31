@@ -15,6 +15,7 @@ from headwaters.core.analyzer.classifier import TinyLlmClassifier, resolve_class
 from headwaters.core.analyzer.ollama_client import OllamaChatClient
 from headwaters.core.analyzer.requirements import Analyzer, AnalyzerInput, Requirements
 from headwaters.core.catalog.schema import Catalog
+from headwaters.core.ollama_remote import remote_patterns_from
 from headwaters.core.rules import LocalTier
 
 
@@ -75,5 +76,11 @@ def build_chain(
     layer3: AnalyzerLayer | None = None
     model = resolve_classifier_model(catalog, tier) if enable_layer3 else None
     if model is not None:
-        layer3 = TinyLlmClassifier(model, client=client, host=tier.host, settings=tier.classifier)
+        layer3 = TinyLlmClassifier(
+            model,
+            client=client,
+            host=tier.host,
+            settings=tier.classifier,
+            remote_patterns=remote_patterns_from(catalog),
+        )
     return AnalyzerChain(base, layer2=layer2, layer3=layer3)

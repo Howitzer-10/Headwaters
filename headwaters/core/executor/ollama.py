@@ -12,10 +12,11 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from headwaters.core.executor.errors import ProviderError
-from headwaters.core.executor.guard import assert_loopback_url
+from headwaters.core.executor.errors import LocalScopeViolation, ProviderError
+from headwaters.core.executor.guard import REMOTE_MODEL_MESSAGE, assert_loopback_url
 from headwaters.core.executor.ollama_convert import build_payload, parse_line
 from headwaters.core.executor.types import BackendRequest, Delta
+from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 
 DEFAULT_CONNECT_S = 5.0
 _MAX_ERROR_BYTES = 4096
@@ -34,12 +35,17 @@ class OllamaBackend:
         *,
         connect_s: float = DEFAULT_CONNECT_S,
         transport: httpx.AsyncBaseTransport | None = None,
+        remote_patterns: RemotePatterns = (),
     ) -> None:
         self.host = assert_loopback_url(host)
         self._connect_s = connect_s
         self._transport = transport
+        self._remote_patterns = remote_patterns
 
     async def stream(self, request: BackendRequest) -> AsyncIterator[Delta]:
+        # Defence in depth (A-OLL-9): a cloud-proxied model is never called as a local one.
+        if is_remote_name(request.target.route, self._remote_patterns):
+            raise LocalScopeViolation(REMOTE_MODEL_MESSAGE, model=request.target.model_id)
         payload = build_payload(request)
         timeout = httpx.Timeout(None, connect=self._connect_s)
         seen_calls = 0

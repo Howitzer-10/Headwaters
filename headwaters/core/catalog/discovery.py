@@ -27,6 +27,7 @@ from headwaters.core.catalog.sources import (
     opencode_models,
     openrouter_models,
 )
+from headwaters.core.ollama_remote import RemotePatterns, remote_patterns_from
 from headwaters.core.rules import Rules
 from headwaters.core.state import Database
 from headwaters.core.state_misc import kv_get, kv_set
@@ -62,14 +63,19 @@ def _network_block(rules: Rules) -> str | None:
 
 
 def _gather(
-    rules: Rules, http: HttpClient, env: Mapping[str, str], home: Path, result: RefreshResult
+    rules: Rules,
+    http: HttpClient,
+    env: Mapping[str, str],
+    home: Path,
+    result: RefreshResult,
+    remote_patterns: RemotePatterns = (),
 ) -> dict[str, list[LiveModel]]:
     """Live models by source name. Only sources that answered appear in the result."""
     found: dict[str, list[LiveModel]] = {}
     blocked = _network_block(rules)
 
     try:
-        models, warnings = ollama_models(http, rules.tiers.local.host)
+        models, warnings = ollama_models(http, rules.tiers.local.host, remote_patterns)
         found["ollama"] = models
         result.warnings.extend(warnings)
     except SourceError as exc:
@@ -129,6 +135,7 @@ def refresh_models(
         os.environ if env is None else env,
         home or Path.home(),
         result,
+        remote_patterns_from(catalog),
     )
     result.sources_ok = sorted(live)
     flat = [m for models in live.values() for m in models]

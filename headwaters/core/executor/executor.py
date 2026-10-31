@@ -17,8 +17,8 @@ from typing import Any, Literal, overload
 from headwaters.core.executor.accumulate import Accumulator
 from headwaters.core.executor.cloud import LiteLLMBackend
 from headwaters.core.executor.cloud_map import OPENROUTER, attribution_headers
-from headwaters.core.executor.errors import ExecutorError, ProviderError
-from headwaters.core.executor.guard import enforce_scope
+from headwaters.core.executor.errors import ExecutorError, LocalScopeViolation, ProviderError
+from headwaters.core.executor.guard import REMOTE_MODEL_MESSAGE, enforce_scope
 from headwaters.core.executor.ollama import OllamaBackend
 from headwaters.core.executor.types import (
     Backend,
@@ -32,6 +32,7 @@ from headwaters.core.executor.types import (
     StreamEvent,
     ToolSpec,
 )
+from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.policy.types import RouteDecision
 from headwaters.core.rules import Rules
 from headwaters.core.walls import WallClassifier
@@ -54,16 +55,23 @@ class Executor:
         *,
         config: ExecutorConfig | None = None,
         cloud_factory: Callable[[], Backend] = LiteLLMBackend,
-        local_factory: Callable[[str], Backend] = OllamaBackend,
+        local_factory: Callable[[str], Backend] | None = None,
         api_key_for: Callable[[str], str | None] | None = None,
         key_alias_for: Callable[[str], str | None] | None = None,
+        remote_patterns: RemotePatterns = (),
     ) -> None:
+        self._remote_patterns = remote_patterns
+        if local_factory is None:
+
+            def local_factory(host: str) -> Backend:
+                return OllamaBackend(host, remote_patterns=remote_patterns)
+
         self._rules = rules
         self._walls = walls
         self._resolve = resolve
         self._config = config or ExecutorConfig()
         self._cloud_factory = cloud_factory
-        self._local_factory = local_factory
+        self._local_factory: Callable[[str], Backend] = local_factory
         self._api_key_for = api_key_for
         self._key_alias_for = key_alias_for
         self._cloud: Backend | None = None  # built on first cloud call, never for local scope
@@ -134,9 +142,11 @@ class Executor:
     def _prepare(
         self, decision: RouteDecision
     ) -> tuple[Backend, ExecTarget, dict[str, str], str | None]:
-        enforce_scope(decision, self._rules)  # before any backend or client exists
+        enforce_scope(decision, self._rules, self._remote_patterns)  # before any backend exists
         target = self._resolve(decision)
         if decision.tier == "local":
+            if is_remote_name(target.route, self._remote_patterns):
+                raise LocalScopeViolation(REMOTE_MODEL_MESSAGE, model=decision.model)
             return self._local_factory(self._rules.tiers.local.host), target, {}, None
         if self._cloud is None:
             self._cloud = self._cloud_factory()
