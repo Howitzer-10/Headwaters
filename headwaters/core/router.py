@@ -394,16 +394,30 @@ class Router:
             raise
 
     def _redecide(
-        self, run: RouteRun, last: RouteDecision, last_error: Mapping[str, object] | None = None
+        self,
+        run: RouteRun,
+        last: RouteDecision,
+        last_error: Mapping[str, object] | None = None,
+        *,
+        stronger_than: float | None = None,
     ) -> RouteDecision:
-        """Decide again without the models already tried, using fresh walls and quotas."""
-        fresh = self._with_live_availability(
-            [c for c in run.candidates if c.id not in run.excluded]
-        )
+        """Decide again without the models already tried, using fresh walls and quotas.
+
+        ``stronger_than`` (escalation, F10) keeps only candidates whose task score is above it
+        and passes ``escalation=None`` so the optimistic rung cannot fire again. The scope and
+        the hard filter still apply, so a local-only request retries on local models only.
+        """
+        pool = [c for c in run.candidates if c.id not in run.excluded]
+        escalation = self._escalation()
+        if stronger_than is not None:
+            task = run.reqs.soft.task
+            pool = [c for c in pool if c.scores.get(task, 0.0) > stronger_than]
+            escalation = None
+        fresh = self._with_live_availability(pool)
         try:
             return decide(
                 PolicyRequest(run.reqs, run.scope, run.request.pin, run.request.force),
-                PolicyContext(fresh, self._rules_source(), run.hw, self._escalation()),
+                PolicyContext(fresh, self._rules_source(), run.hw, escalation),
             )
         except NoRouteError as err:
             raise RouteFailed(
@@ -446,18 +460,24 @@ class Router:
         self, run: RouteRun, decision: RouteDecision, verify: VerifyOutcome
     ) -> RouteDecision | None:
         """The next decision after a failed check, or ``None`` to report the failure as it is."""
+        if len(run.attempts) >= self._config.max_attempts:
+            return None
         plugin = self._escalation()
-        if plugin is None or len(run.attempts) >= self._config.max_attempts:
-            return None
-        try:
-            wanted = plugin.should_escalate(run.escalations + 1, verify.problems)
-        except Exception:  # a broken plugin means: do not escalate
-            return None
-        if not wanted:
-            return None
+        if plugin is None:
+            # D10: the core's one verified retry, only for a mandatory verification.
+            if not decision.verify_required or run.escalations >= 1:
+                return None
+        else:
+            try:
+                wanted = plugin.should_escalate(run.escalations + 1, verify.problems)
+            except Exception:  # a broken plugin means: do not escalate
+                return None
+            if not wanted:
+                return None
         run.excluded.add(decision.model)
         try:
-            nxt = self._redecide(run, decision)
+            # F10: go up, never sideways. Only models with a higher task score qualify.
+            nxt = self._redecide(run, decision, stronger_than=decision.breakdown.quality)
         except RouteFailed:
             run.excluded.discard(decision.model)
             return None  # nothing stronger left: hand back the answer we have, flagged as failed

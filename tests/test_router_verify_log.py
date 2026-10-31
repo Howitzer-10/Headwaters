@@ -41,10 +41,15 @@ def test_verify_failure_is_reported_without_a_plugin(tmp_path: Path) -> None:
 
 def test_verify_failure_escalates_when_a_plugin_is_registered(tmp_path: Path) -> None:
     plugin = Escalator()
+    # LOCAL is slow, so FREE (90) ranks first, but LOCAL's task score (95) is higher: it goes up.
+    stronger = [
+        candidate(FREE, "free_cloud", 90.0),
+        candidate(LOCAL, "local", 95.0, expected_tps=10.0),
+    ]
     rig = Rig(
         tmp_path,
         {FREE: BAD, LOCAL: OK},
-        pool(local=84.0),
+        stronger,
         verifiers=[Verifier()],
         registry=registry_with(escalation=plugin),
     )
