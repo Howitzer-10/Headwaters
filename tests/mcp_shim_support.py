@@ -1,0 +1,57 @@
+"""Fakes for the shim tests (HDW-202): a stand-in for the daemon-side MCP client."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+from mcp import types
+
+from headwaters.core.daemon_client import DaemonClient
+from headwaters.core.daemon_info import DaemonInfo, DaemonPorts
+from headwaters.mcp.link import DaemonLink
+
+INFO = DaemonInfo(77, 1.0, "0.0.0", DaemonPorts(4002))
+
+
+class FakeUpstream:
+    """Stands in for the MCP client connected to the daemon."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any] | None]] = []
+        self.fail: Exception | None = None
+        self.tool_description = "status"
+
+    async def list_tools(self, *, cursor: str | None = None) -> types.ListToolsResult:
+        if self.fail is not None:
+            raise self.fail
+        tool = types.Tool(
+            name="headwaters_status",
+            description=self.tool_description,
+            input_schema={"type": "object"},
+        )
+        return types.ListToolsResult(tools=[tool])
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> types.CallToolResult:
+        self.calls.append((name, arguments))
+        if self.fail is not None:
+            raise self.fail
+        return types.CallToolResult(content=[types.TextContent(type="text", text="ok")])
+
+
+def make_link(upstreams: list[FakeUpstream], ensured: list[int] | None = None) -> DaemonLink:
+    """A link whose every (re)connection hands out the next fake upstream."""
+
+    async def ensure() -> DaemonClient:
+        if ensured is not None:
+            ensured.append(1)
+        return DaemonClient(INFO, "t")
+
+    @asynccontextmanager
+    async def opener(daemon: DaemonClient) -> AsyncIterator[Any]:
+        yield upstreams.pop(0)
+
+    return DaemonLink(ensure, opener)

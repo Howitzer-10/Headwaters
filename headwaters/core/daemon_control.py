@@ -30,6 +30,7 @@ DAEMON_MODULE = "headwaters.daemon"
 _DETACHED = 0x00000008  # DETACHED_PROCESS
 _NEW_GROUP = 0x00000200  # CREATE_NEW_PROCESS_GROUP
 _NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+_BREAKAWAY = 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
 START_TIMEOUT_S = 25.0
 STOP_TIMEOUT_S = 15.0
 
@@ -59,15 +60,24 @@ def daemon_command(port: int | None = None) -> list[str]:
 def _spawn_detached(argv: Sequence[str]) -> subprocess.Popen[bytes]:
     env = {**os.environ, "PYTHONUTF8": "1"}
     if sys.platform == "win32":
-        return subprocess.Popen(
-            list(argv),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            close_fds=True,
-            creationflags=_DETACHED | _NEW_GROUP | _NO_WINDOW,
-        )
+        flags = _DETACHED | _NEW_GROUP | _NO_WINDOW
+        # A host that runs the shim in a Job Object (kill-on-close) would reap the daemon with it;
+        # break away when the job allows it, and fall back when it does not.
+        for extra in (_BREAKAWAY, 0):
+            try:
+                return subprocess.Popen(
+                    list(argv),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=env,
+                    close_fds=True,
+                    creationflags=flags | extra,
+                )
+            except OSError:
+                if not extra:
+                    raise
+        raise AssertionError("unreachable")  # pragma: no cover
     return subprocess.Popen(
         list(argv),
         stdin=subprocess.DEVNULL,

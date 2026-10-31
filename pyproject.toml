@@ -25,6 +25,7 @@ dependencies = [
 
 [project.scripts]
 headwaters = "headwaters.cli.main:app"
+headwaters-mcp = "headwaters.mcp.shim:main"
 
 [build-system]
 requires = ["hatchling"]
