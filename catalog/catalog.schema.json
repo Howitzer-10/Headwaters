@@ -695,6 +695,13 @@
       "title": "Catalog Version",
       "type": "string"
     },
+    "default_ignore_patterns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Default Ignore Patterns",
+      "type": "array"
+    },
     "free_limits": {
       "items": {
         "$ref": "#/$defs/FreeLimit"

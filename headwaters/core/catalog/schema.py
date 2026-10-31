@@ -211,6 +211,8 @@ class Catalog(_Model):
     gpu_profiles: dict[str, GpuProfile] = Field(default_factory=dict)
     secret_patterns: list[NamedPattern] = Field(default_factory=list)
     secret_placeholders: list[NamedPattern] = Field(default_factory=list)
+    # HDW-203: gitignore-syntax lines (secret/env files) always excluded from files-by-path.
+    default_ignore_patterns: list[str] = Field(default_factory=list)
     subscription_rates: list[SubscriptionRate] = Field(default_factory=list)
     analyzer_hints: AnalyzerHints = Field(default_factory=AnalyzerHints)
     prompt_bank_ref: str | None = None
