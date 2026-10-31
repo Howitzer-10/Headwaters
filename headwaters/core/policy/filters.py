@@ -108,6 +108,8 @@ def _first_failure(
         return "no_tools"
     if hard.json and c.row.json_ok is not True:
         return "no_json"
+    if hard.reasoning and c.row.reasoning_ok is not True:
+        return "no_reasoning"
     needed = math.ceil(rules.scoring.ctx_headroom * hard.min_ctx)
     if c.row.ctx is None or c.row.ctx < needed:
         return "ctx_too_small"

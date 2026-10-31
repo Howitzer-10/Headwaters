@@ -51,12 +51,15 @@ from headwaters.core.router_log import LogEntry
 from headwaters.core.router_plan import RoutePlan
 from headwaters.core.router_prep import (
     analyzer_input,
+    apply_request_hints,
+    clean_event,
     executor_messages,
     executor_options,
     local_usable,
     only_local,
     scan_texts,
     with_warm_preference,
+    without_reasoning,
 )
 from headwaters.core.router_run import RouteRun
 from headwaters.core.router_session import session_key
@@ -180,7 +183,10 @@ class Router:
             result: ExecResult | None = None
             failure: ExecutorError | None = None
             try:
-                async for event in events:
+                async for raw in events:
+                    event = clean_event(raw)  # D12: no reasoning text on the wire
+                    if event is None:
+                        continue
                     if event.kind == "first_token":
                         seen_first = True
                         self._emit(run, "executing", decision, "first_token")
@@ -231,12 +237,17 @@ class Router:
             headers=request.headers,
             explicit=request.session_id,
         )
-        reqs = await asyncio.to_thread(self._analyzer.analyze, analyzer_input(request))
+        reqs = await self._analyze(request)
         chosen = self._select(request, key, reqs)
         rejected = hard_filter(
             chosen.candidates, reqs.hard, chosen.scope, chosen.rules, chosen.hw
         ).rejected
         return RoutePlan(reqs, chosen.scope, chosen.first, chosen.candidates, rejected, key)
+
+    async def _analyze(self, request: RouteRequest) -> Requirements:
+        """Layer 1-3 analysis, then the caller's ``task_hint`` / ``reasoning`` (HDW-140)."""
+        found = await asyncio.to_thread(self._analyzer.analyze, analyzer_input(request))
+        return apply_request_hints(found, request)
 
     async def _prepare(self, request: RouteRequest) -> RouteRun:
         started = time.monotonic()
@@ -247,7 +258,7 @@ class Router:
             explicit=request.session_id,
         )
         self._progress(request, "analyzing")
-        reqs = await asyncio.to_thread(self._analyzer.analyze, analyzer_input(request))
+        reqs = await self._analyze(request)
         scope_name = request.scope or self._rules_source().default_scope
         try:
             chosen = self._select(request, key, reqs)
@@ -338,7 +349,7 @@ class Router:
             except ExecutorError as exc:
                 decision = await self._recover(run, decision, exc)
                 continue
-            return decision, result
+            return decision, without_reasoning(result)  # D12: reasoning text never leaves
 
     def _record_wall(
         self, run: RouteRun, decision: RouteDecision, exc: ExecutorError

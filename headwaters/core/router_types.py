@@ -79,6 +79,12 @@ class RouteRequest:
     secret_override: bool = False
     options: ExecOptions | None = None
     on_progress: ProgressCallback | None = None
+    # HDW-140 (D12). ``task_hint`` forces ``soft.task`` (one of the analyzer tasks) without
+    # touching the hard filter. ``reasoning`` becomes ``ExecOptions.reasoning`` (None = provider
+    # default, False = off, True or an effort string = on); switched on, it also requires a
+    # reasoning-capable model. Reasoning text is never returned or stored (see ``RouteResult``).
+    task_hint: str | None = None
+    reasoning: bool | str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +129,11 @@ class VerifyOutcome:
 
 @dataclass(frozen=True)
 class RouteResult:
-    """The answer plus how it was routed. ``decision`` is the one that produced ``result``."""
+    """The answer plus how it was routed. ``decision`` is the one that produced ``result``.
+
+    Reasoning rule (D12): ``result.reasoning`` is always empty. The router drops the model's
+    reasoning text before it reaches a caller, a stream event, a log row or a ledger event.
+    """
 
     result: ExecResult
     decision: RouteDecision

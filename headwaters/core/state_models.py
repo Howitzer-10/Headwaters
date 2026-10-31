@@ -31,6 +31,9 @@ class ModelRow:
     retains_data: bool = False
     warm: bool = False
     size_vram_gb: float | None = None
+    # Can reason on request: Ollama ``capabilities: thinking``, OpenRouter
+    # ``supported_parameters: reasoning`` (HDW-140). None = unknown, treated as not capable.
+    reasoning_ok: bool | None = None
 
 
 def _opt_bool(value: int | None) -> bool | None:
@@ -46,8 +49,8 @@ def upsert_model(db: Database, m: ModelRow) -> None:
         c.execute(
             "INSERT INTO models (id, tier, provider, modalities, tools_ok, json_ok, ctx,"
             " price_in, price_out, size_gb, arch_json, source, last_seen, deprecated_by,"
-            " unscored, retains_data, warm, size_vram_gb)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " unscored, retains_data, warm, size_vram_gb, reasoning_ok)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET tier=excluded.tier, provider=excluded.provider,"
             " modalities=excluded.modalities, tools_ok=excluded.tools_ok,"
             " json_ok=excluded.json_ok, ctx=excluded.ctx, price_in=excluded.price_in,"
@@ -55,7 +58,8 @@ def upsert_model(db: Database, m: ModelRow) -> None:
             " arch_json=excluded.arch_json, source=excluded.source,"
             " last_seen=excluded.last_seen, deprecated_by=excluded.deprecated_by,"
             " unscored=excluded.unscored, retains_data=excluded.retains_data,"
-            " warm=excluded.warm, size_vram_gb=excluded.size_vram_gb",
+            " warm=excluded.warm, size_vram_gb=excluded.size_vram_gb,"
+            " reasoning_ok=excluded.reasoning_ok",
             (
                 m.id,
                 m.tier,
@@ -75,6 +79,7 @@ def upsert_model(db: Database, m: ModelRow) -> None:
                 int(m.retains_data),
                 int(m.warm),
                 m.size_vram_gb,
+                _opt_int(m.reasoning_ok),
             ),
         )
 
@@ -109,6 +114,7 @@ def _model(r: sqlite3.Row) -> ModelRow:
         retains_data=bool(r["retains_data"]),
         warm=bool(r["warm"]),
         size_vram_gb=r["size_vram_gb"],
+        reasoning_ok=_opt_bool(r["reasoning_ok"]),
     )
 
 

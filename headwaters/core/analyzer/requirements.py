@@ -30,6 +30,7 @@ _KEYWORD_SCAN_TAIL = 4000
 _SHORT_PROMPT_TOKENS = 100
 # Tie-break order when two tasks score the same (first wins, confidence drops).
 _TASK_ORDER = ("vision", "code", "reasoning", "extract", "summarize", "creative", "chat")
+KNOWN_TASKS = _TASK_ORDER  # every task that has a floor in rules.yaml
 _FENCE = re.compile(r"```([^\n`]*)\n(.*?)```", re.DOTALL)
 _IMAGE_BONUS = 3
 _JSON_BONUS = 2
@@ -46,6 +47,7 @@ class HardRequirements:
     tools: bool
     json: bool
     min_ctx: int
+    reasoning: bool = False  # set by the caller (HDW-140), never by keyword analysis
 
 
 @dataclass(frozen=True, slots=True)

@@ -32,6 +32,7 @@ class LiveModel:
     modalities: list[str] = field(default_factory=lambda: ["text"])
     tools_ok: bool | None = None
     json_ok: bool | None = None
+    reasoning_ok: bool | None = None
     ctx: int | None = None
     price_in: float | None = None  # USD per million tokens
     price_out: float | None = None
@@ -131,6 +132,7 @@ def ollama_models(
             if "vision" in capset:
                 live.modalities = ["text", "image"]
             live.tools_ok = "tools" in capset
+            live.reasoning_ok = "thinking" in capset
         live.arch, live.ctx = _arch_from_show(_as_dict(show.get("model_info")))
         models[name] = live
     try:
@@ -181,6 +183,7 @@ def openrouter_models(http: HttpClient, api_key: str | None = None) -> list[Live
                 modalities=inputs or ["text"],
                 tools_ok="tools" in params,
                 json_ok=bool(params & {"response_format", "structured_outputs"}),
+                reasoning_ok="reasoning" in params,
                 ctx=_int(entry.get("context_length")),
                 price_in=0.0 if free else _per_million(pricing.get("prompt")),
                 price_out=0.0 if free else _per_million(pricing.get("completion")),

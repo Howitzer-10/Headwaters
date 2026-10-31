@@ -82,5 +82,12 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         ALTER TABLE models ADD COLUMN size_vram_gb REAL;
         """,
     ),
+    (
+        3,
+        "reasoning capability column",
+        """
+        ALTER TABLE models ADD COLUMN reasoning_ok INTEGER;
+        """,
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]

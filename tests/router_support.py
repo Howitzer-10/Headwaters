@@ -42,11 +42,14 @@ def candidate(mid: str, tier: str, code: float, **kw: Any) -> Candidate:
         modalities=["text"],
         tools_ok=True,
         json_ok=True,
+        reasoning_ok=kw.pop("reasoning_ok", None),
         ctx=128_000,
         price_in=kw.pop("price_in", None),
         price_out=kw.pop("price_out", None),
     )
     scores = {"code": code, "chat": code, "agentic_tools": code}
+    if "reasoning" in kw:
+        scores["reasoning"] = kw.pop("reasoning")
     if tier == "local":
         kw.setdefault("fit", fit())
         kw.setdefault("expected_tps", 60.0)
