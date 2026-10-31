@@ -25,6 +25,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run lint-imports
+      - run: uv run pytest tests/test_litellm_guard.py --no-cov -q
       - run: uv run python -m headwaters.core.rules_io --check catalog/rules.schema.json
       - run: uv run python -m headwaters.core.catalog.loader --check catalog/catalog.schema.json
       - run: uv run pytest --cov --cov-report=term-missing --cov-report=xml

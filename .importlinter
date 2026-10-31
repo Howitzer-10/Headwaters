@@ -1,9 +1,9 @@
 [importlinter]
 root_package = headwaters
-include_external_packages = False
+include_external_packages = True
 
 [importlinter:contract:core-is-a-leaf]
-name = Core must not import features, gateway, mcp, control or installer
+name = Core must not import features, gateway, mcp, control, installer or cli
 type = forbidden
 source_modules =
     headwaters.core
@@ -13,3 +13,44 @@ forbidden_modules =
     headwaters.mcp
     headwaters.control
     headwaters.installer
+    headwaters.cli
+
+# litellm is reached through importlib in cloud.py (invisible to this linter), so the allowed edge
+# may not exist as a static import; tests/test_litellm_guard.py covers the string form.
+[importlinter:contract:litellm-only-in-cloud-executor]
+name = Only headwaters.core.executor.cloud may import litellm
+type = forbidden
+source_modules =
+    headwaters
+forbidden_modules =
+    litellm
+ignore_imports =
+    headwaters.core.executor.cloud -> litellm
+unmatched_ignore_imports_alerting = none
+
+[importlinter:contract:mcp-sdk-only-in-mcp]
+name = Only headwaters.mcp may import the mcp SDK
+type = forbidden
+source_modules =
+    headwaters.core
+    headwaters.cli
+    headwaters.control
+    headwaters.features
+    headwaters.gateway
+    headwaters.installer
+forbidden_modules =
+    mcp
+
+[importlinter:contract:web-framework-only-in-gateway]
+name = Only headwaters.gateway may import fastapi or starlette
+type = forbidden
+source_modules =
+    headwaters.core
+    headwaters.cli
+    headwaters.control
+    headwaters.features
+    headwaters.installer
+    headwaters.mcp
+forbidden_modules =
+    fastapi
+    starlette
