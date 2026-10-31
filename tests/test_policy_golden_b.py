@@ -145,6 +145,32 @@ CASES: list[Case] = [
         {"locks": ["private_lock"], "battery": "prefer_cloud"},
         {"model": "loc14", "sugg": []},
     ),
+    (
+        # HDW-128 (F9): the lock does not narrow `local`, but it is in force: no cloud hint.
+        "private-lock-default-local-battery-no-cloud-hint",
+        {
+            "locks": ["private_lock"],
+            "default_scope": "local",
+            "scope": None,
+            "battery": "prefer_cloud",
+        },
+        {"model": "loc14", "sugg": []},
+    ),
+    (
+        "private-lock-requested-local-busy-no-cloud-hint",
+        {"locks": ["private_lock"], "scope": "local", "busy": True},
+        {"model": "loc14", "sugg": []},
+    ),
+    (
+        "airplane-battery-no-cloud-hint",
+        {"locks": ["airplane"], "scope": "local", "battery": "prefer_cloud"},
+        {"model": "loc14", "sugg": []},
+    ),
+    (
+        "no-lock-local-scope-below-floor-keeps-cloud-hint",
+        {"scope": "local", "complexity": 5},
+        {"model": "loc14", "below": True, "sugg": ["pull_model", "split_task", "use_cloud"]},
+    ),
 ]
 
 

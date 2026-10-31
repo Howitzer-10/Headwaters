@@ -38,10 +38,10 @@ def suggestions_for(
     if below_floor and chosen.is_local and is_local_only(req, ctx):
         tips.append(Suggestion("pull_model", "Pull a larger local model that fits your GPU."))
         tips.append(Suggestion("split_task", "Split the task into smaller steps."))
-        if req.scope.local_only and not req.scope.locks:
+        if req.scope.local_only and not req.scope.active_locks:
             tips.append(Suggestion("use_cloud", "Use headwaters/cloud to allow cloud models."))
     hw = ctx.hw
-    if hw is None or not chosen.is_local or req.scope.locks:  # a lock forbids the hint
+    if hw is None or not chosen.is_local or req.scope.active_locks:  # any lock forbids the hint
         return tuple(tips)
     if hw.battery_policy == "prefer_cloud":
         why = "on battery"
@@ -77,7 +77,7 @@ def no_route(
         tips.append(Suggestion("pull_model", "Pull a local model that fits your GPU."))
     if codes & {"no_vision", "no_tools", "no_json"}:
         tips.append(Suggestion("add_capable_model", "No model supports what this needs."))
-    if req.scope.local_only and not req.scope.locks:
+    if req.scope.local_only and not req.scope.active_locks:
         tips.append(Suggestion("use_cloud", "Use headwaters/cloud to allow cloud models."))
     return NoRouteError(code, message, etas=etas, suggestions=tuple(tips), rejected=rejected)
 

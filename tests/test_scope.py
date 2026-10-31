@@ -205,6 +205,23 @@ def test_locks_are_recorded() -> None:
     assert not decision.allows_cloud
 
 
+def test_active_locks_include_locks_that_did_not_narrow() -> None:
+    # Private lock plus default_scope local: nothing narrowed, but the lock is in force (HDW-128).
+    decision = resolve_scope(Rules.model_validate({"default_scope": "local", "private_lock": True}))
+    assert decision.locks == ()
+    assert decision.active_locks == ("private_lock",)
+    requested = resolve_scope(Rules.model_validate({"private_lock": True}), requested="local")
+    assert requested.locks == ()
+    assert requested.active_locks == ("private_lock",)
+
+
+def test_active_locks_list_project_rule_secret_and_airplane() -> None:
+    rules = Rules.model_validate({"default_scope": "local", "airplane": True})
+    project = ProjectConfig.model_validate({"privacy": "local"})
+    assert resolve_scope(rules, project).active_locks == ("project_rule", "airplane")
+    assert resolve_scope(Rules()).active_locks == ()
+
+
 def test_decision_helpers() -> None:
     decision = resolve_scope(Rules(), paid_scopes=True)
     assert decision.scope == "auto"

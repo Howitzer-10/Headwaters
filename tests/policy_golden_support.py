@@ -11,9 +11,10 @@ from headwaters.core.policy.decide import decide
 from headwaters.core.policy.errors import NoRouteError
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.policy.types import PolicyContext, PolicyRequest
+from headwaters.core.project_config import ProjectConfig
 from headwaters.core.quotas import Availability
 from headwaters.core.rules import Rules
-from headwaters.core.scope import LOCAL_TIERS, SCOPE_TIERS, ScopeDecision
+from headwaters.core.scope import ScopeDecision, resolve_scope
 from headwaters.core.state_models import ModelRow
 from tests.test_policy_scoring import fit, hw, soft
 
@@ -83,6 +84,30 @@ def build(
     return out
 
 
+def _scope(s: dict[str, Any], rules: Rules) -> ScopeDecision:
+    """Build the scope through ``resolve_scope``, as the router does (HDW-128).
+
+    Spec keys: ``scope`` (requested), ``default_scope``, ``locks`` (``private_lock``,
+    ``project_rule``, ``airplane``), ``strategy``.
+    """
+    locks = s.get("locks", ())
+    data = rules.model_dump()
+    data["private_lock"] = "private_lock" in locks or data["private_lock"]
+    data["airplane"] = "airplane" in locks or data["airplane"]
+    if "default_scope" in s:
+        data["default_scope"] = s["default_scope"]
+    project = (
+        ProjectConfig.model_validate({"privacy": "local"}) if "project_rule" in locks else None
+    )
+    return resolve_scope(
+        Rules.model_validate(data),
+        project,
+        requested=s.get("scope"),
+        strategy=s.get("strategy", "cost_saver"),
+        paid_scopes=True,
+    )
+
+
 def run(s: dict[str, Any]) -> Any:
     """Run one scenario spec and return the ``RouteDecision`` or the ``NoRouteError``."""
     rules = Rules.model_validate(s.get("rules", {}))
@@ -100,10 +125,7 @@ def run(s: dict[str, Any]) -> Any:
         s.get("tokens", 1000),
         False,
     )
-    name = s.get("scope", "auto")
-    locks = tuple(s.get("locks", ()))
-    tiers = LOCAL_TIERS if locks else SCOPE_TIERS[name]
-    scope = ScopeDecision(name, tiers, s.get("strategy", "cost_saver"), "agentic", locks)
+    scope = _scope(s, rules)
     has_hw = "battery" in s or "busy" in s
     state = hw(s.get("battery", "normal"), s.get("busy", False)) if has_hw else None
     cands = build(s.get("mods"), tuple(s.get("drop", ())), tuple(s.get("only", ())))

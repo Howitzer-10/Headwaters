@@ -89,6 +89,9 @@ class ScopeDecision:
     strategy: Strategy
     verify: VerifyMode
     locks: tuple[str, ...] = ()  # locks that narrowed the request
+    # Every lock in force, narrowing or not: private_lock, project_rule, secret, airplane.
+    # Hints that forbid "use cloud" key on this, not on ``locks``.
+    active_locks: tuple[str, ...] = ()
     reasons: tuple[str, ...] = ()
     secret_patterns: tuple[str, ...] = ()  # pattern names only, never matched text
 
@@ -191,10 +194,12 @@ def resolve_scope(
     base: Scope = requested if requested is not None else rules.default_scope
     reasons = [f"{'requested' if requested is not None else 'default'} scope: {base}"]
     narrowed: list[str] = []
+    active: list[str] = []
     tiers = SCOPE_TIERS[base]
 
     # Locks, strongest first. Each can only remove tiers.
     if rules.private_lock:
+        active.append("private_lock")
         tiers = _narrow(
             tiers,
             LOCAL_TIERS,
@@ -211,6 +216,7 @@ def resolve_scope(
 
     privacy: Privacy = project.privacy if project is not None else "any"
     if privacy != "any":
+        active.append("project_rule")
         tiers = _narrow(
             tiers,
             PRIVACY_TIERS[privacy],
@@ -238,6 +244,7 @@ def resolve_scope(
                 "in rules.yaml.",
             )
         else:
+            active.append("secret")
             tiers = _narrow(
                 tiers,
                 LOCAL_TIERS,
@@ -251,6 +258,9 @@ def resolve_scope(
                 ),
             )
             reasons.append(f"secret detected ({shown}): local only")
+
+    if rules.airplane:
+        active.append("airplane")  # the router drops non-local candidates; no tier change here
 
     if not paid_scopes and tiers & PAID_TIERS:
         tiers = tiers - PAID_TIERS
@@ -270,6 +280,7 @@ def resolve_scope(
         strategy=strategy if strategy is not None else rules.strategy,
         verify=verify if verify is not None else rules.verify,
         locks=tuple(narrowed),
+        active_locks=tuple(active),
         reasons=tuple(reasons),
         secret_patterns=names,
     )
