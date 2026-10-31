@@ -6,8 +6,8 @@ import pytest
 
 from headwaters.core.features import STAR_LEGEND, FeatureRegistry, FeatureSpec
 from headwaters.core.plugins import INTERFACES, PluginContractError, check_plugin
-from headwaters.features._example import ExampleVerifier
 from tests.contracts.harness import BEHAVIOUR
+from tests.fixtures.features._example import ExampleVerifier
 
 
 class _BadVersion:

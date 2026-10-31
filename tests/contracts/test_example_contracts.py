@@ -1,4 +1,4 @@
-"""Run the contract harness against every plugin registered by discovered features."""
+"""Run the contract harness against every plugin of the fixture features."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from headwaters.core.features import FeatureRegistry, discover_features
 from tests.contracts.harness import run_contract
 
 _registry = FeatureRegistry()
-discover_features(_registry)
+discover_features(_registry, "tests.fixtures.features")
 _CASES = [
     (iface, plugin)
     for spec in _registry.all()

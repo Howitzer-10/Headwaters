@@ -17,13 +17,24 @@ from headwaters.core.features import (
     discover_features,
 )
 from headwaters.core.plugins import PluginContractError
-from headwaters.features._example import ExampleLedger
 from tests.contracts.harness import run_contract
+from tests.fixtures.features._example import ExampleLedger
+
+EXAMPLE_PACKAGE = "tests.fixtures.features"
+
+
+def test_production_discovery_registers_no_example() -> None:
+    """HDW-126 / P8: the dummy feature must never be registered in production."""
+    reg = FeatureRegistry()
+    assert discover_features(reg) == []
+    assert reg.all() == []
+    assert reg.plugins_for("VerifierPlugin") == []
+    assert reg.plugins_for("LedgerPlugin") == []
 
 
 def test_plugins_for_respects_flags() -> None:
     reg = FeatureRegistry()
-    discover_features(reg)
+    discover_features(reg, EXAMPLE_PACKAGE)
     assert len(reg.plugins_for("VerifierPlugin")) == 1
     reg.set_flags({"_example": False})
     assert reg.plugins_for("VerifierPlugin") == []
@@ -33,7 +44,7 @@ def test_plugins_for_respects_flags() -> None:
 
 def test_example_found_by_discovery_and_passes_contracts() -> None:
     reg = FeatureRegistry()
-    assert discover_features(reg) == ["headwaters.features._example"]
+    assert discover_features(reg, EXAMPLE_PACKAGE) == [f"{EXAMPLE_PACKAGE}._example"]
     spec = reg.get("_example")
     assert spec is not None
     assert spec.star
