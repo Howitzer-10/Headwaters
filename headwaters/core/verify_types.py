@@ -41,6 +41,11 @@ class VerifyReport:
     checks: list[CheckResult] = field(default_factory=list)
     reasons: list[Reason] = field(default_factory=list)
 
+    @property
+    def checked(self) -> int:
+        """Checks that really ran (pass or fail); skips (no grammar, no git) do not count."""
+        return sum(1 for c in self.checks if c.status != "skipped")
+
     def to_dict(self) -> dict[str, object]:
         return {
             "passed": self.passed,

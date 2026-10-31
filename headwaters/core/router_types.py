@@ -93,16 +93,32 @@ class Attempt:
 
 @dataclass(frozen=True)
 class VerifyOutcome:
-    """``passed`` is None when verification was wanted but no verifier could run (``ran`` False)."""
+    """What the gate found. ``checked`` counts checks that really ran (skips excluded).
+
+    ``passed`` is None when nothing was established: no verifier could run, or every check was
+    skipped (F11). ``unchecked`` is set by the router when the gate was mandatory and ``checked``
+    is 0: the answer was not verified and must never be called verified.
+    """
 
     ran: bool
     passed: bool | None
     problems: tuple[str, ...] = ()
     verifiers: int = 0
+    checked: int = 0
+    unchecked: bool = False
 
     @property
     def failed(self) -> bool:
         return self.ran and self.passed is False
+
+    @property
+    def status(self) -> str:
+        """``unchecked``, ``fail``, ``pass`` or ``skipped`` (nothing established)."""
+        if self.unchecked:
+            return "unchecked"
+        if self.failed:
+            return "fail"
+        return "pass" if self.passed else "skipped"
 
 
 @dataclass(frozen=True)
@@ -121,6 +137,16 @@ class RouteResult:
     @property
     def verify_failed(self) -> bool:
         return self.verify is not None and self.verify.failed
+
+    @property
+    def verify_status(self) -> str | None:
+        """``unchecked`` when a mandatory gate checked nothing; None when no gate ran."""
+        return None if self.verify is None else self.verify.status
+
+    @property
+    def below_floor(self) -> bool:
+        """Stays visible to engines: a below-floor answer is never silently verified."""
+        return self.decision.below_floor
 
 
 RouteEventKind = Literal["route", "stream", "final"]

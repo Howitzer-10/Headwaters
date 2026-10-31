@@ -45,13 +45,14 @@ def _one(
     result: ExecResult,
     tools: Sequence[Mapping[str, Any]] | None,
     schema: Mapping[str, Any] | None,
-) -> list[str]:
+) -> tuple[list[str], int]:
+    """Rendered problems and how many checks really ran. A plain plugin counts as one check."""
     if isinstance(verifier, BasicVerifier):
         report = verifier.verify_report(
             result.content, json_schema=schema, tool_calls=_tool_calls(result), tools=tools
         )
-        return [reason.render() for reason in report.reasons]
-    return list(verifier.verify(result.content))
+        return [reason.render() for reason in report.reasons], report.checked
+    return list(verifier.verify(result.content)), 1
 
 
 def run_verifiers(
@@ -64,13 +65,18 @@ def run_verifiers(
     schema = schema_of(response_format)
     problems: list[str] = []
     ran = 0
+    checked = 0
     for verifier in verifiers:
         try:
-            found = _one(verifier, result, tools, schema)
+            found, count = _one(verifier, result, tools, schema)
         except Exception:  # a broken verifier must not fail the user's answer
             continue
         ran += 1
+        checked += count
         problems.extend(p for p in found if p not in problems)
     if ran == 0:
         return VerifyOutcome(False, None)
-    return VerifyOutcome(True, not problems, tuple(problems), ran)
+    if problems:
+        return VerifyOutcome(True, False, tuple(problems), ran, checked)
+    # F11: no problem found and nothing checked establishes nothing, so it is not a pass.
+    return VerifyOutcome(True, True if checked else None, (), ran, checked)

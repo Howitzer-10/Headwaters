@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from headwaters.core import verify_basic
 from headwaters.core.executor.types import ExecResult, ToolCall, Usage
 from headwaters.core.router_verify import run_verifiers, schema_of, wants_verify
 from headwaters.core.verify_basic import BasicVerifier
@@ -69,3 +72,31 @@ def test_duplicate_problems_are_reported_once() -> None:
     outcome = run_verifiers([Verifier(), Verifier()], answer("bad"))
     assert outcome.problems == ("bad_output: contains the word bad",)
     assert outcome.verifiers == 2
+
+
+def test_prose_checks_nothing_and_is_not_a_pass() -> None:
+    outcome = run_verifiers([BasicVerifier()], answer("Sure, here is the explanation."))
+    assert outcome.ran
+    assert outcome.checked == 0
+    assert outcome.passed is None
+    assert outcome.status == "skipped"
+    assert not outcome.failed
+
+
+def test_a_real_check_counts_and_passes() -> None:
+    outcome = run_verifiers([BasicVerifier()], answer("```python\nx = 1\n```"))
+    assert outcome.checked >= 1
+    assert outcome.passed is True
+    assert outcome.status == "pass"
+
+
+def test_a_missing_grammar_is_a_skip_not_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(_name: str) -> object:
+        raise RuntimeError("no grammar")
+
+    monkeypatch.setattr(verify_basic, "_parser", broken)
+    report = BasicVerifier().verify_report("let x = 1;", language="javascript")
+    assert [c.status for c in report.checks if c.name == "parse"] == ["skipped"]
+    assert report.checked == 0
+    outcome = run_verifiers([BasicVerifier()], answer("let x = 1;"))
+    assert outcome.passed is not False

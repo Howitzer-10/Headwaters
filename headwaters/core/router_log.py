@@ -50,11 +50,7 @@ def requirements_dict(req: Requirements | None) -> dict[str, Any]:
 
 
 def verify_label(verify: VerifyOutcome | None) -> str | None:
-    if verify is None:
-        return None
-    if not verify.ran:
-        return "skipped"
-    return "pass" if verify.passed else "fail"
+    return None if verify is None else verify.status
 
 
 def cost_usd(price_in: float | None, price_out: float | None, result: ExecResult) -> float:

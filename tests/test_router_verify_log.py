@@ -9,6 +9,7 @@ import pytest
 from headwaters.core.executor.types import Delta
 from headwaters.core.router_types import RouteFailed
 from headwaters.core.state_decisions import get_outcome, recent_decisions
+from headwaters.core.verify_basic import BasicVerifier
 from tests.router_rig import Rig
 from tests.router_support import (
     OK,
@@ -83,12 +84,43 @@ def test_verify_off_skips_the_gate(tmp_path: Path) -> None:
     assert not result.verify_failed
 
 
-def test_requested_verify_without_any_verifier_is_reported_as_not_run(tmp_path: Path) -> None:
+def test_optional_verify_without_any_verifier_is_skipped_not_unchecked(tmp_path: Path) -> None:
     rig = Rig(tmp_path, {FREE: OK}, pool())
     result = rig.run(verify="always")
     assert result.verify is not None
     assert result.verify.ran is False
+    assert result.verify_status == "skipped"
     assert not result.verify_failed
+
+
+def test_mandatory_gate_with_no_verifier_is_unchecked_and_below_floor_stays_visible(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path, {FREE: OK}, [candidate(FREE, "free_cloud", 75.0)])  # floor 80
+    result = rig.run()
+    assert result.verify is not None
+    assert result.verify.unchecked
+    assert result.verify_status == "unchecked"
+    assert result.below_floor
+    assert not result.verify_failed
+    outcome = get_outcome(rig.db, result.decision_id or 0)
+    assert outcome is not None
+    assert (outcome.status, outcome.verify_result) == ("ok", "unchecked")
+
+
+def test_mandatory_gate_on_a_prose_answer_is_unchecked(tmp_path: Path) -> None:
+    rig = Rig(
+        tmp_path, {FREE: OK}, [candidate(FREE, "free_cloud", 75.0)], verifiers=[BasicVerifier()]
+    )
+    result = rig.run()
+    assert result.verify is not None
+    assert result.verify.ran
+    assert result.verify.checked == 0
+    assert result.verify.passed is None
+    assert result.verify_status == "unchecked"
+    outcome = get_outcome(rig.db, result.decision_id or 0)
+    assert outcome is not None
+    assert outcome.verify_result == "unchecked"
 
 
 def test_decision_and_outcome_rows_are_written(tmp_path: Path) -> None:

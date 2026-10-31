@@ -449,12 +449,18 @@ class Router:
             return None
         self._emit(run, "verifying", decision)
         verifiers = [*self._verifiers, *self._plugins("VerifierPlugin")]
-        return run_verifiers(
+        outcome = run_verifiers(
             verifiers,
             result,
             tools=run.request.tools,
             response_format=run.request.response_format,
         )
+        if decision.verify_required and outcome.checked == 0:
+            run.notes.append(
+                f"{decision.model}: mandatory verification checked nothing (unchecked)"
+            )
+            return replace(outcome, unchecked=True)
+        return outcome
 
     def _escalate(
         self, run: RouteRun, decision: RouteDecision, verify: VerifyOutcome
