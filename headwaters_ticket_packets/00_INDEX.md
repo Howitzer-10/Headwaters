@@ -7,7 +7,7 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 - If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
 - Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
 - **Decisions override packets.** Every packet carries a `DECISIONS OVERRIDE PACKET TEXT` block (just above `WORKFLOW FOR THIS TICKET`) that tells the session to read `docs/DECISIONS.md` and `docs/ASSUMPTIONS.md` first; D7 and later win over conflicting packet text, and tickets listed under "Deferred tickets" are not built. **If you regenerate the packets, put this block back into the Context Pack template**, or the protection is lost.
-- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback).
+- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings.
 
 | Ticket | Title | Model | Design sections included | ≈ k tokens |
 | --- | --- | --- | --- | --- |
@@ -34,6 +34,28 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-117 | Router façade (shared core API) | Sonnet | v3 §2, v3.4 §A | 2.3 |
 | HDW-118 | CLI basics | Sonnet | v3 §5.4, v3.3 §C, v3.5 §B | 2.2 |
 | HDW-119 | Phase 1 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-120 | Secret scan covers every message part | Sonnet | v3.3 §D8, F1 | 1.7 |
+| HDW-121 | Ollama cloud-proxied models are never local | Opus | v3.3 §D1-D2, A-OLL-8, F2 | 1.8 |
+| HDW-122 | Credit walls hit paid models only, and expire | Sonnet | v3 §4.4, F3, F22 | 1.8 |
+| HDW-123 | Local scope serves the best local model below the floor | Sonnet | v3 §4.5 step 4, v3.3 §D3, D10, F4 | 1.8 |
+| HDW-124 | Complete the import contract | Sonnet | D7, D8, v3.5 §F, F5 | 1.8 |
+| HDW-125 | Make subprocess decoding independent of the code page | Sonnet | gap 11, F6 | 1.7 |
+| HDW-126 | Production never registers `features/_example` | Sonnet | v3.5 §F, F7 | 1.6 |
+| HDW-127 | litellm never writes to stdout and logs through redaction | Sonnet | v3.1 §C5, F8 | 1.6 |
+| HDW-128 | Hints honour every active lock | Sonnet | v3.3 §B4, F9 | 1.6 |
+| HDW-129 | Escalation and the core verified retry go to a stronger model | Sonnet | v3 §4.6, D10, F10 | 1.7 |
+| HDW-130 | A mandatory gate that checked nothing is not a pass | Sonnet | v3 §4.5 step 4, F11 | 1.6 |
+| HDW-131 | Live rules in long-running engines | Sonnet | v3.3 §C, F12, F22 | 1.8 |
+| HDW-132 | `primary_first` means the primary first | Sonnet | v3.3 §A, F13 | 1.6 |
+| HDW-133 | Score terms that do something: offload, complexity | Sonnet | v3 §7.1, F14, F19 | 1.6 |
+| HDW-134 | Core session stickiness (D11) | Sonnet | v3 §4.5 session rules, D11, F15, F16 | 1.7 |
+| HDW-135 | Remote images are refused, not dropped, for local models | Sonnet | v3.3 §D2, F17 | 1.5 |
+| HDW-136 | Unknown context is not "too small" | Sonnet | F18 | 1.5 |
+| HDW-137 | Local fix hints name a model | Sonnet | v3.3 §C, F20 | 1.5 |
+| HDW-138 | Hard-coded tunables to rules and catalog; startup fail-safe | Sonnet | section 5 of this review, F26, F27 | 1.7 |
+| HDW-139 | Seed catalog: classifier and laziness patterns | Sonnet | v3 §4.6, F21 | 1.5 |
+| HDW-140 | Core hooks for `headwaters_think` (D12) | Sonnet | v3.4 §B1, D12 | 1.5 |
+| HDW-141 | Pin Python 3.13 for development | Sonnet | owner question 2026-10-31, gap 12 | 1.4 |
 | HDW-201 | Shared daemon, internal API, port handling | Sonnet | v3.1 §C3, v3.4 §B3 | 1.8 |
 | HDW-202 | stdio MCP shim | Sonnet | v3.1 §C5, v3.4 §B3 | 1.7 |
 | HDW-203 | Workspace roots and files-by-path | Sonnet | v3 §5.2.2, v3.1 §C4, v3.4 §D | 1.9 |

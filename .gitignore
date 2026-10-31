@@ -52,14 +52,13 @@ nosetests.xml
 
 # --- Extra ignores ----------------------------------------------------------
 .venv*/
-.tmp*_previous.py
+.tmp**_previous.py
 review_bundle_*/
 *.py,cover
 .hypothesis/
 
 # --- pyenv / pipenv / poetry / uv -------------------------------------------
 # Lock files ARE committed (uv.lock, poetry.lock); these are the local extras.
-.python-version
 pip-wheel-metadata/
 __pypackages__/
 

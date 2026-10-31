@@ -73,7 +73,7 @@ headwaters/installer/   hosts/, templates/
 headwaters/cli/         main (Typer)
 headwaters/features/    ★ modules only (ledger, dashboard, tray, wizard, paid_scopes,
                       context_engine, knn, verify_v2, worktree, handoff, hooks,
-                      usage_report, fusion, duck, image, learning, sampling)
+                      usage_report, fusion, duck, image, learning)
 catalog/  integrations/  vscode-extension/  packaging/  bench/  tests/  docs/
 
 WORKFLOW FOR THIS TICKET
@@ -99,16 +99,17 @@ WORKFLOW FOR THIS TICKET
 | 6 Quality | **Beta 0.3** | SPW-601 → 608 | Context engine, kNN, verify v2, worktree, escalation, handoff |
 | 7 Breadth + proof | **Beta 0.4** | SPW-701 → 706 | Hooks, more hosts, HeadwatersBench, host eval suite |
 | 8 RC → 1.0 | **1.0** | SPW-801 → 803 | Hardening, decision evidence, apply decision |
-| 9 Extras | 1.x | SPW-901 → 905 | Fusion, duck, image, learning, sampling |
+| 9 Extras | 1.x | SPW-901 → 905 | Fusion, duck, image, learning, sampling (SPW-905 DEFERRED, D9) |
 
 **Critical path to Beta 0.1:** 001 → 002 → 003/004 → 101 → 102 → 103 → 105 → 106 → 108 → 109 → 110 → 112 → 113 → 114 → 115 → 117 → 201 → 204 → 301 → 302 → 403 → 405 → 407.
 
 **Scope-risk valve (v3.5 §G):** if 0.1 slips, ship Phases 1, 2 and 4 to closed-alpha testers without the gateway, then finish Phase 3 before the open beta.
 
-### Open decisions flagged while ticketing (decide before Phase 1 ends)
-1. **Escalation in core?** v3.5 makes verify-then-escalate ★. These tickets follow that: core verifies and reports, and the optimistic rung only activates if an escalation plugin is registered. Consider allowing a single retry on the next candidate in core.
-2. **Sticky sessions in core?** v3.5 makes them ★. Without them, gateway agent loops can switch models between turns. These tickets put session keying and warm-model preference in core and full stickiness in ★ (SPW-607). Consider moving basic stickiness to core.
-3. **`headwaters_think` in 0.1:** shipped as single-model reasoning (core). Fusion and duck modes arrive in 1.x as ★ overlays.
+### Open decisions flagged while ticketing: settled
+All three were settled at the HDW-119 review gate (2026-10-31); see `docs/DECISIONS.md`:
+1. Escalation in core: [D10](../docs/DECISIONS.md#d10-detail-escalation-in-core)
+2. Sticky sessions in core: [D11](../docs/DECISIONS.md#d11-detail-sticky-sessions-in-core)
+3. `headwaters_think` in 0.1: [D12](../docs/DECISIONS.md#d12-detail-headwaters_think-in-01)
 
 ---
 
@@ -122,7 +123,7 @@ WORKFLOW FOR THIS TICKET
 - Directory skeleton from the Context Pack, with `__init__.py` files.
 - `import-linter` contract: `headwaters.core` must not import `headwaters.features`, `headwaters.gateway`, `headwaters.mcp`, `headwaters.control` or `headwaters.installer`.
 - GitHub Actions: lint + type-check + tests on `windows-latest` and `ubuntu-latest`; coverage report.
-- Docs stubs: `docs/ASSUMPTIONS.md`, `docs/PROVENANCE.md`, `docs/DECISIONS.md` (seed with D1–D6), `THIRD_PARTY_NOTICES.md`, `LICENSE` placeholder ("All rights reserved" for now).
+- Docs stubs: `docs/ASSUMPTIONS.md`, `docs/PROVENANCE.md`, `docs/DECISIONS.md` (seed with D1–D6; `docs/DECISIONS.md` now holds D1–D13), `THIRD_PARTY_NOTICES.md`, `LICENSE` placeholder ("All rights reserved" for now).
 - `pytest` markers: `live`, `windows`, `slow`.
 **Accept when:** CI is green on both OSes; the import-linter contract fails a deliberate violation test; `uv run headwaters --help` prints a stub.
 **Not in this ticket:** any feature code.
@@ -362,7 +363,7 @@ Also:
 1. pin / force overrides
 2. hard filter
 3. cheap rung: best of {local, free_cloud} ≥ floor (local wins ties)
-4. optimistic rung (within margin δ AND verifiable) **only if an `EscalationPlugin` is registered**
+4. optimistic rung (within margin δ AND verifiable) **only if an `EscalationPlugin` is registered** (D10 adds a core verified retry for mandatory checks, HDW-129; the optimistic rung itself stays ★)
 5. paid primary → `openrouter/auto` (only when paid tiers are allowed)
 6. if paid is walled → best-effort cheap with `below_floor=true` → `openrouter/free` only if enabled and complexity ≤ 2
 7. `NoRouteError` with reset ETAs and suggestions
@@ -435,6 +436,149 @@ Output uses Rich tables; `--json` for scripts.
 - Run coverage. Check that the import-linter contract holds.
 - Settle the 3 open decisions in §2.
 - Produce a punch list of fixes as new tickets.
+
+---
+
+## Phase 1.5: HDW-119 review fixes
+
+Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/HDW-119_REVIEW.md`, section 8). The backlog numbers tickets SPW-xxx and the packets HDW-xxx; **HDW = SPW numbering**, so HDW-120 is SPW-120 and every Depends/Refs below uses the same numbers. Decisions D10 to D13 are in `docs/DECISIONS.md`. **Blocks Phase 2** = merge before SPW-201; "Before HDW-xxx" = merge before that ticket; **Can wait** = any time before the Beta 0.1 gate (SPW-407). Ticket text is verbatim from the review, except HDW-124, which also carries owner answer 6.
+
+### HDW-120 · Secret scan covers every message part · **Blocks Phase 2**
+**Model** Sonnet · **Effort** Medium · **Depends** 112, 117 · **Class** Core · **Refs** v3.3 §D8, F1
+**Build:**
+- `router_prep.scan_texts` walks every string leaf of every message: `content` parts, OpenAI `tool_calls[].function.arguments`, Anthropic `tool_use.input`, nested `tool_result` content, and system blocks. Reuse `_extract.collect`, extended to keep the texts.
+- A socket-spy fixture (shared with the catalog updater tests) asserts no non-loopback connect during `Router.run` in the secret-locked state.
+**Accept when:** P1's four shapes are all detected; a secret only in a tool call routes local; the socket spy records no remote connect; no secret text appears in reasons or rows.
+
+### HDW-121 · Ollama cloud-proxied models are never local · **Blocks Phase 2**
+**Model** **Opus** · **Effort** High · **Depends** 105, 115 · **Class** Core · **Refs** v3.3 §D1-D2, A-OLL-8, F2
+**Build:**
+- Verify against current Ollama docs and a live probe how cloud models appear in `/api/tags` and `/api/show` (remote fields, `:cloud`/`-cloud` tags). Record it as A-OLL-9.
+- Discovery marks them `retains_data=true`, `tier=free_cloud`/`paid` per catalog, or drops them; never `local`.
+- `enforce_scope` and `OllamaBackend` refuse a local call to a model flagged remote (defence in depth); the layer-3 classifier refuses one too.
+- Catalog: `ollama_remote_patterns` (data, not code).
+- `doctor` hint (HDW-402): recommend `OLLAMA_NO_CLOUD=1` when Private Mode is used.
+**Accept when:** a fixture `/api/tags` with a cloud model never yields a local candidate; Private-lock routing to it raises `LocalScopeViolation`; the assumption is recorded with a source and date.
+
+### HDW-122 · Credit walls hit paid models only, and expire · **Blocks Phase 2**
+**Model** Sonnet · **Effort** High · **Depends** 110, 111, 117 · **Class** Core · **Refs** v3 §4.4, F3, F22
+**Build:**
+- Credit exhaustion (`exhausted` from a 402 or credit body on a paid model) records a subject that only paid models of that provider/key check (e.g. `provider:openrouter:paid`). Free-tier exhaustion (`free-models-per-day`) records a free subject.
+- An exhausted wall without a reset gets `until = now + walls.exhausted_recheck_s` (rules, default e.g. 900).
+- The router passes the key alias when the executor knows it; `count_request` also runs on 429.
+**Accept when:** after a paid OpenRouter 402, a `:free` OpenRouter model is still `ok`; the wall lifts after the recheck time; P9 is a regression test; the quota tests still pass.
+
+### HDW-123 · Local scope serves the best local model below the floor · **Blocks Phase 2**
+**Model** Sonnet · **Effort** Medium · **Depends** 114 · **Class** Core · **Refs** v3 §4.5 step 4, v3.3 §D3, D10, F4
+**Build:**
+- In `build_ladder`, local-only and battery `local_only` states append the below-floor *local* entries (`best_effort`, `verify_required`) after the local entries that meet the floor; `local_below_floor` is raised only when no local model passes the hard filter. The error keeps its suggestions, now attached as `RouteDecision.suggestions` (`pull_model`, `split_task`).
+- Remove the analyzer's `+int(agentic)` complexity step (the floor already carries `agentic_bonus`); update the HDW-106 fixtures.
+- Golden rows: `agentic-local-scope` (served, best_effort, verify), `scope-local-too-hard` (served below floor), no cloud fallback in any row.
+**Accept when:** P2 gives a local decision in local scope with `below_floor=True, verify_required=True`; no golden row leaves the local tier in local scope; CLI `pick --scope local` shows the warning.
+
+### HDW-124 · Complete the import contract · **Blocks Phase 2**
+**Model** Sonnet · **Effort** Medium · **Depends** 001 · **Class** Core · **Refs** D7, D8, v3.5 §F, F5
+**Build:**
+- Add `headwaters.cli` to the core contract's forbidden modules.
+- New contracts with `include_external_packages = True`: only `headwaters.core.executor.cloud` may import `litellm`; only `headwaters.mcp` may import `mcp`; only `headwaters.gateway` may import `fastapi`/`starlette` (in place before Phase 2 code exists).
+- A source test that fails on any `litellm` reference outside `executor/cloud.py` and `cloud_map.py` (it catches `importlib` strings the linter can't see).
+- A test that importing `headwaters.core.router` and `headwaters.cli.main` leaves `litellm` out of `sys.modules`.
+- A CI check that litellm's telemetry and cost-map fetch stay off after every litellm version bump (owner decision 2026-10-31, HDW-119 question 6).
+**Accept when:** `lint-imports` shows every contract kept; deliberate violations for each new contract fail; the litellm source test passes.
+
+### HDW-125 · Make subprocess decoding independent of the code page · **Blocks Phase 2**
+**Model** Sonnet · **Effort** Low · **Depends** 001, 108 · **Class** Core · **Refs** gap 11, F6
+**Build:** `encoding="utf-8", errors="replace"` (plus `PYTHONIOENCODING=utf-8` in the child env) in `tests/test_import_contract.py`, `hardware/gpu.py:run_nvidia_smi`, and any other `text=True` call (search the repo).
+**Accept when:** the full suite passes 3 times in a row in a cp1252 console on Windows; an `nvidia-smi` fixture with a non-ASCII process name parses.
+
+### HDW-126 · Production never registers `features/_example` · **Blocks Phase 2**
+**Model** Sonnet · **Effort** Low · **Depends** 004 · **Class** Core · **Refs** v3.5 §F, F7
+**Build:** move `_example` to `tests/fixtures/features/_example` (or make `discover_features` skip `_`-prefixed packages unless `include_private=True`); the contract tests discover it explicitly.
+**Accept when:** `discover_features(FeatureRegistry())` in production returns no `_example`; the contract harness still runs against the example; P8 is a regression test.
+
+### HDW-127 · litellm never writes to stdout and logs through redaction · **Before HDW-202**
+**Model** Sonnet · **Effort** Low · **Depends** 003, 115 · **Class** Core · **Refs** v3.1 §C5, F8
+**Build:** in `_load_litellm` set `suppress_debug_info = True` and `set_verbose = False`, and attach `RedactionFilter` (plus a level cap) to the `LiteLLM`, `LiteLLM Router` and `LiteLLM Proxy` loggers; record the attribute names in ASSUMPTIONS (A-LLM-6).
+**Accept when:** under `guard_stdout(strict=True)`, a cloud call that raises a mapped litellm exception (fake module) writes nothing to stdout; a key in a litellm log record is redacted.
+
+### HDW-128 · Hints honour every active lock · **Before HDW-205**
+**Model** Sonnet · **Effort** Low · **Depends** 112, 114 · **Class** Core · **Refs** v3.3 §B4, F9
+**Build:** `ScopeDecision.active_locks` lists every lock in force (Private lock, project rule, secret, airplane), narrowing or not; `suggestions_for` and `no_route` key the cloud hint on it; the golden runner builds scope through `resolve_scope`.
+**Accept when:** P3 yields no `use_cloud` hint; a golden row covers Private lock plus `default_scope: local` plus battery.
+
+### HDW-129 · Escalation and the core verified retry go to a stronger model · **Before HDW-204**
+**Model** Sonnet · **Effort** Medium · **Depends** 117, 123 · **Class** Core · **Refs** v3 §4.6, D10, F10
+**Build:**
+- `_escalate` and the new core retry (D10: one retry when `verify_required` and the check failed, no plugin needed) redecide over candidates whose task score is above the failed model's, with `escalation=None` so the optimistic rung can't fire again.
+- The retry is counted in `max_attempts`, stays in scope, and is skipped after the first streamed token.
+**Accept when:** tests cover cheap fail then stronger pass; no stronger candidate gives the original answer flagged; local scope retries only locally; the existing escalation test is updated so it goes up.
+
+### HDW-130 · A mandatory gate that checked nothing is not a pass · **Before HDW-204**
+**Model** Sonnet · **Effort** Low · **Depends** 116, 117 · **Class** Core · **Refs** v3 §4.5 step 4, F11
+**Build:** `VerifyOutcome.checked` (checks that actually ran, skips excluded); when `decision.verify_required` and `checked == 0`, the result carries `verify="unchecked"`, the outcome row stores `unchecked`, and `below_floor` stays visible to the engine.
+**Accept when:** P8's prose case reports `unchecked`; a missing grammar is a skip, not a pass; the old "not run" test is replaced.
+
+### HDW-131 · Live rules in long-running engines · **With HDW-201**
+**Model** Sonnet · **Effort** Medium · **Depends** 101, 117 · **Class** Core · **Refs** v3.3 §C, F12, F22
+**Build:**
+- `Router`, `Executor` and `QuotaTracker` take a rules provider (`Callable[[], Rules]`, `RulesManager.current`), read once per request in `_select` and in `enforce_scope`. `enforce_scope` re-checks `rules.private_lock` and `airplane` itself.
+- The daemon schedules `poll_key` with the live `airplane`/lock state.
+**Accept when:** a test toggles `private_lock` between two requests on one Router and the second never builds a cloud client; airplane set mid-run blocks the next cloud call.
+
+### HDW-132 · `primary_first` means the primary first · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 114 · **Class** Core · **Refs** v3.3 §A, F13
+**Build:** under `primary_first`, every usable primary leads (flag `below_floor` when under the floor), then `openrouter/auto`, then the cost_saver ladder.
+**Accept when:** a golden row with a primary scoring under the floor picks it, flagged; the walled-primary row still falls to auto.
+
+### HDW-133 · Score terms that do something: offload, complexity · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 113 · **Class** Core · **Refs** v3 §7.1, F14, F19
+**Build:** `scoring.offload_penalty` (rules) applied to `fit.status == "offload"`; make `complexity_penalty` model-dependent (scaled by the gap to 100) or remove it and its rule.
+**Accept when:** P4 shows offload below fits; a golden row prefers a fitting model over an offloaded one with an equal score.
+
+### HDW-134 · Core session stickiness (D11) · **Before HDW-302**
+**Model** Sonnet · **Effort** Medium · **Depends** 117, 123 · **Class** Core · **Refs** v3 §4.5 session rules, D11, F15, F16
+**Build:**
+- Separate the session preference from residency: never zero `eviction_penalty`, never give a VRAM bonus to cloud models.
+- The D11 rule: the last *successful* model leads while usable, in scope, passes the hard filter and still meets the floor (or is the same local best-effort choice). Pin only on `ok`.
+- The reason line says "kept session model".
+**Accept when:** P5 shows no cloud warm bonus and keeps the evict penalty; a three-turn test keeps one model across a small ranking change and moves on a wall and on `verify_failed`.
+
+### HDW-135 · Remote images are refused, not dropped, for local models · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 115 · **Class** Core · **Refs** v3.3 §D2, F17
+**Build:** a local call with a non-`data:` `image_url` raises a structured `image_url_not_local` error (no fetch); the engine may inline it outside local scope.
+**Accept when:** tests cover a data URL (sent), an https URL in local scope (refused) and nothing fetched.
+
+### HDW-136 · Unknown context is not "too small" · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 113 · **Class** Core · **Refs** F18
+**Build:** `ctx is None` uses `unknown_model_defaults.ctx` (via the candidate builder) and rejects with `ctx_unknown` only if that is also too small.
+**Accept when:** the filter test is updated; the suggestion is not `split_task` for unknown context.
+
+### HDW-137 · Local fix hints name a model · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 117 · **Class** Core · **Refs** v3.3 §C, F20
+**Build:** the router builds `local_fix_hint` and the `pull_model` suggestion text from `catalog.gpu_profiles[hw.profile].recommended` for the request's role (vision, agentic_coder, general).
+**Accept when:** a vision request in local scope with no vision model says "pull <catalog model>".
+
+### HDW-138 · Hard-coded tunables to rules and catalog; startup fail-safe · **Can wait**
+**Model** Sonnet · **Effort** Medium · **Depends** 101, 103 · **Class** Core · **Refs** section 5 of this review, F26, F27
+**Build:**
+- Move every value marked "Tunable" or "Fact" in section 5 to `rules.yaml` or the catalog (one schema bump each); regenerate both schema files; delete `project_config.effective_scope` (F23) and the duplicate `CTX_HEADROOM`.
+- On a startup parse error, keep any readable `private_lock`, `airplane` and `default_scope`; if none can be read, start in local scope and say why (F27).
+**Accept when:** the section 5 table rows are gone from code; schema checks pass; an invalid file with `private_lock: true` starts locked.
+
+### HDW-139 · Seed catalog: classifier and laziness patterns · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 103 · **Class** Core (data) · **Refs** v3 §4.6, F21
+**Build:** a tiny text classifier entry for both GPU profiles; `placeholder_patterns` for the v3 4.6 laziness markers (`rest of (the )?code`, `// existing code`, `... remaining`, `TODO: implement`), all `verify: true`.
+**Accept when:** the seed validates; the verify fixtures catch each marker.
+
+### HDW-140 · Core hooks for `headwaters_think` (D12) · **Before HDW-205**
+**Model** Sonnet · **Effort** Medium · **Depends** 106, 115, 117 · **Class** Core · **Refs** v3.4 §B1, D12
+**Build:** `RouteRequest.task_hint` (forces `soft.task`); `RouteRequest.reasoning` (mapped to `ExecOptions.reasoning`); `ModelRow.reasoning_ok` from Ollama `capabilities: thinking` and OpenRouter `supported_parameters: reasoning` (migration 3) plus a `HardRequirements.reasoning` filter; a documented rule that reasoning text is never returned or stored.
+**Accept when:** a think-style request in local scope picks a local thinking model with `think` on; reasoning text is absent from rows, events and the default result rendering.
+
+### HDW-141 · Pin Python 3.13 for development · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 001 · **Class** – · **Refs** owner question 2026-10-31, gap 12
+**Build:** add `.python-version` with `3.13`; delete `.venv313`; add `.venv*/` to `.gitignore`; keep `requires-python = ">=3.11"`; add an allowed-to-fail CI job on the newest Python.
+**Accept when:** a fresh `uv sync` builds a 3.13 env on a machine where 3.15 is the default; `ruff check .` passes on the whole tree.
 
 ---
 
@@ -524,11 +668,11 @@ Output uses Rich tables; `--json` for scripts.
 
 ### SPW-301 · OpenAI-compatible endpoints and virtual models
 **Model** Sonnet · **Effort** High · **Depends** 117, 201, 002 (D7) · **Class** Core · **Refs** v3 §5.1, v3.3 §B
-**Build:** following D7 (LiteLLM proxy + hooks **or** thin FastAPI + litellm SDK):
+**Build:** following D7 (thin FastAPI gateway + litellm SDK; the LiteLLM proxy is not used):
 - `/v1/chat/completions` (streaming and non-streaming) and `/v1/models`, served inside or alongside the daemon on 127.0.0.1.
 - `/v1/models` lists core picker models `headwaters/auto|free|local|cloud`, plus `headwaters/quality|duck` only when `picker.show_extras`.
 - Requests call `Router.handle`.
-- Pin the LiteLLM version if it's used.
+- Pin the LiteLLM version (`uv.lock`).
 **Accept when:** an OpenAI SDK client completes chat (streaming and non-streaming) against mocked providers; the model list respects the config.
 
 ### SPW-302 · Streaming failover, headers, session key
@@ -545,7 +689,7 @@ Output uses Rich tables; `--json` for scripts.
 **Model** Sonnet · **Effort** High · **Depends** 302 · **Class** Core · **Refs** v3 §5.1, v3.2 §D
 **Build:**
 - Anthropic Messages API compatibility: system prompt, content blocks (text, image, tool_use, tool_result), streaming SSE event sequence, stop reasons.
-- Use LiteLLM's translation if D7 chose it; otherwise build a translation layer with fixture tests.
+- Use LiteLLM's translation (D7: `litellm.anthropic.messages`), with fixture tests.
 - Document the Claude Code `ANTHROPIC_BASE_URL` setup (API keys only).
 **Accept when:** an Anthropic SDK client works for text, tool use and streaming against mocked backends.
 
@@ -932,7 +1076,7 @@ Also: reference GPU profiles (12 GB, 16 GB); reproducible configs; reports with 
 - Reset and override controls.
 **Accept when:** convergence tests pass; the export payload schema contains no free text.
 
-### SPW-905 · MCP sampling tier ★
+### SPW-905 · MCP sampling tier ★ · **DEFERRED (D9): do not build**
 **Model** Sonnet · **Effort** Medium · **Depends** 206, 002 · **Refs** v3.4 §B3
 **Build:**
 - When the host supports MCP sampling, offer the host model as an optional tier for `headwaters_do` subtasks.
