@@ -29,7 +29,7 @@ from typing import Any, Literal
 from headwaters.core import state_limits
 from headwaters.core.catalog.http import HttpClient, SourceError
 from headwaters.core.catalog.schema import FreeLimit, WallScope
-from headwaters.core.rules import WallsRules
+from headwaters.core.rules import RulesProvider, WallsRules
 from headwaters.core.scope import PAID_TIERS
 from headwaters.core.state import Database
 from headwaters.core.state_misc import kv_get, kv_set
@@ -148,18 +148,25 @@ class QuotaTracker:
     def __init__(
         self,
         db: Database,
-        walls: WallsRules | None = None,
+        walls: WallsRules | RulesProvider | None = None,
         free_limits: Sequence[FreeLimit] = (),
         *,
         clock: Callable[[], float] | None = None,
         rng: random.Random | None = None,
     ) -> None:
         self._db = db
-        self._walls = walls or WallsRules()
+        # A provider is read on every use, so an edit to `walls:` applies without a restart.
+        self._walls_source: Callable[[], WallsRules] = (
+            (lambda: walls().walls) if callable(walls) else (lambda: walls or WallsRules())
+        )
         self._limits = list(free_limits)
         # Looked up per call (not bound) so a patched ``time.time`` (freezegun) is honoured.
         self._clock: Callable[[], float] = clock or (lambda: time.time())
         self._rng = rng or random.Random()  # jitter only, not security
+
+    @property
+    def _walls(self) -> WallsRules:
+        return self._walls_source()
 
     # ------------------------------------------------------------------ walls
 

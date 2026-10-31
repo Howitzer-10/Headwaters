@@ -34,7 +34,7 @@ from headwaters.core.executor.types import (
 )
 from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.policy.types import RouteDecision
-from headwaters.core.rules import Rules
+from headwaters.core.rules import Rules, RulesProvider, as_provider
 from headwaters.core.walls import WallClassifier
 
 # Maps a decision to what to call (litellm route or Ollama name, ``num_ctx``, cold flag).
@@ -49,7 +49,7 @@ def _has_output(delta: Delta) -> bool:
 class Executor:
     def __init__(
         self,
-        rules: Rules,
+        rules: Rules | RulesProvider,
         walls: WallClassifier,
         resolve: TargetResolver,
         *,
@@ -66,7 +66,7 @@ class Executor:
             def local_factory(host: str) -> Backend:
                 return OllamaBackend(host, remote_patterns=remote_patterns)
 
-        self._rules = rules
+        self._rules_source = as_provider(rules)  # read per call, so rule edits apply (HDW-131)
         self._walls = walls
         self._resolve = resolve
         self._config = config or ExecutorConfig()
@@ -142,17 +142,16 @@ class Executor:
     def _prepare(
         self, decision: RouteDecision
     ) -> tuple[Backend, ExecTarget, dict[str, str], str | None]:
-        enforce_scope(decision, self._rules, self._remote_patterns)  # before any backend exists
+        rules = self._rules_source()  # one reading per call
+        enforce_scope(decision, rules, self._remote_patterns)  # before any backend exists
         target = self._resolve(decision)
         if decision.tier == "local":
             if is_remote_name(target.route, self._remote_patterns):
                 raise LocalScopeViolation(REMOTE_MODEL_MESSAGE, model=decision.model)
-            return self._local_factory(self._rules.tiers.local.host), target, {}, None
+            return self._local_factory(rules.tiers.local.host), target, {}, None
         if self._cloud is None:
             self._cloud = self._cloud_factory()
-        headers = (
-            attribution_headers(self._rules.attribution) if target.provider == OPENROUTER else {}
-        )
+        headers = attribution_headers(rules.attribution) if target.provider == OPENROUTER else {}
         key = self._api_key_for(target.provider) if self._api_key_for else None
         return self._cloud, target, headers, key
 
@@ -195,7 +194,7 @@ class Executor:
         options: ExecOptions,
     ) -> AsyncIterator[StreamEvent]:
         backend, target, headers, key = self._prepare(decision)
-        keep_alive = self._rules.tiers.local.keep_alive
+        keep_alive = self._rules_source().tiers.local.keep_alive
         request = BackendRequest(target, messages, tools, options, keep_alive, headers, key)
         acc = Accumulator(decision.model, decision.tier)
         started = time.monotonic()

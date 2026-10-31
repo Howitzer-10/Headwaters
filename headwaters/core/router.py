@@ -71,7 +71,7 @@ from headwaters.core.router_types import (
     VerifyOutcome,
 )
 from headwaters.core.router_verify import run_verifiers, wants_verify
-from headwaters.core.rules import Rules
+from headwaters.core.rules import Rules, RulesProvider, as_provider
 from headwaters.core.scope import (
     ScopeDecision,
     ScopeError,
@@ -110,6 +110,7 @@ class RouterConfig:
 class _Selection:
     """Steps 2-3 of the pipeline: the scope, the candidates it was decided on, the first pick."""
 
+    rules: Rules
     scope: ScopeDecision
     candidates: tuple[Candidate, ...]
     hw: HardwareState | None
@@ -119,7 +120,7 @@ class _Selection:
 class Router:
     def __init__(
         self,
-        rules: Rules,
+        rules: Rules | RulesProvider,
         db: Database,
         analyzer: RequirementsAnalyzer,
         candidates: CandidateSource,
@@ -133,7 +134,7 @@ class Router:
         config: RouterConfig | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        self._rules = rules
+        self._rules_source = as_provider(rules)  # read once per request (HDW-131)
         self._db = db
         self._analyzer = analyzer
         self._candidates = candidates
@@ -233,7 +234,7 @@ class Router:
         reqs = await asyncio.to_thread(self._analyzer.analyze, analyzer_input(request))
         chosen = self._select(request, key, reqs)
         rejected = hard_filter(
-            chosen.candidates, reqs.hard, chosen.scope, self._rules, chosen.hw
+            chosen.candidates, reqs.hard, chosen.scope, chosen.rules, chosen.hw
         ).rejected
         return RoutePlan(reqs, chosen.scope, chosen.first, chosen.candidates, rejected, key)
 
@@ -247,7 +248,7 @@ class Router:
         )
         self._progress(request, "analyzing")
         reqs = await asyncio.to_thread(self._analyzer.analyze, analyzer_input(request))
-        scope_name = request.scope or self._rules.default_scope
+        scope_name = request.scope or self._rules_source().default_scope
         try:
             chosen = self._select(request, key, reqs)
         except (ScopeError, NoRouteError) as exc:
@@ -268,9 +269,10 @@ class Router:
 
     def _select(self, request: RouteRequest, key: str, reqs: Requirements) -> _Selection:
         """Steps 2-3: secrets, candidates, scope and the policy ladder. No side effects."""
+        rules = self._rules_source()  # one reading for the whole selection
         matches = self._scan_secrets(request)
         candidates = self._with_live_availability(self._candidates(reqs))
-        if self._rules.airplane:
+        if rules.airplane:
             candidates = only_local(candidates)
         session = self._get_session(key)
         warm = session.pinned_model if session is not None else None
@@ -278,7 +280,7 @@ class Router:
         hw = self._hardware() if self._hardware is not None else None
         self._progress(request, "scope")
         scope = resolve_scope(
-            self._rules,
+            rules,
             request.project,
             requested=request.scope,
             strategy=request.strategy,
@@ -291,9 +293,9 @@ class Router:
         self._progress(request, "deciding")
         first = decide(
             PolicyRequest(reqs, scope, request.pin, request.force),
-            PolicyContext(candidates, self._rules, hw, self._escalation()),
+            PolicyContext(candidates, rules, hw, self._escalation()),
         )
-        return _Selection(scope, candidates, hw, first)
+        return _Selection(rules, scope, candidates, hw, first)
 
     def _with_live_availability(self, candidates: Sequence[Candidate]) -> tuple[Candidate, ...]:
         """Walls live in shared SQLite, so another engine may have set one a moment ago.
@@ -401,7 +403,7 @@ class Router:
         try:
             return decide(
                 PolicyRequest(run.reqs, run.scope, run.request.pin, run.request.force),
-                PolicyContext(fresh, self._rules, run.hw, self._escalation()),
+                PolicyContext(fresh, self._rules_source(), run.hw, self._escalation()),
             )
         except NoRouteError as err:
             raise RouteFailed(
@@ -555,7 +557,7 @@ class Router:
             surface=request.surface,
             session=key,
             scope=scope_name,
-            strategy=request.strategy or self._rules.strategy,
+            strategy=request.strategy or self._rules_source().strategy,
             status=exc.code,
             latency_ms=int((time.monotonic() - started) * 1000),
             requirements=reqs,

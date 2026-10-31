@@ -31,7 +31,7 @@ from headwaters.core.policy.filters import Candidate
 from headwaters.core.policy.types import RouteDecision
 from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import CandidateSource, RequirementsAnalyzer, Router
-from headwaters.core.rules import OpenAICompatEndpoint, Rules
+from headwaters.core.rules import OpenAICompatEndpoint, Rules, RulesProvider, as_provider
 from headwaters.core.secrets_detect import SecretDetector
 from headwaters.core.state import Database
 from headwaters.core.walls import WallClassifier
@@ -137,7 +137,7 @@ def hardware_reader(rules: Rules) -> Callable[[], HardwareState | None]:
 
 
 def build_engine(
-    rules: Rules,
+    rules: Rules | RulesProvider,
     catalog: Catalog,
     catalog_source: str,
     db: Database,
@@ -150,6 +150,8 @@ def build_engine(
     enable_classifier: bool = True,
 ) -> Engine:
     """Assemble a router for ``rules`` and ``catalog``. Nothing is called or started here."""
+    provider = as_provider(rules)  # Router, Executor and QuotaTracker read it per request
+    rules = provider()  # CandidateBuilder, hardware and flags still take this one reading
     patterns = remote_patterns_from(catalog)
     targets = TargetBuilder(rules, env)
     registry = FeatureRegistry()
@@ -157,7 +159,7 @@ def build_engine(
     registry.set_flags(rules.features)
     read_hardware = hardware or hardware_reader(rules)
     executor = Executor(
-        rules,
+        provider,
         WallClassifier(catalog.wall_patterns),
         targets,
         cloud_factory=cloud_factory,
@@ -167,12 +169,12 @@ def build_engine(
     )
     chain = analyzer or build_chain(catalog, rules.tiers.local, enable_layer3=enable_classifier)
     router = Router(
-        rules,
+        provider,
         db,
         chain,
         _RememberingSource(CandidateBuilder(db, rules, catalog, read_hardware)),
         executor,
-        QuotaTracker(db, rules.walls, catalog.free_limits),
+        QuotaTracker(db, provider, catalog.free_limits),
         secrets=SecretDetector.from_catalog(catalog),
         registry=registry,
         hardware=read_hardware,

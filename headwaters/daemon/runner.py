@@ -11,6 +11,7 @@ from headwaters.core.instance_lock import InstanceLock
 from headwaters.core.logging import configure_logging, get_logger, shutdown_logging
 from headwaters.core.rules import Rules
 from headwaters.core.rules_io import ConfigError, load_rules, rules_path
+from headwaters.core.rules_watch import RulesManager
 from headwaters.core.state import open_database
 from headwaters.daemon.service import Daemon, pick_ports
 
@@ -48,11 +49,22 @@ def run(*, preferred_port: int | None = None) -> int:
         except netports.PortError as exc:
             _log.error("no port available: %s", exc)
             return EXIT_NO_PORT
-        daemon = Daemon(rules, open_database(), sock, ports, load_or_create_token())
+        # Watch rules.yaml so ``headwaters private on`` reaches the running router (HDW-131).
+        manager = RulesManager()
+        manager.start()
+        daemon = Daemon(
+            rules,
+            open_database(),
+            sock,
+            ports,
+            load_or_create_token(),
+            rules_source=lambda: manager.current,
+        )
         try:
             daemon.rebuild_engine()
             asyncio.run(daemon.serve())
         finally:
+            manager.stop()
             sock.close()
             remove_info(os.getpid())
         return EXIT_OK

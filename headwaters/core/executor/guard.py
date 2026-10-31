@@ -55,6 +55,10 @@ def enforce_scope(
         raise LocalScopeViolation("Local scope never uses a cloud tier.", model=model)
     if tier not in decision.scope.tiers:
         raise ScopeViolation(f"Tier {tier!r} is outside the effective scope.", model=model)
+    # Re-checked here, from the rules the caller just read, so a lock or airplane switched on after
+    # the decision was made still stops the call (HDW-131, F12).
+    if rules.private_lock and tier != "local":
+        raise LocalScopeViolation("Private lock allows local models only.", model=model)
     if rules.airplane and tier != "local":
         raise ScopeViolation("Airplane mode blocks all network egress.", model=model)
     if tier == "local":

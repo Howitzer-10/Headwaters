@@ -54,7 +54,7 @@ def needs_refresh(db: Database, rules: Rules, now: float | None = None) -> bool:
     return (time.time() if now is None else now) - float(last) >= rules.models.refresh_ttl_s
 
 
-def _network_block(rules: Rules) -> str | None:
+def network_block(rules: Rules) -> str | None:
     if rules.airplane:
         return "airplane mode"
     if rules.private_lock or rules.default_scope == "local":
@@ -72,7 +72,7 @@ def _gather(
 ) -> dict[str, list[LiveModel]]:
     """Live models by source name. Only sources that answered appear in the result."""
     found: dict[str, list[LiveModel]] = {}
-    blocked = _network_block(rules)
+    blocked = network_block(rules)
 
     try:
         models, warnings = ollama_models(http, rules.tiers.local.host, remote_patterns)

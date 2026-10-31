@@ -8,6 +8,7 @@ Model slugs, limits and prices are NOT defaults here: they live in the catalog.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -262,3 +263,18 @@ class Rules(_Model):
     features: dict[str, bool] = Field(default_factory=dict)
     hosts: HostsRules = Field(default_factory=HostsRules)
     advice: Literal["off", "inline", "header_only"] = "off"
+
+
+RulesProvider = Callable[[], Rules]
+"""Returns the live rules. Long-running engines read it once per request (HDW-131)."""
+
+
+def as_provider(source: Rules | RulesProvider) -> RulesProvider:
+    """A provider for a fixed ``Rules`` (tests, the CLI) or an existing provider.
+
+    The daemon passes ``RulesManager.current`` so an edit to ``rules.yaml`` (``headwaters private
+    on``) reaches a running router without a restart.
+    """
+    if isinstance(source, Rules):
+        return lambda: source
+    return source

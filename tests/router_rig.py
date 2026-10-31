@@ -38,8 +38,10 @@ class Rig:
         key_alias_for: Callable[[str], str | None] | None = None,
         free_limits: Sequence[FreeLimit] = (),
         clock: Callable[[], float] | None = None,
+        rules_source: Callable[[], Rules] | None = None,
     ) -> None:
         self.rules = rules or Rules()
+        live: Rules | Callable[[], Rules] = rules_source or self.rules  # HDW-131
         self.db: Database = open_database(tmp_path / "state.db")
         self.dispatch = Dispatch(scripts)
         self.cloud_clients = 0
@@ -52,7 +54,7 @@ class Rig:
             return self.dispatch
 
         executor = Executor(
-            self.rules,
+            live,
             WALLS,
             lambda d: target_for(d, cold=False),
             cloud_factory=cloud_factory,
@@ -63,9 +65,11 @@ class Rig:
         async def sleep(seconds: float) -> None:
             self.waits.append(seconds)
 
-        self.quotas = QuotaTracker(self.db, self.rules.walls, free_limits, clock=clock)
+        self.quotas = QuotaTracker(
+            self.db, rules_source or self.rules.walls, free_limits, clock=clock
+        )
         self.router = Router(
-            self.rules,
+            live,
             self.db,
             self.analyzer,
             lambda _reqs: pool,
