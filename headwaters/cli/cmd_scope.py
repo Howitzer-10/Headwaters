@@ -1,7 +1,9 @@
 """``headwaters scope`` and ``headwaters private``: the user's switches for scope and the lock.
 
-Both edit ``rules.yaml`` in place (comments are kept) and the running engines pick the change up
-through the rules hot reload. Only the user loosens a lock, and the CLI is the user: it never
+Both edit ``rules.yaml`` in place (comments are kept), then ask the running daemon to reload it
+and wait for its confirmation (``cli/daemon_sync.py``, HDW-148): with no daemon they say so and
+exit 0; with a daemon that does not confirm they exit non-zero. Only the user loosens a lock, and
+the CLI is the user: it never
 does so on behalf of a request. A project rule or the Private lock still wins over a looser
 default scope, and the command says so.
 """
@@ -12,6 +14,7 @@ import typer
 
 from headwaters.cli import runtime
 from headwaters.cli.cmd_status import effective_scope, locks_in_force
+from headwaters.cli.daemon_sync import confirm
 from headwaters.cli.output import EXIT_CONFIG, emit_json, fail, make_console
 from headwaters.core.rules import Scope
 from headwaters.core.rules_edit import set_setting
@@ -62,8 +65,10 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show or set the default scope: which tiers may serve requests."""
         previous = None
+        sync = None
         if value is not None:
             previous, _ = _apply("default_scope", value, as_json)
+            sync = confirm({"default_scope": value}, as_json=as_json)
         rt = runtime.load_runtime(as_json=as_json)
         effective, line = _effective_payload(rt)
         if as_json:
@@ -74,6 +79,7 @@ def register(app: typer.Typer) -> None:
                     "previous": previous,
                     "changed": value is not None and previous != value,
                     "effective": effective,
+                    **({"daemon": sync.as_dict()} if sync is not None else {}),
                 }
             )
             return
@@ -85,6 +91,8 @@ def register(app: typer.Typer) -> None:
         else:
             console.print(f"Default scope: {previous} -> {value}")
         console.print(line)
+        if sync is not None:
+            console.print(sync.message)
         if value is not None and effective["scope"] != value:
             console.print(
                 "Note: a lock or project rule is narrowing this; the tighter setting always wins."
@@ -100,8 +108,12 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Turn the Private lock on or off. While it is on, nothing leaves this machine."""
         previous = None
+        sync = None
         if state is not None:
             previous, _ = _apply("private_lock", state == "on", as_json)
+            # Return only after the running daemon reports the switch (a privacy switch must be
+            # true when it answers); no daemon running is fine, it reads the file at start.
+            sync = confirm({"private_lock": state == "on"}, as_json=as_json)
         rt = runtime.load_runtime(as_json=as_json)
         effective, line = _effective_payload(rt)
         lock = rt.rules.private_lock
@@ -113,6 +125,7 @@ def register(app: typer.Typer) -> None:
                     "previous": previous,
                     "changed": state is not None and previous != lock,
                     "effective": effective,
+                    **({"daemon": sync.as_dict()} if sync is not None else {}),
                 }
             )
             return
@@ -127,3 +140,5 @@ def register(app: typer.Typer) -> None:
         if lock:
             console.print("Only local models will be used; no cloud client is created.")
         console.print(line)
+        if sync is not None:
+            console.print(sync.message)

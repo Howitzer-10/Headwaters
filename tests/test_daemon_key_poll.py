@@ -53,7 +53,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Database:
 
 def _daemon(db: Database, live: Live) -> Daemon:
     sock = socket.socket()
-    return Daemon(Rules(), db, sock, DaemonPorts(1, 2, 3), "tok", rules_source=live)
+    return Daemon(db, sock, DaemonPorts(1, 2, 3), "tok", rules_source=live)
 
 
 def _walls(db: Database) -> set[str]:

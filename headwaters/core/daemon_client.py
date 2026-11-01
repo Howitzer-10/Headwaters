@@ -59,6 +59,11 @@ class DaemonClient:
         reply: dict[str, Any] = self._call("GET", "/v1/status", auth=True)
         return reply
 
+    def reload(self) -> dict[str, Any]:
+        """Ask the daemon to re-read ``rules.yaml`` now; the reply carries the live switches."""
+        reply: dict[str, Any] = self._call("POST", "/v1/reload", auth=True, body={})
+        return reply
+
     def shutdown(self) -> dict[str, Any]:
         reply: dict[str, Any] = self._call("POST", "/v1/shutdown", auth=True, body={})
         return reply

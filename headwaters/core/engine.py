@@ -114,8 +114,11 @@ class _RememberingSource:
 
 @dataclass(frozen=True)
 class Engine:
+    """One built router and what was built with it. It holds no copy of the rules: the parts
+    that read them per request take the provider, and the parts that read them once at build
+    time are rebuilt by the daemon when the rules change (HDW-148)."""
+
     router: Router
-    rules: Rules
     catalog: Catalog
     catalog_source: str
     remote_patterns: RemotePatterns
@@ -148,10 +151,18 @@ def build_engine(
     local_factory: Callable[[str], Backend] | None = None,
     env: Mapping[str, str] | None = None,
     enable_classifier: bool = True,
+    snapshot: Rules | None = None,
 ) -> Engine:
-    """Assemble a router for ``rules`` and ``catalog``. Nothing is called or started here."""
-    provider = as_provider(rules)  # Router, Executor and QuotaTracker read it per request
-    rules = provider()  # CandidateBuilder, hardware and flags still take this one reading
+    """Assemble a router for ``rules`` and ``catalog``. Nothing is called or started here.
+
+    The router, executor and quota tracker read ``rules`` per request. The candidate builder,
+    hardware monitor, feature flags, ``TargetBuilder`` and analyzer chain take one reading at
+    build time: ``snapshot`` when the caller has it (the daemon, so its stale-engine check and
+    the build agree), else one call of the provider. The daemon builds a new engine whenever
+    the rules change (HDW-148); a request already running finishes on the engine it started on.
+    """
+    provider = as_provider(rules)
+    rules = snapshot if snapshot is not None else provider()
     patterns = remote_patterns_from(catalog)
     targets = TargetBuilder(rules, env)
     registry = FeatureRegistry()
@@ -180,6 +191,4 @@ def build_engine(
         hardware=read_hardware,
         gpu_profiles=catalog.gpu_profiles,
     )
-    return Engine(
-        router, rules, catalog, catalog_source, patterns, targets, registry, read_hardware
-    )
+    return Engine(router, catalog, catalog_source, patterns, targets, registry, read_hardware)

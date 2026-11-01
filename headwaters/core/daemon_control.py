@@ -22,6 +22,7 @@ __all__ = [
     "DAEMON_MODULE",
     "ControlResult",
     "daemon_command",
+    "pid_alive",
     "start_daemon",
     "stop_daemon",
 ]
@@ -132,6 +133,9 @@ def _pid_alive(pid: int) -> bool:
             return False
     except Exception:
         return False
+
+
+pid_alive = _pid_alive
 
 
 def stop_daemon(

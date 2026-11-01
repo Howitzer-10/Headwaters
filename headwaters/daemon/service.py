@@ -71,37 +71,95 @@ async def run_in_daemon_thread(work: Callable[[], object]) -> None:
 
 @dataclass
 class Daemon:
-    rules: Rules
     db: Database
     sock: socket.socket
     ports: DaemonPorts
     token: str
+    # ``RulesManager.current`` in production: the live rules, read at each use (HDW-131). The
+    # daemon keeps no copy of its own (HDW-148, FU-131-2).
+    rules_source: RulesProvider
     started_at: float = field(default_factory=time.time)
     engine: Engine | None = None
     last_keep_warm: KeepWarmResult | None = None
     last_refresh: str = "never"
     last_key_poll: KeyPollResult | None = None
-    # ``RulesManager.current`` in production: the live rules, read at each use (HDW-131).
-    rules_source: RulesProvider | None = None
-    # ``RulesManager.reload`` in production: re-reads rules.yaml now, after ``headwaters_scope``
-    # edited it, so the change is seen by the next call without waiting for the file watcher.
+    # ``RulesManager.reload`` in production: re-reads rules.yaml now (True when valid rules are in
+    # force). ``headwaters_scope`` and ``POST /v1/reload`` call it, so a change is seen by the
+    # next call without waiting for the file watcher.
     reload_rules: Callable[[], object] | None = None
+    # ``RulesManager.last_error`` in production: why the last reload was rejected, or ``None``.
+    rules_error: Callable[[], object] | None = None
     _server: HttpServer | None = None
     _stop: asyncio.Event | None = None
+    # The rules the current engine was built from. Only the rebuild hook sets it, so a rebuild
+    # started by the catalog refresh never goes back to older rules (and never has to read the
+    # manager while it holds the build lock).
+    _built_with: Rules | None = None
+    _build_lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
     def live_rules(self) -> Rules:
-        return self.rules_source() if self.rules_source is not None else self.rules
+        return self.rules_source()
 
-    def rebuild_engine(self) -> Engine:
-        catalog, source = updater.load_active()
-        self.engine = build_engine(lambda: self.live_rules, catalog, source, self.db)
+    def rebuild_engine(self, rules: Rules | None = None, *, reuse_catalog: bool = False) -> Engine:
+        """Build an engine and swap it in. A call already running keeps the engine it started on.
+
+        ``rules`` is the reading the build uses (the rebuild hook passes the rules it was told
+        about). ``reuse_catalog`` keeps the loaded catalog instead of reading it from disk.
+        """
+        # The live rules are read outside the lock: reading them may run the rebuild hook, which
+        # takes the lock itself.
+        first = self.live_rules if rules is None and self._built_with is None else None
+        with self._build_lock:
+            snapshot = rules if rules is not None else (self._built_with or first)
+            assert snapshot is not None  # ``first`` is read whenever nothing else is known
+            current = self.engine
+            if reuse_catalog and current is not None:
+                catalog, source = current.catalog, current.catalog_source
+            else:
+                catalog, source = updater.load_active()
+            self.engine = build_engine(
+                self.rules_source, catalog, source, self.db, snapshot=snapshot
+            )
+            self._built_with = snapshot
+            return self.engine
+
+    def on_rules_changed(self, rules: Rules) -> None:
+        """``RulesManager`` calls this once new valid rules are in force: rebuild the engine.
+
+        It may run on a request thread (the manager reloads at the next read), and the manager
+        holds readers back until it returns, so the next request already sees the new engine.
+        """
+        self.rebuild_engine(rules, reuse_catalog=True)
+
+    def reload_now(self) -> dict[str, Any]:
+        """``POST /v1/reload``: re-read rules.yaml now and report the switches that are live."""
+        accepted = bool(self.reload_rules()) if self.reload_rules is not None else True
+        rules = self.live_rules  # after the reload: a privacy switch must be true when it answers
+        reply: dict[str, Any] = {
+            "applied": accepted,
+            "private_lock": rules.private_lock,
+            "airplane": rules.airplane,
+            "default_scope": rules.default_scope,
+        }
+        if not accepted:
+            error = self.rules_error() if self.rules_error is not None else None
+            reply["error"] = (
+                str(error) if error else "rules.yaml was rejected; the last good rules stay."
+            )
+        return reply
+
+    def live_engine(self) -> Engine | None:
+        """The engine a new request should use. Reading the rules first picks up an edit of
+        rules.yaml and, through the rebuild hook, swaps in the engine built for it, so the
+        request that notices a change already runs on the new engine (HDW-148)."""
+        self.live_rules  # noqa: B018 - the read is the point: it reloads a changed file
         return self.engine
 
     def tool_context(self) -> ToolContext:
         """What the MCP tools read per call: the live engine and the live rules (HDW-204)."""
         return ToolContext(
-            engine=lambda: self.engine,
+            engine=self.live_engine,
             rules=lambda: self.live_rules,
             db=self.db,
             reload_rules=self.reload_rules or (lambda: None),
@@ -117,8 +175,8 @@ class Daemon:
         }
 
     def status(self) -> dict[str, Any]:
+        rules = self.live_rules  # first: a changed file rebuilds the engine read next
         engine = self.engine
-        rules = self.live_rules
         warm = self.last_keep_warm
         catalog = None
         if engine is not None:
@@ -161,7 +219,7 @@ class Daemon:
         except Exception:
             _log.warning("model refresh failed", exc_info=True)
         if changed or self.engine is None:
-            self.rebuild_engine()
+            self.rebuild_engine()  # a new catalog: read it from disk, keep the rules in force
 
     def keep_warm_once(self) -> KeepWarmResult:
         engine = self.engine
@@ -236,6 +294,7 @@ class Daemon:
             health=self.health,
             status=self.status,
             on_shutdown=self.request_stop,
+            on_reload=self.reload_now,
             mcp_app=endpoint.app,
             mcp_lifespan=endpoint.lifespan,
         )

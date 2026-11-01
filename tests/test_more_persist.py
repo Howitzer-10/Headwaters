@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from headwaters.core import paths
+from headwaters.core.rules import Rules
 from headwaters.core.rules_edit import set_setting
 from headwaters.core.rules_io import load_rules, rules_path
 from headwaters.core.rules_watch import RulesManager
@@ -73,8 +74,7 @@ def test_comments_in_rules_yaml_survive_a_tool_edit(
 def test_the_daemons_tool_context_hands_the_tools_the_database_and_the_reload() -> None:
     reloads: list[int] = []
     daemon = Daemon.__new__(Daemon)  # only tool_context() is exercised: no sockets, no engine
-    daemon.rules = load_rules.__globals__["Rules"]()
-    daemon.rules_source = None
+    daemon.rules_source = Rules
     daemon.engine = None
     daemon.db = object()  # type: ignore[assignment]
     daemon.reload_rules = lambda: reloads.append(1)

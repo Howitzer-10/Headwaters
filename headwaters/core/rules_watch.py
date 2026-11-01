@@ -2,10 +2,16 @@
 
 ``RulesManager.current`` always returns a valid ``Rules``. When an edit is invalid the error
 is logged and kept in ``last_error``; the previous good settings stay active.
+
+The watcher covers an idle daemon. A request never waits for it (HDW-148, FU-131-4): ``current``
+compares the file's ``(mtime_ns, size)`` with the signature of the last read (one ``os.stat``) and
+reloads first when it differs, so a hand edit is seen by the very next read. The signature is
+kept even when the file is invalid, so an unfinished save is parsed once, not on every request.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -63,8 +69,16 @@ class _Handler(FileSystemEventHandler):
                 return
 
 
+Signature = tuple[int, int] | None
+
+
 class RulesManager:
-    """Owns the live ``Rules``; reloads on file change after a quiet period."""
+    """Owns the live ``Rules``; reloads on file change, at the next read or after a quiet period.
+
+    ``on_reload`` may run on any thread that reads ``current`` (a request thread, the watcher
+    timer, the API thread), so it must be safe to call from there. It never runs concurrently
+    with itself, and a reader that arrives while it runs waits for it to finish.
+    """
 
     def __init__(
         self,
@@ -78,15 +92,30 @@ class RulesManager:
         self._debounce_s = debounce_s
         self._on_reload = on_reload
         self._on_error = on_error
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # guards the fields below, held only briefly
+        self._reload_lock = threading.RLock()  # one reload at a time, hook included
         self._timer: threading.Timer | None = None
         self._observer: BaseObserver | None = None
         self._rules = Rules()
+        self._seen: Signature = None  # signature of the file at the last read
+        self._applying = False  # ``on_reload`` is running: readers wait for it
         self.last_error: ConfigError | None = None
         self._load_initial()
 
+    def set_on_reload(self, callback: Callable[[Rules], None] | None) -> None:
+        """Set the hook that runs after new valid rules were applied (the daemon's rebuild)."""
+        self._on_reload = callback
+
+    def _signature(self) -> Signature:
+        try:
+            info = os.stat(paths.long_safe(self.path))
+        except OSError:
+            return None
+        return (info.st_mtime_ns, info.st_size)
+
     def _load_initial(self) -> None:
         ensure_rules_file(self.path)
+        self._seen = self._signature()
         try:
             self._rules = load_rules(self.path)
         except ConfigError as exc:
@@ -98,29 +127,57 @@ class RulesManager:
 
     @property
     def current(self) -> Rules:
+        """The live rules. A file that changed since the last read is read first (one stat)."""
+        if self._applying or self._signature() != self._seen:
+            with self._reload_lock:
+                # Re-check under the lock: another thread may have reloaded while this one waited.
+                if self._signature() != self._seen:
+                    self._reload_locked()
         with self._lock:
             return self._rules
 
     def reload(self) -> bool:
-        """Re-read the file now. Returns True when new valid rules were applied."""
+        """Re-read the file now. Returns True when valid rules are in force after the read."""
+        with self._reload_lock:
+            return self._reload_locked()
+
+    def _reload_locked(self) -> bool:
+        # Signature first: an edit that lands during the read differs next time and is read again.
+        seen = self._signature()
         try:
             fresh = load_rules(self.path)
         except ConfigError as exc:
             with self._lock:
                 self.last_error = exc
+                self._seen = seen
             _log.warning("rules reload rejected, keeping last good config: %s", exc)
-            if self._on_error:
-                self._on_error(exc)
+            self._call_hook(self._on_error, exc)
             return False
         with self._lock:
             changed = fresh != self._rules
+            # ``_applying`` goes up before the new rules and signature are visible, so a reader
+            # that sees them also sees the flag and waits for the hook (the engine rebuild).
+            self._applying = changed and self._on_reload is not None
             self._rules = fresh
             self.last_error = None
+            self._seen = seen
         if changed:
             _log.info("rules reloaded")
-            if self._on_reload:
-                self._on_reload(fresh)
+            try:
+                self._call_hook(self._on_reload, fresh)
+            finally:
+                self._applying = False
         return True
+
+    @staticmethod
+    def _call_hook(hook: Callable[[Any], None] | None, arg: Any) -> None:
+        """A failing hook must never fail the request that happened to trigger the reload."""
+        if hook is None:
+            return
+        try:
+            hook(arg)
+        except Exception:
+            _log.exception("rules hook failed")
 
     def _schedule(self) -> None:
         with self._lock:

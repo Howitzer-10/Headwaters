@@ -103,10 +103,12 @@ def build_app(
     health: JsonProvider,
     status: JsonProvider,
     on_shutdown: Callable[[], None],
+    on_reload: JsonProvider | None = None,
     mcp_app: ASGIApp | None = None,
     mcp_lifespan: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> ASGIApp:
-    """The daemon's ASGI app. ``health`` is public; ``status`` and shutdown need the token."""
+    """The daemon's ASGI app. ``health`` is public; ``status``, reload and shutdown need the
+    token. ``on_reload`` re-reads rules.yaml now and returns the live switches (HDW-148)."""
 
     async def get_health(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, **health()})
@@ -119,9 +121,20 @@ def build_app(
         asyncio.get_running_loop().call_soon(on_shutdown)
         return JSONResponse({"ok": True, "stopping": True})
 
+    async def post_reload(request: Request) -> JSONResponse:
+        if on_reload is None:
+            return JSONResponse({"ok": False, "error": {"code": "not_supported"}}, status_code=501)
+        # The reload parses the file and may rebuild the engine: keep it off the event loop.
+        try:
+            reply = await asyncio.to_thread(on_reload)
+        except Exception:
+            return JSONResponse({"ok": False, "error": {"code": "reload_failed"}}, status_code=500)
+        return JSONResponse({"ok": True, **reply})
+
     routes: list[Route | Mount] = [
         Route(HEALTH_PATH, get_health, methods=["GET"]),
         Route("/v1/status", get_status, methods=["GET"]),
+        Route("/v1/reload", post_reload, methods=["POST"]),
         Route("/v1/shutdown", post_shutdown, methods=["POST"]),
     ]
     if mcp_app is not None:

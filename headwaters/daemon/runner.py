@@ -49,18 +49,21 @@ def run(*, preferred_port: int | None = None) -> int:
         except netports.PortError as exc:
             _log.error("no port available: %s", exc)
             return EXIT_NO_PORT
-        # Watch rules.yaml so ``headwaters private on`` reaches the running router (HDW-131).
+        # Watch rules.yaml so ``headwaters private on`` reaches the running router (HDW-131), and
+        # rebuild the engine whenever new valid rules are applied (HDW-148). The manager also
+        # re-reads a changed file at the next ``current`` read, so a hand edit needs no wait.
         manager = RulesManager()
-        manager.start()
         daemon = Daemon(
-            rules,
             open_database(),
             sock,
             ports,
             load_or_create_token(),
             rules_source=lambda: manager.current,
             reload_rules=manager.reload,
+            rules_error=lambda: manager.last_error,
         )
+        manager.set_on_reload(daemon.on_rules_changed)
+        manager.start()
         try:
             daemon.rebuild_engine()
             asyncio.run(daemon.serve())
