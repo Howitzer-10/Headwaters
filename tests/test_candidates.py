@@ -68,6 +68,17 @@ def test_cloud_candidates_carry_scores_and_no_fit(db: Database) -> None:
     assert found.tier == "free_cloud"
 
 
+def test_unknown_context_uses_catalog_default_and_is_flagged(db: Database) -> None:
+    upsert_model(db, ModelRow("vendor/noctx", "free_cloud", "p", ["text"], ctx=None))
+    upsert_model(db, ModelRow("vendor/ctx", "free_cloud", "p", ["text"], ctx=8192))
+    found = by_id(builder(db, gpu_state())(requirements()))
+    default = load_catalog(REPO_ROOT / SEED_RELATIVE_PATH).unknown_model_defaults.ctx
+    assert found["vendor/noctx"].row.ctx == default
+    assert found["vendor/noctx"].ctx_assumed is True
+    assert found["vendor/ctx"].row.ctx == 8192
+    assert found["vendor/ctx"].ctx_assumed is False
+
+
 def test_local_candidates_get_fit_and_residency(db: Database) -> None:
     add_model(db, "qwen:14b", "local", 80.0, warm=True, size_vram_gb=8.0)
     add_model(db, "other:7b", "local", 60.0)

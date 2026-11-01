@@ -73,6 +73,12 @@ def no_route(
         tips.append(Suggestion("wait", f"Wait about {int(min(etas.values()))}s for a reset."))
     if "ctx_too_small" in codes:
         tips.append(Suggestion("split_task", "Split the task or send less context."))
+    if "ctx_unknown" in codes:
+        tips.append(
+            Suggestion(
+                "set_context", "Set the model's context size in rules.yaml (models.overrides)."
+            )
+        )
     if any(x.startswith("no_fit_") for x in codes) and "local" in req.scope.tiers:
         tips.append(Suggestion("pull_model", "Pull a local model that fits your GPU."))
     if codes & {"no_vision", "no_tools", "no_json"}:

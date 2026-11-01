@@ -17,6 +17,7 @@ API-key presence for paid models, and live ``/api/ps`` calibration.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from headwaters.core.analyzer.requirements import Requirements
 from headwaters.core.catalog.merge import CatalogLookup
@@ -101,14 +102,18 @@ class CandidateBuilder:
                 entry = lookup.find([row.id])
                 if entry is not None and hw is not None:
                     tps = expected_tps_for(entry, hw.profile)
+            # F18: a model that reports no context gets the catalog default, flagged as assumed.
+            assumed = row.ctx is None or row.ctx <= 0
+            shown = replace(row, ctx=self._catalog.unknown_model_defaults.ctx) if assumed else row
             out.append(
                 Candidate(
-                    row,
+                    shown,
                     scores.get(row.id, {}),
                     fit=fit,
                     residency=residency,
                     expected_tps=tps,
                     is_primary=row.id in primary,
+                    ctx_assumed=assumed,
                 )
             )
         return out

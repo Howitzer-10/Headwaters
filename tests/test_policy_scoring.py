@@ -109,7 +109,31 @@ def test_filter_context_needs_headroom() -> None:
     need = hard(min_ctx=10_000)  # needs 12_000 at the default 1.2x
     assert why(hard_filter([cand("a", ctx=11_999)], need, scope(), RULES), "a") == "ctx_too_small"
     assert hard_filter([cand("a", ctx=12_000)], need, scope(), RULES).kept
-    assert why(hard_filter([cand("a", ctx=None)], need, scope(), RULES), "a") == "ctx_too_small"
+    assert why(hard_filter([cand("a", ctx=None)], need, scope(), RULES), "a") == "ctx_unknown"
+
+
+def test_filter_assumed_context_is_unknown_not_too_small() -> None:
+    need = hard(min_ctx=10_000)
+    small = cand("a", ctx=4_096, ctx_assumed=True)
+    assert why(hard_filter([small], need, scope(), RULES), "a") == "ctx_unknown"
+    assert hard_filter([cand("a", ctx=12_000, ctx_assumed=True)], need, scope(), RULES).kept
+
+
+def test_unknown_context_suggestion_is_not_split_task() -> None:
+    from headwaters.core.policy.filters import Rejection
+    from headwaters.core.policy.ladder import no_route
+
+    err = no_route("no_model", "m", (Rejection("a", "ctx_unknown"),), [], _Req())  # type: ignore[arg-type]
+    codes = {s.code for s in err.suggestions}
+    assert "split_task" not in codes
+    assert "set_context" in codes
+
+
+class _Req:
+    class scope:
+        tiers = ALL_TIERS
+        local_only = False
+        active_locks = ()
 
 
 def test_filter_headroom_comes_from_rules() -> None:

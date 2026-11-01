@@ -55,6 +55,7 @@ class Candidate:
     scope_tier: TierName | None = None
     role: Role = "normal"
     is_session: bool = False  # the session's last successful model (D11); not a residency fact
+    ctx_assumed: bool = False  # row.ctx came from unknown_model_defaults, not the model (F18)
 
     @property
     def id(self) -> str:
@@ -76,7 +77,7 @@ class Candidate:
 @dataclass(frozen=True)
 class Rejection:
     model_id: str
-    reason: str  # stable code, e.g. no_vision, no_tools, ctx_too_small, walled, scope
+    reason: str  # stable code, e.g. no_vision, ctx_too_small, ctx_unknown, walled, scope
 
 
 @dataclass(frozen=True)
@@ -112,7 +113,12 @@ def _first_failure(
     if hard.reasoning and c.row.reasoning_ok is not True:
         return "no_reasoning"
     needed = math.ceil(rules.scoring.ctx_headroom * hard.min_ctx)
-    if c.row.ctx is None or c.row.ctx < needed:
+    if c.row.ctx is None or c.ctx_assumed:
+        # Unknown context is not "too small" (F18): the real size is not known.
+        if c.row.ctx is None or c.row.ctx < needed:
+            return "ctx_unknown"
+        return None
+    if c.row.ctx < needed:
         return "ctx_too_small"
     return None
 
