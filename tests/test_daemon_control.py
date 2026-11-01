@@ -182,6 +182,43 @@ def test_start_gives_up_after_the_timeout() -> None:
     assert not result.ok
 
 
+class _FakeProcess:
+    def __init__(self, status: str) -> None:
+        self._status = status
+
+    def status(self) -> str:
+        return self._status
+
+
+def test_pid_alive_treats_a_zombie_as_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Linux CI: a stopped daemon is a zombie child until reaped, and pid_exists still says True."""
+    import psutil
+
+    from headwaters.core.daemon_control import _pid_alive
+
+    monkeypatch.setattr(psutil, "pid_exists", lambda pid: True)
+    monkeypatch.setattr(psutil, "Process", lambda pid: _FakeProcess(psutil.STATUS_ZOMBIE))
+    assert _pid_alive(99) is False
+    monkeypatch.setattr(psutil, "Process", lambda pid: _FakeProcess(psutil.STATUS_SLEEPING))
+    assert _pid_alive(99) is True
+
+
+def test_pid_alive_is_false_for_a_missing_or_vanishing_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    import psutil
+
+    from headwaters.core.daemon_control import _pid_alive
+
+    monkeypatch.setattr(psutil, "pid_exists", lambda pid: False)
+    assert _pid_alive(99) is False
+
+    def vanish(pid: int) -> _FakeProcess:
+        raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(psutil, "pid_exists", lambda pid: True)
+    monkeypatch.setattr(psutil, "Process", vanish)
+    assert _pid_alive(99) is False
+
+
 def test_stop_reports_not_running_and_cleans_a_stale_file() -> None:
     assert stop_daemon(find=lambda: None).outcome == "not_running"
     write_info(INFO)

@@ -118,10 +118,18 @@ def start_daemon(
 
 
 def _pid_alive(pid: int) -> bool:
+    """True while ``pid`` is a running process. A zombie (exited, not yet reaped by its parent)
+    counts as gone: ``psutil.pid_exists`` is still True for it on POSIX, so a daemon started by
+    this process would otherwise look alive after a clean stop."""
     try:
         import psutil
 
-        return bool(psutil.pid_exists(pid))
+        if not psutil.pid_exists(pid):
+            return False
+        try:
+            return bool(psutil.Process(pid).status() != psutil.STATUS_ZOMBIE)
+        except psutil.NoSuchProcess:
+            return False
     except Exception:
         return False
 
