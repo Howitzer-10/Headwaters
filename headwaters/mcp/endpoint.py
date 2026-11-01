@@ -26,6 +26,7 @@ from headwaters.mcp.tools.context import ToolContext
 from headwaters.mcp.tools.frontdoor import register_frontdoor
 from headwaters.mcp.tools.frontdoor_advanced import register_advanced
 from headwaters.mcp.tools.frontdoor_more import register_more
+from headwaters.mcp.tools.frontdoor_prompts import register_prompts
 from headwaters.mcp.tools.frontdoor_run import register_run
 from headwaters.mcp.tools.guarded import Gate
 
@@ -71,6 +72,7 @@ def build_endpoint(
         register_run(mcp, tools, Gate(tools))
         register_more(mcp, tools, disclosure, summaries)
         register_advanced(mcp, tools)
+        register_prompts(mcp)
         mcp.middleware.append(disclosure)
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host="127.0.0.1")
     return McpEndpoint(app=app, lifespan=mcp.session_manager.run)

@@ -23,6 +23,7 @@ class FakeUpstream:
         self.metas: list[Any] = []
         self.list_metas: list[Any] = []
         self.reads: list[str] = []
+        self.prompt_gets: list[tuple[str, dict[str, str] | None]] = []
         self.fail: Exception | None = None
         self.progress: list[str] = []
         self.tool_description = "status"
@@ -69,6 +70,22 @@ class FakeUpstream:
             raise self.fail
         template = types.ResourceTemplate(name="r", uri_template="headwaters://result/{result_id}")
         return types.ListResourceTemplatesResult(resource_templates=[template])
+
+    async def list_prompts(self, *, cursor: str | None = None) -> types.ListPromptsResult:
+        if self.fail is not None:
+            raise self.fail
+        return types.ListPromptsResult(prompts=[types.Prompt(name="headwaters-status")])
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None
+    ) -> types.GetPromptResult:
+        self.prompt_gets.append((name, arguments))
+        if self.fail is not None:
+            raise self.fail
+        text = types.TextContent(type="text", text="do it")
+        return types.GetPromptResult(
+            description="d", messages=[types.PromptMessage(role="user", content=text)]
+        )
 
     async def read_resource(self, uri: str) -> types.ReadResourceResult:
         self.reads.append(uri)

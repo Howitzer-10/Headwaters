@@ -147,11 +147,32 @@ def build_shim_server(link: DaemonLink) -> Server[Any]:
             raise MCPError(INTERNAL_ERROR, _unavailable_text(exc)) from exc
         return types.ReadResourceResult(contents=read.contents)
 
+    async def on_list_prompts(
+        ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None
+    ) -> types.ListPromptsResult:
+        cursor = params.cursor if params is not None else None
+        try:
+            listed = await link.call(lambda c: c.list_prompts(cursor=cursor), retry=True)
+        except DaemonUnavailable as exc:
+            raise MCPError(INTERNAL_ERROR, _unavailable_text(exc)) from exc
+        return types.ListPromptsResult(prompts=listed.prompts, next_cursor=listed.next_cursor)
+
+    async def on_get_prompt(
+        ctx: ServerRequestContext[Any], params: types.GetPromptRequestParams
+    ) -> types.GetPromptResult:
+        try:
+            got = await link.call(lambda c: c.get_prompt(params.name, params.arguments), retry=True)
+        except DaemonUnavailable as exc:
+            raise MCPError(INTERNAL_ERROR, _unavailable_text(exc)) from exc
+        return types.GetPromptResult(description=got.description, messages=got.messages)
+
     return Server(
         SERVER_NAME,
         version=headwaters.__version__,
         on_list_tools=on_list_tools,
         on_call_tool=on_call_tool,
+        on_list_prompts=on_list_prompts,
+        on_get_prompt=on_get_prompt,
         on_list_resources=on_list_resources,
         on_list_resource_templates=on_list_resource_templates,
         on_read_resource=on_read_resource,
