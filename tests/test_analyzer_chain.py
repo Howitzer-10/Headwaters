@@ -67,8 +67,9 @@ def test_chain_falls_through_when_layer2_crashes(base: Analyzer) -> None:
 
 
 def test_resolve_classifier_model(catalog: Catalog) -> None:
-    assert resolve_classifier_model(catalog, LocalTier()) == "example-local-vision:7b"
-    assert resolve_classifier_model(catalog, LocalTier(profile="desktop_16gb")) is None
+    assert resolve_classifier_model(catalog, LocalTier()) == "example-local-tiny:1b"
+    desktop = LocalTier(profile="desktop_16gb")
+    assert resolve_classifier_model(catalog, desktop) == "example-local-tiny:1b"
     explicit = LocalTier(classifier=ClassifierRules(model="my-tiny:1b"))
     assert resolve_classifier_model(catalog, explicit) == "my-tiny:1b"
 
@@ -77,7 +78,6 @@ def test_build_chain_wires_layer3_and_can_disable(catalog: Catalog) -> None:
     chain = build_chain(catalog, LocalTier(), client=FakeClient(answer()))
     assert [layer.name for layer in chain.layers] == ["tiny_llm"]
     assert not build_chain(catalog, LocalTier(), enable_layer3=False).layers
-    assert not build_chain(catalog, LocalTier(profile="desktop_16gb")).layers
 
 
 @pytest.mark.parametrize(

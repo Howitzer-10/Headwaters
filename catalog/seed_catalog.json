@@ -73,6 +73,21 @@
       "scores": {"vision": 0.6, "chat": 0.5},
       "expected_tps": {"laptop_12gb": 45.0, "desktop_16gb": 60.0},
       "verify": true
+    },
+    {
+      "id": "example-local-tiny:1b",
+      "aliases": [],
+      "tier_hints": ["local"],
+      "provider": "ollama",
+      "modalities": ["text"],
+      "tools_ok": false,
+      "json_ok": true,
+      "ctx": 8192,
+      "size_gb": 1.0,
+      "arch": {"n_layers": 16, "n_kv_heads": 8, "head_dim": 64},
+      "scores": {"chat": 0.3, "extract": 0.3},
+      "expected_tps": {"laptop_12gb": 150.0, "desktop_16gb": 200.0},
+      "verify": true
     }
   ],
   "free_limits": [
@@ -98,7 +113,11 @@
     {"provider": "opencode", "status_codes": [429], "body_regex": "(?i)FreeUsageLimitError|rate limit", "kind": "rate_limit", "scope": "provider", "verify": true}
   ],
   "placeholder_patterns": [
-    {"name": "example-placeholder", "regex": "(?i)\\byour[_-]?api[_-]?key\\b", "verify": true}
+    {"name": "example-placeholder", "regex": "(?i)\\byour[_-]?api[_-]?key\\b", "verify": true},
+    {"name": "lazy-rest-of-code", "regex": "(?i)\\brest of (the )?code\\b", "verify": true},
+    {"name": "lazy-existing-code-comment", "regex": "(?i)(//|#|/\\*|<!--|--)\\s*(\\.{3}\\s*)?(existing|previous|unchanged) code\\b", "verify": true},
+    {"name": "lazy-remaining-ellipsis", "regex": "(?i)(\\.{3}|\\u2026)\\s*\\(?remaining\\b", "verify": true},
+    {"name": "lazy-todo-implement", "regex": "(?i)\\bTODO:?\\s*implement\\b", "verify": true}
   ],
   "ollama_remote_patterns": [
     {"name": "ollama-cloud-tag", "regex": "(?i)[:-]cloud$", "verify": true}
@@ -110,7 +129,7 @@
         "agentic_coder": ["example-local:14b"],
         "general": ["example-local:14b"],
         "vision": ["example-local-vision:7b"],
-        "classifier": ["example-local-vision:7b"]
+        "classifier": ["example-local-tiny:1b"]
       }
     },
     "desktop_16gb": {
@@ -118,7 +137,8 @@
       "recommended": {
         "agentic_coder": ["example-local:14b"],
         "general": ["example-local:14b"],
-        "vision": ["example-local-vision:7b"]
+        "vision": ["example-local-vision:7b"],
+        "classifier": ["example-local-tiny:1b"]
       }
     }
   },
