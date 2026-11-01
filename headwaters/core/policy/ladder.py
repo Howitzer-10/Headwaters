@@ -103,7 +103,10 @@ def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) 
 
     ladder: list[Entry] = []
     if strategy == "primary_first":
-        ladder += [e for e in paid if e[1].meets_floor]
+        # F13 (HDW-132): every usable primary leads, even below the floor (the decision then
+        # carries ``below_floor`` and mandatory verification); openrouter/auto only if it passes.
+        ladder += _entries(primaries, "paid")
+        ladder += _entries(auto, "paid", True)
     ladder += cheap_ok
     if not cheap_ok and ctx.escalation is not None and verifiable and cheap_low:
         near = cheap_low[0]

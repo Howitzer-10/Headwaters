@@ -106,6 +106,17 @@ CASES: list[Case] = [
         {"model": "paid1", "rung": "paid", "fallbacks": ["orauto", "loc14", "free1"]},
     ),
     (
+        "primary-first-below-floor-still-first",
+        {"strategy": "primary_first", "mods": {"paid1": {"scores": {"code": 75.0}}}},
+        {
+            "model": "paid1",
+            "rung": "paid",
+            "below": True,
+            "verify": True,
+            "fallbacks": ["orauto", "loc14", "free1"],
+        },
+    ),
+    (
         "primary-first-walled-uses-auto",
         {"strategy": "primary_first", "mods": {"paid1": {"availability": COOLDOWN}}},
         {"model": "orauto", "rung": "paid"},
