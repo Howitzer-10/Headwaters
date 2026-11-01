@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "do-diff",
+      "prompt": "Change run() in app.py so it returns 2 instead of 1, and give me a diff.",
+      "expected_tool": "headwaters_do",
+      "gold_arguments": {"task": "make run() return 2", "paths": ["app.py"], "want": "diff"},
+      "required_args": ["task", "paths", "want"]
+    },
+    {
+      "id": "do-write",
+      "prompt": "Write a function that adds two numbers.",
+      "expected_tool": "headwaters_do",
+      "gold_arguments": {"task": "write a function that adds two numbers"},
+      "required_args": ["task"]
+    },
+    {
+      "id": "ask-explain",
+      "prompt": "Explain what run() in app.py does. Do not change anything.",
+      "expected_tool": "headwaters_ask",
+      "gold_arguments": {"question": "what does run() do?", "paths": ["app.py"]},
+      "required_args": ["question", "paths"]
+    },
+    {
+      "id": "check-diff",
+      "prompt": "Before I apply this patch, check that it is sound: --- a/app.py +++ b/app.py",
+      "expected_tool": "headwaters_check",
+      "gold_arguments": {
+        "diff": "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def run():\n-    return 1\n+    return 2\n"
+      },
+      "required_args": ["diff"]
+    },
+    {
+      "id": "check-code",
+      "prompt": "Is this Python snippet syntactically valid? def f(): return 1",
+      "expected_tool": "headwaters_check",
+      "gold_arguments": {"code": "def f():\n    return 1\n", "language": "python"},
+      "required_args": ["code"]
+    },
+    {
+      "id": "think-lock",
+      "prompt": "Think hard: why can two threads deadlock when they take locks A and B in different order?",
+      "expected_tool": "headwaters_think",
+      "gold_arguments": {"question": "why can two threads deadlock on locks A and B?"},
+      "required_args": ["question"]
+    },
+    {
+      "id": "status-why",
+      "prompt": "My last request was refused. Which scope am I in, and why?",
+      "expected_tool": "headwaters_status",
+      "gold_arguments": {}
+    },
+    {
+      "id": "scope-local",
+      "prompt": "Keep everything on local models from now on.",
+      "expected_tool": "headwaters_scope",
+      "gold_arguments": {"scope": "local"},
+      "required_args": ["scope"]
+    },
+    {
+      "id": "handoff-fix",
+      "prompt": "I am switching models. Save a packet so the next one can carry on fixing the flaky test.",
+      "expected_tool": "headwaters_handoff",
+      "gold_arguments": {"goal": "fix the flaky test", "paths": ["app.py"]},
+      "required_args": ["goal"]
+    },
+    {
+      "id": "more-tools",
+      "prompt": "What other Headwaters tools can I turn on, like pinning a model?",
+      "expected_tool": "headwaters_more",
+      "gold_arguments": {}
+    }
+  ]
+}
