@@ -11,7 +11,6 @@ from headwaters.core.policy.types import Entry, PolicyContext, PolicyRequest, Ru
 from headwaters.core.scope import TierName
 
 _CHEAP_TIERS: frozenset[TierName] = frozenset({"local", "free_cloud"})
-_VERIFIABLE_TASKS = frozenset({"code"})  # plus any request that asks for JSON
 
 
 def _entries(
@@ -113,7 +112,7 @@ def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) 
     paid = _entries(primaries, "paid") + _entries(auto, "paid")
     cheap_ok = _entries(cheap, "cheap", True)
     cheap_low = _entries(cheap, "best_effort", False)
-    verifiable = soft.task in _VERIFIABLE_TASKS or reqs.hard.json
+    verifiable = soft.task in rules.floors.verifiable_tasks or reqs.hard.json
 
     ladder: list[Entry] = []
     if strategy == "primary_first":

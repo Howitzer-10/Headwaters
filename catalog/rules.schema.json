@@ -217,6 +217,13 @@
             "per_complexity": 3
           }
         },
+        "verifiable_tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verifiable Tasks",
+          "type": "array"
+        },
         "vision": {
           "$ref": "#/$defs/FloorRule",
           "default": {
@@ -322,6 +329,14 @@
         "classifier": {
           "$ref": "#/$defs/ClassifierRules"
         },
+        "ctx_steps": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Ctx Steps",
+          "type": "array"
+        },
         "host": {
           "default": "http://localhost:11434",
           "title": "Host",
@@ -342,6 +357,12 @@
           "title": "Kv Cache Type",
           "type": "string"
         },
+        "offload_weight_factor": {
+          "default": 2.0,
+          "minimum": 1,
+          "title": "Offload Weight Factor",
+          "type": "number"
+        },
         "on_battery": {
           "default": "prefer_cloud",
           "enum": [
@@ -351,6 +372,12 @@
           ],
           "title": "On Battery",
           "type": "string"
+        },
+        "overhead_gb": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Overhead Gb",
+          "type": "number"
         },
         "profile": {
           "default": "auto",

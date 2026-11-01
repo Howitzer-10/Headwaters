@@ -61,9 +61,16 @@ def _entry_for(row: ModelRow) -> ModelEntry:
     )
 
 
-def fit_for_row(row: ModelRow, budget_gb: float, est_tokens: int, kv_type: str) -> FitResult:
-    """Fit of one local model on ``budget_gb`` of VRAM for a request of ``est_tokens``."""
-    return evaluate_fit(_entry_for(row), budget_gb, est_tokens, FitConfig(kv_type=kv_type))
+def fit_for_row(
+    row: ModelRow, budget_gb: float, est_tokens: int, cfg: FitConfig | str
+) -> FitResult:
+    """Fit of one local model on ``budget_gb`` of VRAM for a request of ``est_tokens``.
+
+    ``cfg`` is a ``FitConfig`` (from rules), or a bare KV type for the default tunables.
+    """
+    if isinstance(cfg, str):
+        cfg = FitConfig(kv_type=cfg)
+    return evaluate_fit(_entry_for(row), budget_gb, est_tokens, cfg)
 
 
 class CandidateBuilder:
@@ -126,7 +133,7 @@ class CandidateBuilder:
         loaded: list[LoadedModel],
     ) -> tuple[FitResult, ResidencyInputs]:
         budget = hw.budget_gb if hw is not None else 0.0
-        fit = fit_for_row(row, budget, est_tokens, self._rules.tiers.local.kv_cache_type)
+        fit = fit_for_row(row, budget, est_tokens, FitConfig.from_rules(self._rules))
         needed = fit.weights_gb + fit.kv_gb if fit.usable else (row.size_gb or 0.0)
         config = ResidencyConfig(
             max_loaded_models=default_max_loaded(hw.profile if hw is not None else "custom")

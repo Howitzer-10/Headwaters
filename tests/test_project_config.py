@@ -5,11 +5,9 @@ import pytest
 from headwaters.core.project_config import (
     PROJECT_FILE_NAME,
     ProjectConfig,
-    effective_scope,
     find_project_file,
     load_project_config,
 )
-from headwaters.core.rules import Rules
 from headwaters.core.rules_io import ConfigError
 
 
@@ -53,23 +51,3 @@ def test_invalid_project_config(tmp_path: Path, text: str) -> None:
     (tmp_path / PROJECT_FILE_NAME).write_text(text, encoding="utf-8")
     with pytest.raises(ConfigError):
         load_project_config(tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("scope", "privacy", "expected"),
-    [
-        ("auto", "any", "auto"),
-        ("cloud", "any", "cloud"),
-        ("auto", "free", "free"),
-        ("cloud", "free", "free"),
-        ("auto", "local", "local"),
-        ("free", "local", "local"),
-        ("local", "any", "local"),  # never loosened
-        ("local", "free", "local"),
-        ("free", "free", "free"),
-    ],
-)
-def test_privacy_only_tightens(scope: str, privacy: str, expected: str) -> None:
-    rules = Rules.model_validate({"default_scope": scope})
-    project = ProjectConfig.model_validate({"privacy": privacy})
-    assert effective_scope(rules, project) == expected

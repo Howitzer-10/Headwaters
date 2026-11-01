@@ -78,6 +78,12 @@ class LocalTier(_Model):
     keep_warm_model: str = "auto"
     classifier: ClassifierRules = Field(default_factory=ClassifierRules)
     on_battery: Literal["prefer_cloud", "normal", "local_only"] = "prefer_cloud"
+    # Fit math (HDW-138): num_ctx steps, VRAM overhead, and how far weights may spill.
+    ctx_steps: list[int] = Field(
+        default_factory=lambda: [8192, 16384, 24576, 32768, 49152, 65536], min_length=1
+    )
+    overhead_gb: float = Field(default=1.0, ge=0)
+    offload_weight_factor: float = Field(default=2.0, ge=1)
 
 
 class TiersRules(_Model):
@@ -105,6 +111,8 @@ class FloorsRules(_Model):
     agentic_bonus: int = Field(default=15, ge=0)
     high_risk_bonus: int = Field(default=10, ge=0)
     optimistic_margin: int = Field(default=8, ge=0)
+    # Tasks whose answers can be checked mechanically (a JSON request always counts too).
+    verifiable_tasks: list[str] = Field(default_factory=lambda: ["code"])
 
 
 class StrategyWeights(_Model):

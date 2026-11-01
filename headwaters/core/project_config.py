@@ -11,15 +11,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from headwaters.core import paths
-from headwaters.core.rules import Rules
 from headwaters.core.rules_io import ConfigError, format_validation_error, read_yaml_mapping
 
 PROJECT_FILE_NAME = ".headwaters.yaml"
 
 Privacy = Literal["local", "free", "any"]
-# Higher = tighter.
-_PRIVACY_RANK: dict[str, int] = {"any": 0, "free": 1, "local": 2}
-# Scopes a privacy level still allows (rules.default_scope values).
 _SCOPE_RANK: dict[str, int] = {"auto": 0, "cloud": 0, "free": 1, "local": 2}
 
 
@@ -52,14 +48,3 @@ def load_project_config(workspace: Path) -> tuple[ProjectConfig, Path | None]:
         return ProjectConfig.model_validate(data), found
     except ValidationError as exc:
         raise ConfigError(found, format_validation_error(exc)) from exc
-
-
-def effective_scope(rules: Rules, project: ProjectConfig) -> str:
-    """Default scope after the project rule is applied (tighten only, never loosen).
-
-    ``private_lock`` and the other locks are resolved by the policy layer, not here.
-    """
-    scope = rules.default_scope
-    if _PRIVACY_RANK[project.privacy] > _SCOPE_RANK[scope]:
-        return project.privacy
-    return scope

@@ -14,25 +14,36 @@ from dataclasses import dataclass
 from typing import Literal
 
 from headwaters.core.catalog.schema import Arch, ModelEntry
+from headwaters.core.rules import Rules
 
 GIB = 1024**3
 KV_BYTES_PER_ELEM: Mapping[str, float] = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5}
 DEFAULT_KV_TYPE = "f16"  # unknown type: assume the biggest (safe)
-CTX_STEPS: tuple[int, ...] = (8192, 16384, 24576, 32768, 49152, 65536)
-CTX_HEADROOM = 1.2  # num_ctx must be >= 1.2 x estimated prompt tokens
 GB_TO_GIB = 1e9 / 1024**3
-DEFAULT_OVERHEAD_GB = 1.0  # v3 section 7.1 says 0.5-1.0; top of range = safe
-DEFAULT_OFFLOAD_WEIGHT_FACTOR = 2.0  # weights up to 2x the GPU budget run (slowly) offloaded
 
 FitStatus = Literal["fits", "offload", "no_fit"]
 
 
 @dataclass(frozen=True)
 class FitConfig:
+    """Fit tunables. Defaults match ``rules.tiers.local`` / ``rules.scoring`` (HDW-138)."""
+
     kv_type: str = "q8_0"
-    overhead_gb: float = DEFAULT_OVERHEAD_GB
-    offload_weight_factor: float = DEFAULT_OFFLOAD_WEIGHT_FACTOR
-    ctx_steps: tuple[int, ...] = CTX_STEPS
+    overhead_gb: float = 1.0
+    offload_weight_factor: float = 2.0
+    ctx_steps: tuple[int, ...] = (8192, 16384, 24576, 32768, 49152, 65536)
+    ctx_headroom: float = 1.2  # num_ctx must be >= headroom x estimated prompt tokens
+
+    @classmethod
+    def from_rules(cls, rules: Rules) -> FitConfig:
+        local = rules.tiers.local
+        return cls(
+            kv_type=local.kv_cache_type,
+            overhead_gb=local.overhead_gb,
+            offload_weight_factor=local.offload_weight_factor,
+            ctx_steps=tuple(sorted(local.ctx_steps)),
+            ctx_headroom=rules.scoring.ctx_headroom,
+        )
 
 
 @dataclass(frozen=True)
@@ -92,8 +103,8 @@ class WeightsCalibration:
             return self._weights_gb.get(model_id)
 
 
-def _need_tokens(est_tokens: int) -> int:
-    return math.ceil(CTX_HEADROOM * max(0, est_tokens))
+def _need_tokens(est_tokens: int, headroom: float) -> int:
+    return math.ceil(headroom * max(0, est_tokens))
 
 
 def evaluate_fit(
@@ -113,7 +124,7 @@ def evaluate_fit(
     observed = calibration.get(mid) if calibration else None
     weights = observed if observed is not None else entry.size_gb * GB_TO_GIB
     calibrated = observed is not None
-    need = _need_tokens(est_tokens)
+    need = _need_tokens(est_tokens, cfg.ctx_headroom)
     ctx_cap = entry.ctx
     steps = [s for s in cfg.ctx_steps if ctx_cap is None or s <= ctx_cap]
     cont = max_ctx_tokens(arch, weights, budget_gb, cfg)

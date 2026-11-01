@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, get_args
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -16,12 +17,35 @@ from watchdog.observers.api import BaseObserver
 
 from headwaters.core import paths
 from headwaters.core.logging import get_logger
-from headwaters.core.rules import Rules
-from headwaters.core.rules_io import ConfigError, ensure_rules_file, load_rules, rules_path
+from headwaters.core.rules import Rules, Scope
+from headwaters.core.rules_io import (
+    ConfigError,
+    ensure_rules_file,
+    load_rules,
+    read_yaml_mapping,
+    rules_path,
+)
 
 DEFAULT_DEBOUNCE_S = 0.3
 
 _log = get_logger("rules")
+
+
+def _fail_safe_rules(path: Path) -> tuple[Rules, str]:
+    """Rules for an unreadable ``rules.yaml``: keep any valid lock/scope value, else go local."""
+    try:
+        data = read_yaml_mapping(path)
+    except ConfigError:
+        data = {}
+    kept: dict[str, Any] = {}
+    for key in ("private_lock", "airplane"):
+        if isinstance(data.get(key), bool):
+            kept[key] = data[key]
+    if data.get("default_scope") in get_args(Scope):
+        kept["default_scope"] = data["default_scope"]
+    if not kept:
+        return Rules(default_scope="local"), "no setting could be read; starting in local scope"
+    return Rules.model_validate(kept), f"keeping {', '.join(sorted(kept))} and defaults"
 
 
 class _Handler(FileSystemEventHandler):
@@ -66,9 +90,11 @@ class RulesManager:
         try:
             self._rules = load_rules(self.path)
         except ConfigError as exc:
-            # No previous good config exists: run on built-in defaults and report.
+            # No previous good config exists (F27): keep what can be read of the safety
+            # settings; if nothing can be read, start in local scope and say why.
             self.last_error = exc
-            _log.error("rules invalid at startup, using defaults: %s", exc)
+            self._rules, note = _fail_safe_rules(self.path)
+            _log.error("rules invalid at startup, %s: %s", note, exc)
 
     @property
     def current(self) -> Rules:

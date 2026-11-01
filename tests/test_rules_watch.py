@@ -70,11 +70,11 @@ def test_rapid_writes_are_debounced(manager: RulesManager) -> None:
     assert len(manager.reloads) <= 2  # type: ignore[attr-defined]
 
 
-def test_invalid_at_startup_uses_defaults(tmp_path: Path) -> None:
+def test_invalid_at_startup_starts_local(tmp_path: Path) -> None:
     target = tmp_path / "rules.yaml"
     target.write_text("gateway:\n  port: 0\n", encoding="utf-8")
     m = RulesManager(target)
-    assert m.current == Rules()
+    assert m.current == Rules(default_scope="local")
     assert m.last_error is not None
     assert "gateway.port" in str(m.last_error)
 
