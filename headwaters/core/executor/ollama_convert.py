@@ -12,9 +12,11 @@ from headwaters.core.executor.types import BackendRequest, Delta, Message, ToolC
 _DATA_URL_MARK = ";base64,"
 
 
-def _text_and_images(content: object) -> tuple[str, list[str]]:
-    """OpenAI content (string or parts) -> (text, base64 images). Remote image URLs are dropped:
-    fetching them would be network egress that the executor does not control."""
+def _text_and_images(content: object, model: str = "") -> tuple[str, list[str]]:
+    """OpenAI content (string or parts) -> (text, base64 images). A non-``data:`` image URL is
+    refused with ``image_url_not_local`` (HDW-135): fetching it would be network egress the
+    executor does not control, and dropping it would let the model answer about an image it
+    never saw. Nothing is fetched and the URL is never put in the error."""
     if content is None:
         return "", []
     if isinstance(content, str):
@@ -32,6 +34,12 @@ def _text_and_images(content: object) -> tuple[str, list[str]]:
                 raw = url.get("url", "") if isinstance(url, Mapping) else str(url or "")
                 if raw.startswith("data:") and _DATA_URL_MARK in raw:
                     images.append(raw.split(_DATA_URL_MARK, 1)[1])
+                else:
+                    raise ExecutorError(
+                        "image_url_not_local",
+                        "A local model cannot fetch a remote image; send it as a data: URL.",
+                        model=model,
+                    )
     return "".join(texts), images
 
 
@@ -47,13 +55,13 @@ def _arguments_object(value: object) -> dict[str, Any]:
     return {}
 
 
-def to_ollama_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
+def to_ollama_messages(messages: Sequence[Message], model: str = "") -> list[dict[str, Any]]:
     """Convert OpenAI-style chat messages to Ollama's native shape."""
     names: dict[str, str] = {}
     out: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role", "user"))
-        text, images = _text_and_images(message.get("content"))
+        text, images = _text_and_images(message.get("content"), model)
         item: dict[str, Any] = {"role": role, "content": text}
         if images:
             item["images"] = images
@@ -94,7 +102,7 @@ def build_payload(request: BackendRequest) -> dict[str, Any]:
         options["num_predict"] = request.options.max_tokens
     payload: dict[str, Any] = {
         "model": target.route,
-        "messages": to_ollama_messages(request.messages),
+        "messages": to_ollama_messages(request.messages, target.model_id),
         "stream": True,
         "options": options,
         "keep_alive": request.keep_alive,

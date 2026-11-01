@@ -4,23 +4,45 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from headwaters.core.executor.errors import ExecutorError
 from headwaters.core.executor.ollama_convert import parse_line, to_ollama_messages
 
 
-def test_images_are_inlined_and_remote_urls_dropped() -> None:
+def test_data_url_images_are_inlined() -> None:
     messages: list[dict[str, Any]] = [
         {
             "role": "user",
             "content": [
                 {"type": "text", "text": "what is this"},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
-                {"type": "image_url", "image_url": {"url": "https://remote.example/x.png"}},
             ],
         }
     ]
     assert to_ollama_messages(messages) == [
         {"role": "user", "content": "what is this", "images": ["QUJD"]}
     ]
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "image_url", "image_url": {"url": "https://remote.example/x.png"}},
+        {"type": "image_url", "image_url": "http://remote.example/x.png"},
+        {"type": "image_url", "image_url": {"url": "data:image/png,notbase64"}},
+    ],
+)
+def test_non_data_image_url_is_refused_without_the_url(part: dict[str, Any]) -> None:
+    messages: list[dict[str, Any]] = [
+        {"role": "user", "content": [{"type": "text", "text": "x"}, part]}
+    ]
+    with pytest.raises(ExecutorError) as info:
+        to_ollama_messages(messages, "qwen")
+    assert info.value.code == "image_url_not_local"
+    assert info.value.model == "qwen"
+    assert info.value.before_first_token is True
+    assert "remote.example" not in info.value.message
 
 
 def test_assistant_tool_calls_and_tool_results() -> None:

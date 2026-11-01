@@ -52,6 +52,47 @@ def test_payload_requires_computed_num_ctx() -> None:
     assert info.value.code == "missing_num_ctx"
 
 
+def _image_request(url: str) -> BackendRequest:
+    content = [{"type": "image_url", "image_url": {"url": url}}]
+    target = ExecTarget("qwen", "ollama", "qwen2.5-vl:7b", num_ctx=8192)
+    return BackendRequest(target, [{"role": "user", "content": content}], None, ExecOptions(), "5m")
+
+
+def test_remote_image_is_refused_and_nothing_is_sent_or_fetched() -> None:
+    hits: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        hits.append(str(req.url))
+        return httpx.Response(200, content=ndjson({"done": True}))
+
+    backend = OllamaBackend("http://127.0.0.1:11434", transport=httpx.MockTransport(handler))
+
+    async def go() -> list[Delta]:
+        return [d async for d in backend.stream(_image_request("https://remote.example/x.png"))]
+
+    with pytest.raises(ExecutorError) as info:
+        asyncio.run(go())
+    assert info.value.code == "image_url_not_local"
+    assert hits == []  # not even the local /api/chat call, and no fetch of the image
+
+
+def test_data_url_image_is_sent_to_the_local_model() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, content=ndjson({"message": {"content": "ok"}, "done": True}))
+
+    backend = OllamaBackend("http://127.0.0.1:11434", transport=httpx.MockTransport(handler))
+
+    async def go() -> list[Delta]:
+        return [d async for d in backend.stream(_image_request("data:image/png;base64,QUJD"))]
+
+    asyncio.run(go())
+    assert len(seen) == 1
+    assert seen[0]["messages"][0]["images"] == ["QUJD"]
+
+
 def test_streaming_separates_thinking_from_content_and_reports_usage() -> None:
     seen: list[dict[str, Any]] = []
 
