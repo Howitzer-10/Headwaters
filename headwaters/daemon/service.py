@@ -26,6 +26,7 @@ from headwaters.core.rules import Rules, RulesProvider
 from headwaters.core.state import Database
 from headwaters.gateway.server import HttpServer, build_app
 from headwaters.mcp.endpoint import build_endpoint
+from headwaters.mcp.tools.context import ToolContext
 
 __all__ = ["Daemon", "pick_ports", "run_in_daemon_thread"]
 
@@ -92,6 +93,10 @@ class Daemon:
         catalog, source = updater.load_active()
         self.engine = build_engine(lambda: self.live_rules, catalog, source, self.db)
         return self.engine
+
+    def tool_context(self) -> ToolContext:
+        """What the MCP tools read per call: the live engine and the live rules (HDW-204)."""
+        return ToolContext(engine=lambda: self.engine, rules=lambda: self.live_rules)
 
     # ------------------------------------------------------------------ http payloads
 
@@ -211,7 +216,7 @@ class Daemon:
 
     async def serve(self) -> None:
         self._stop = asyncio.Event()
-        endpoint = build_endpoint(headwaters.__version__)
+        endpoint = build_endpoint(headwaters.__version__, tools=self.tool_context())
         app = build_app(
             token=self.token,
             health=self.health,

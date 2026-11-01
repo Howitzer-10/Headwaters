@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import httpx2
 from mcp import Client, MCPError
@@ -22,6 +21,7 @@ from headwaters.core.daemon_client import DaemonClient, find_running
 from headwaters.core.daemon_control import ControlResult, start_daemon
 from headwaters.core.daemon_info import read_token
 from headwaters.core.logging import get_logger
+from headwaters.mcp.threads import run_blocking
 
 __all__ = [
     "DaemonLink",
@@ -44,51 +44,20 @@ class DaemonUnavailable(Exception):
     """The shared daemon could not be reached or started. The message is safe to show."""
 
 
-def _deliver(future: asyncio.Future[Any], value: Any, error: BaseException | None) -> None:
-    if future.done():  # the waiter was cancelled
-        return
-    if error is not None:
-        future.set_exception(error)
-    else:
-        future.set_result(value)
-
-
-async def _in_thread(fn: Callable[[], T]) -> T:
-    """Run a blocking call on a daemon thread.
-
-    Not ``asyncio.to_thread``: that uses the default executor, which ``asyncio.run`` joins at
-    exit, so a shim closed while the daemon is still starting would hang for the start timeout.
-    """
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[T] = loop.create_future()
-
-    def work() -> None:
-        try:
-            value = fn()
-            error: BaseException | None = None
-        except BaseException as exc:
-            value, error = None, exc
-        with contextlib.suppress(RuntimeError):  # the loop is already closed
-            loop.call_soon_threadsafe(_deliver, future, value, error)
-
-    threading.Thread(target=work, daemon=True, name="headwaters-shim-worker").start()
-    return await future
-
-
 async def ensure_daemon(
     *,
     find: Callable[[], DaemonClient | None] = find_running,
     start: Callable[[], ControlResult] = start_daemon,
 ) -> DaemonClient:
     """A client for the live daemon; start the daemon first if it is not running."""
-    client = await _in_thread(find)
+    client = await run_blocking(find)
     if client is not None:
         return client
     _log.info("daemon not running, starting it")
-    result = await _in_thread(start)
+    result = await run_blocking(start)
     if not result.ok:
         raise DaemonUnavailable(result.message)
-    client = await _in_thread(find)
+    client = await run_blocking(find)
     if client is None:
         raise DaemonUnavailable("The daemon started but does not answer.")
     return client

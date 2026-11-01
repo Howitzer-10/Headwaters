@@ -110,7 +110,11 @@ def test_two_mcp_clients_connect_to_the_same_endpoint(live_home: Path) -> None:
         http = httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"})
         async with http, Client(streamable_http_client(daemon.info.mcp_url, http_client=http)) as c:
             tools = await c.list_tools()
-            assert tools.tools == []  # tools arrive with HDW-202
+            assert sorted(t.name for t in tools.tools) == [
+                "headwaters_ask",
+                "headwaters_check",
+                "headwaters_do",
+            ]  # the front-door tools of HDW-204; HDW-205 adds the rest
             return name
 
     async def both() -> list[str]:

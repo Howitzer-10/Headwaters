@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -27,6 +28,7 @@ from headwaters.core import paths
 from headwaters.core.logging import configure_logging
 from headwaters.core.stdio import configure_utf8, guard_stdout
 from headwaters.mcp.link import DaemonLink, DaemonUnavailable
+from headwaters.mcp.meta import META_CWD
 
 __all__ = ["build_shim_server", "main", "serve_stdio"]
 
@@ -42,8 +44,17 @@ def _unavailable_text(exc: DaemonUnavailable) -> str:
     )
 
 
+def workdir() -> str:
+    """The shim's working directory: a host starts the shim in the project folder."""
+    return os.getcwd()
+
+
 def build_shim_server(link: DaemonLink) -> Server[Any]:
-    """The low-level MCP server whose handlers forward to the daemon through ``link``."""
+    """The low-level MCP server whose handlers forward to the daemon through ``link``.
+
+    Tool calls carry ``headwaters/cwd`` in their ``_meta`` (the workspace boundary when nothing is
+    configured, D9). Resources are forwarded too, so a ``headwaters://result/<id>`` link works.
+    """
 
     async def on_list_tools(
         ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None
@@ -58,19 +69,55 @@ def build_shim_server(link: DaemonLink) -> Server[Any]:
     async def on_call_tool(
         ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
     ) -> types.CallToolResult:
+        # The daemon is shared, so it cannot know this host's project folder: say it (D9).
+        meta: Any = {META_CWD: workdir()}
         try:
-            return await link.call(lambda c: c.call_tool(params.name, params.arguments))
+            return await link.call(lambda c: c.call_tool(params.name, params.arguments, meta=meta))
         except DaemonUnavailable as exc:
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=_unavailable_text(exc))],
                 is_error=True,
             )
 
+    async def on_list_resources(
+        ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None
+    ) -> types.ListResourcesResult:
+        cursor = params.cursor if params is not None else None
+        try:
+            listed = await link.call(lambda c: c.list_resources(cursor=cursor), retry=True)
+        except DaemonUnavailable as exc:
+            raise MCPError(INTERNAL_ERROR, _unavailable_text(exc)) from exc
+        return types.ListResourcesResult(resources=listed.resources, next_cursor=listed.next_cursor)
+
+    async def on_list_resource_templates(
+        ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None
+    ) -> types.ListResourceTemplatesResult:
+        cursor = params.cursor if params is not None else None
+        try:
+            listed = await link.call(lambda c: c.list_resource_templates(cursor=cursor), retry=True)
+        except DaemonUnavailable as exc:
+            raise MCPError(INTERNAL_ERROR, _unavailable_text(exc)) from exc
+        return types.ListResourceTemplatesResult(
+            resource_templates=listed.resource_templates, next_cursor=listed.next_cursor
+        )
+
+    async def on_read_resource(
+        ctx: ServerRequestContext[Any], params: types.ReadResourceRequestParams
+    ) -> types.ReadResourceResult:
+        try:
+            read = await link.call(lambda c: c.read_resource(params.uri), retry=True)
+        except DaemonUnavailable as exc:
+            raise MCPError(INTERNAL_ERROR, _unavailable_text(exc)) from exc
+        return types.ReadResourceResult(contents=read.contents)
+
     return Server(
         SERVER_NAME,
         version=headwaters.__version__,
         on_list_tools=on_list_tools,
         on_call_tool=on_call_tool,
+        on_list_resources=on_list_resources,
+        on_list_resource_templates=on_list_resource_templates,
+        on_read_resource=on_read_resource,
     )
 
 

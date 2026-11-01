@@ -32,14 +32,14 @@ def test_a_client_drives_the_shim_and_a_cold_start_launches_the_daemon(live_home
             info = client.server_info
             assert info is not None
             assert info.name == "headwaters"
-            listed = await client.list_tools()  # the daemon has no tools yet (HDW-203+)
+            listed = await client.list_tools()  # the front-door tools (HDW-204)
             # Checked while connected: the SDK's stdio client runs the shim in a kill-on-close
             # Windows Job Object, which also reaps a daemon the shim started (see the report).
             daemon = find_running()
             return [t.name for t in listed.tools], daemon.info.pid if daemon else None
 
     names, pid = asyncio.run(scenario())
-    assert names == []
+    assert sorted(names) == ["headwaters_ask", "headwaters_check", "headwaters_do"]
     assert pid is not None, "the shim did not start the daemon"
 
 

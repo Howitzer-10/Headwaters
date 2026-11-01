@@ -20,6 +20,8 @@ class FakeUpstream:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any] | None]] = []
+        self.metas: list[Any] = []
+        self.reads: list[str] = []
         self.fail: Exception | None = None
         self.tool_description = "status"
 
@@ -34,12 +36,33 @@ class FakeUpstream:
         return types.ListToolsResult(tools=[tool])
 
     async def call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None
+        self, name: str, arguments: dict[str, Any] | None = None, *, meta: Any = None
     ) -> types.CallToolResult:
         self.calls.append((name, arguments))
+        self.metas.append(meta)
         if self.fail is not None:
             raise self.fail
         return types.CallToolResult(content=[types.TextContent(type="text", text="ok")])
+
+    async def list_resources(self, *, cursor: str | None = None) -> types.ListResourcesResult:
+        if self.fail is not None:
+            raise self.fail
+        return types.ListResourcesResult(resources=[])
+
+    async def list_resource_templates(
+        self, *, cursor: str | None = None
+    ) -> types.ListResourceTemplatesResult:
+        if self.fail is not None:
+            raise self.fail
+        template = types.ResourceTemplate(name="r", uri_template="headwaters://result/{result_id}")
+        return types.ListResourceTemplatesResult(resource_templates=[template])
+
+    async def read_resource(self, uri: str) -> types.ReadResourceResult:
+        self.reads.append(uri)
+        if self.fail is not None:
+            raise self.fail
+        content = types.TextResourceContents(uri=uri, text="{}", mime_type="application/json")
+        return types.ReadResourceResult(contents=[content])
 
 
 def make_link(upstreams: list[FakeUpstream], ensured: list[int] | None = None) -> DaemonLink:

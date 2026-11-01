@@ -7,6 +7,7 @@ echoed back.
 from typing import Any
 
 from headwaters.cli.output import fmt_eta, make_console, table, yes_no
+from headwaters.core.advice import BELOW_FLOOR_WARNING
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.router_plan import RoutePlan
 
@@ -90,10 +91,7 @@ def print_plan(plan: RoutePlan) -> None:
     console.print(head)
 
     if d.below_floor:
-        console.print(
-            "\nWarning: no model in scope reaches the quality floor for this request. This is "
-            "the best available one; its answer is verified before you see it."
-        )
+        console.print("\n" + BELOW_FLOOR_WARNING)
 
     console.print("\nWhy:")
     for reason in d.reasons:
