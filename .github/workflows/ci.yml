@@ -34,3 +34,18 @@ jobs:
         with:
           name: coverage-${{ matrix.os }}-py${{ matrix.python }}
           path: coverage.xml
+
+  newest-python:
+    name: ubuntu-latest / py3.14 (allowed to fail)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest --no-cov -q
