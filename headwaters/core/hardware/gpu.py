@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -33,6 +34,7 @@ class GpuProcess:
     pid: int
     name: str
     mem_mb: float | None
+    path: str = ""  # full executable path when known (nvidia-smi prints it; NVML via psutil)
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,15 @@ def _process_name(pid: int) -> str:
         return ""
 
 
+def _process_path(pid: int) -> str:
+    try:
+        import psutil
+
+        return str(psutil.Process(pid).exe())
+    except Exception:
+        return ""
+
+
 def _nvml_mem_mb(raw: object) -> float | None:
     if not isinstance(raw, int) or raw < 0 or raw >= _NVML_NA_THRESHOLD:
         return None
@@ -83,7 +94,9 @@ def _nvml_processes(nvml: Any, handle: Any) -> tuple[GpuProcess, ...]:
             mem = _nvml_mem_mb(getattr(entry, "usedGpuMemory", None))
             old = seen.get(pid)
             if old is None or (old.mem_mb is None and mem is not None):
-                seen[pid] = GpuProcess(pid=pid, name=_process_name(pid), mem_mb=mem)
+                seen[pid] = GpuProcess(
+                    pid=pid, name=_process_name(pid), mem_mb=mem, path=_process_path(pid)
+                )
     return tuple(seen.values())
 
 
@@ -139,6 +152,25 @@ def find_nvidia_smi() -> str | None:
     return candidate if os.path.isfile(candidate) else None
 
 
+def decode_smi(raw: bytes) -> str:
+    """Decode ``nvidia-smi`` output line by line (HDW-144, FU-125-1).
+
+    A line that is valid UTF-8 is taken as UTF-8 (the real tool printed pure ASCII on the dev
+    machine, code page 65001; the capture is ``docs/nvidia_smi_compute_apps_sample.txt``). A line
+    that is not goes through the Windows ANSI code page (``mbcs``), the likely alternative, with
+    undecodable bytes replaced. A wrong name can never turn into a busy reading: only the PID,
+    the memory cells and an ``ollama`` prefix are read from it, and the cells are ASCII digits.
+    """
+    fallback = "mbcs" if sys.platform == "win32" else "utf-8"
+    lines: list[str] = []
+    for line in raw.split(b"\n"):
+        try:
+            lines.append(line.decode("utf-8"))
+        except UnicodeDecodeError:
+            lines.append(line.decode(fallback, "replace"))
+    return "\n".join(lines)
+
+
 def run_nvidia_smi(args: Sequence[str]) -> str | None:
     exe = find_nvidia_smi()
     if exe is None:
@@ -147,16 +179,13 @@ def run_nvidia_smi(args: Sequence[str]) -> str | None:
         done = subprocess.run(
             [exe, *args],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=_SMI_TIMEOUT_S,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return done.stdout if done.returncode == 0 else None
+    return decode_smi(done.stdout) if done.returncode == 0 else None
 
 
 def _smi_number(cell: str) -> float | None:
@@ -185,7 +214,9 @@ def _smi_processes(runner: SmiRunner) -> tuple[GpuProcess, ...]:
         if len(cells) < 3 or not cells[0].isdigit():
             continue
         name = os.path.basename(cells[1].replace("\\", "/"))
-        procs.append(GpuProcess(pid=int(cells[0]), name=name, mem_mb=_smi_number(cells[2])))
+        procs.append(
+            GpuProcess(pid=int(cells[0]), name=name, mem_mb=_smi_number(cells[2]), path=cells[1])
+        )
     return tuple(procs)
 
 

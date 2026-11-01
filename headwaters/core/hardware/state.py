@@ -21,6 +21,7 @@ from headwaters.core.hardware.gpu import (
     probe_nvidia_smi,
     probe_nvml,
 )
+from headwaters.core.hardware.ollama_vram import read_ollama_vram_mb
 from headwaters.core.rules import LocalTier
 
 Profile = Literal["laptop_12gb", "desktop_16gb", "custom"]
@@ -38,6 +39,7 @@ DEFAULT_CACHE_TTL_S = 5.0
 _LAPTOP_RANGE_GB = (10.0, 13.5)
 _DESKTOP_RANGE_GB = (14.0, 17.5)
 _OLLAMA_PREFIX = "ollama"
+_RUNNER_PREFIX = "llama-server"
 
 
 @dataclass(frozen=True)
@@ -129,15 +131,36 @@ def read_battery() -> BatteryState:
 
 
 def _is_ollama(proc: GpuProcess) -> bool:
-    return proc.name.lower().startswith(_OLLAMA_PREFIX)
+    """Ollama's server, or its model runner (HDW-144).
+
+    The runner is a child process named ``llama-server.exe`` that lives under Ollama's own
+    install folder (seen live: ``...\\Programs\\Ollama\\lib\\ollama\\llama-server.exe``), so the
+    name alone never matched and the runner was counted as another app. A runner is accepted
+    only when a folder in its path starts with ``ollama``; the same name elsewhere is not ours.
+    """
+    name = proc.name.lower()
+    if name.startswith(_OLLAMA_PREFIX):
+        return True
+    if not name.startswith(_RUNNER_PREFIX):
+        return False
+    folders = proc.path.replace("\\", "/").lower().split("/")[:-1]
+    return any(part.startswith(_OLLAMA_PREFIX) for part in folders)
 
 
 def detect_gpu_busy(
     gpu: GpuInfo | None,
     threshold_pct: float = DEFAULT_BUSY_THRESHOLD_PCT,
     own_pid: int | None = None,
+    ollama_vram_mb: float | None = None,
 ) -> GpuBusy:
-    """Busy = other (non-Ollama, non-us) processes hold more than ``threshold_pct`` of VRAM."""
+    """Busy = other (non-Ollama, non-us) processes hold more than ``threshold_pct`` of VRAM.
+
+    ``ollama_vram_mb`` is what Ollama's ``/api/ps`` says its loaded models hold (HDW-144).
+    When Windows hides per-process memory and no Ollama process is listed, the used VRAM is
+    all there is to go on; Ollama's own share is subtracted first, so a lone loaded model does
+    not read as another app. ``None`` means unknown (Ollama not reachable): nothing is
+    subtracted, and the whole used VRAM still counts as other.
+    """
     if gpu is None or gpu.total_mb <= 0:
         return GpuBusy(False, 0.0, 0.0)
     own = os.getpid() if own_pid is None else own_pid
@@ -148,8 +171,8 @@ def detect_gpu_busy(
         top = max(known, key=lambda p: p.mem_mb or 0.0)
         top_name: str | None = top.name or str(top.pid)
     elif gpu.free_mb is not None and not any(_is_ollama(p) for p in gpu.processes):
-        # Windows hides per-process memory; with no Ollama on the GPU, all used VRAM is "other".
-        used = gpu.used_mb or 0.0
+        # Windows hides per-process memory; all used VRAM is "other" except what Ollama holds.
+        used = max(0.0, (gpu.used_mb or 0.0) - (ollama_vram_mb or 0.0))
         top_name = others[0].name if others and others[0].name else None
     else:
         return GpuBusy(False, 0.0, 0.0)
@@ -165,6 +188,7 @@ def build_state(
     battery: BatteryState,
     busy_threshold_pct: float = DEFAULT_BUSY_THRESHOLD_PCT,
     taken_at: float = 0.0,
+    ollama_vram_mb: float | None = None,
 ) -> HardwareState:
     notes: list[str] = []
     total_gb = None if gpu is None else gpu.total_mb / 1024
@@ -172,7 +196,7 @@ def build_state(
     display = None if gpu is None else gpu.display_active
     reserve, reserve_src = compute_reserve(display, local.reserve_gb)
     budget = 0.0 if total_gb is None else max(0.0, total_gb - reserve)
-    busy = detect_gpu_busy(gpu, busy_threshold_pct)
+    busy = detect_gpu_busy(gpu, busy_threshold_pct, ollama_vram_mb=ollama_vram_mb)
     policy: OnBatteryPolicy = local.on_battery if battery.on_battery else "normal"
 
     suggestion: LocalSuggestion
@@ -230,7 +254,9 @@ class HardwareMonitor:
         busy_threshold_pct: float = DEFAULT_BUSY_THRESHOLD_PCT,
         ttl_s: float = DEFAULT_CACHE_TTL_S,
         clock: Callable[[], float] = time.monotonic,
+        ollama_vram: Callable[[str], float | None] = read_ollama_vram_mb,
     ) -> None:
+        self._ollama_vram = ollama_vram
         self._local = local or LocalTier()
         self._probes: tuple[GpuProbe, ...] = (
             tuple(probes) if probes is not None else (probe_nvml, probe_nvidia_smi)
@@ -258,11 +284,28 @@ class HardwareMonitor:
             cached = self._cached
             if not force and cached is not None and now - cached.taken_at < self._ttl:
                 return cached
+            gpu = self._detect()
             state = build_state(
-                self._detect(), self._local, self._battery_reader(), self._busy_pct, now
+                gpu,
+                self._local,
+                self._battery_reader(),
+                self._busy_pct,
+                now,
+                self._ollama_share(gpu),
             )
             self._cached = state
             return state
+
+    def _ollama_share(self, gpu: GpuInfo | None) -> float | None:
+        """Ollama's own VRAM, asked only when the busy check can use it (no per-process data)."""
+        if gpu is None or gpu.free_mb is None:
+            return None
+        if any(p.mem_mb is not None for p in gpu.processes):
+            return None
+        try:
+            return self._ollama_vram(self._local.host)
+        except Exception:  # a failed lookup means unknown, never a failed snapshot
+            return None
 
     def _detect(self) -> GpuInfo | None:
         for probe in self._probes:
