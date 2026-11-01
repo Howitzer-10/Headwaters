@@ -19,8 +19,24 @@ NO_FIT = fit("no_fit", "weights_too_large")
 CASES: list[Case] = [
     (
         "gpu-12gb-offload-still-ok",
-        {"mods": {"loc14": {"fit": fit("offload", "kv_exceeds_budget")}}},
+        {"scope": "local", "mods": {"loc14": {"fit": fit("offload", "kv_exceeds_budget")}}},
         {"model": "loc14"},
+    ),
+    (
+        "gpu-offload-ranks-below-equal-fit",  # HDW-133: same score, only the fit differs
+        {
+            "scope": "local",
+            "mods": {
+                "loc14": {"fit": fit("offload", "kv_exceeds_budget")},
+                "loc7": {"scores": {"code": 85.0}},
+            },
+        },
+        {"model": "loc7", "fallbacks": ["loc14"]},
+    ),
+    (
+        "gpu-offload-loses-to-free-cloud",
+        {"mods": {"loc14": {"fit": fit("offload", "kv_exceeds_budget")}}},
+        {"model": "free1"},
     ),
     (
         "gpu-12gb-big-model-excluded",

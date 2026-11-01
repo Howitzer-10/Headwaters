@@ -129,7 +129,9 @@ class ScoringRules(_Model):
     """Policy engine weights (HDW-113). Scores are on the same 0..100 scale as the floors."""
 
     ctx_headroom: float = Field(default=1.2, ge=1)  # context must be >= headroom x tokens
-    complexity_penalty_per_level: float = Field(default=3.0, ge=0)
+    # Points per complexity level above 1, scaled by (100 - quality) / 100 (HDW-133).
+    complexity_penalty_per_level: float = Field(default=10.0, ge=0)
+    offload_penalty: float = Field(default=30.0, ge=0)  # local model spills to system RAM (slow)
     assumed_output_tokens: int = Field(default=1000, ge=0)  # for the cost estimate
     residency_scale: float = Field(default=100.0, ge=0)  # 0..1 residency inputs -> points
     latency_ref_tps: float = Field(default=30.0, gt=0)  # at or above this speed: no penalty

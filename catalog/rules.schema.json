@@ -610,7 +610,7 @@
           "type": "integer"
         },
         "complexity_penalty_per_level": {
-          "default": 3.0,
+          "default": 10.0,
           "minimum": 0,
           "title": "Complexity Penalty Per Level",
           "type": "number"
@@ -643,6 +643,12 @@
           "default": 5.0,
           "minimum": 0,
           "title": "Latency Weight",
+          "type": "number"
+        },
+        "offload_penalty": {
+          "default": 30.0,
+          "minimum": 0,
+          "title": "Offload Penalty",
           "type": "number"
         },
         "on_battery_local_penalty": {

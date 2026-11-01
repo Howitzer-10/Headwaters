@@ -12,7 +12,7 @@ from headwaters.core.policy.filters import Candidate
 from headwaters.core.policy.scoring import ScoreBreakdown, estimate_cost_usd, score_candidate
 from headwaters.core.quotas import Availability
 from headwaters.core.rules import Rules, ScoringRules
-from tests.test_policy_scoring import RULES, cand, hw, local, soft
+from tests.test_policy_scoring import RULES, cand, fit, hw, local, soft
 
 
 def total(
@@ -39,10 +39,34 @@ def test_score_missing_task_score_is_zero() -> None:
 
 def test_score_complexity_penalty() -> None:
     b = total(cand(scores={"code": 80.0}), soft(complexity=4))
-    assert b.complexity_penalty == 9.0  # 3.0 * (4 - 1)
-    assert b.total == 71.0
+    assert b.complexity_penalty == pytest.approx(6.0)  # 10.0 * (4 - 1) * (100 - 80) / 100
+    assert b.total == pytest.approx(74.0)
     rules = Rules(scoring=ScoringRules(complexity_penalty_per_level=1.0))
-    assert total(cand(scores={"code": 80.0}), soft(complexity=4), rules=rules).total == 77.0
+    got = total(cand(scores={"code": 80.0}), soft(complexity=4), rules=rules)
+    assert got.total == pytest.approx(79.4)
+
+
+def test_complexity_penalty_depends_on_the_model() -> None:
+    hard_ask = soft(complexity=5)
+    strong = total(cand("s", scores={"code": 95.0}), hard_ask)
+    weak = total(cand("w", scores={"code": 60.0}), hard_ask)
+    assert strong.complexity_penalty == pytest.approx(2.0)
+    assert weak.complexity_penalty == pytest.approx(16.0)
+    assert total(cand(scores={"code": 100.0}), hard_ask).complexity_penalty == 0.0
+    assert total(cand(scores={"code": 60.0}), soft(complexity=1)).complexity_penalty == 0.0
+    # A 5-point quality lead is wiped out by the harder penalty on the weaker model.
+    assert weak.total + 5 < strong.total
+
+
+def test_score_offload_penalty() -> None:
+    fits = total(local(fit=fit("fits")))
+    off = total(local(fit=fit("offload", "kv_exceeds_budget")))
+    assert fits.offload_penalty == 0.0
+    assert off.offload_penalty == 30.0
+    assert off.total == fits.total - 30.0
+    assert total(cand()).offload_penalty == 0.0  # cloud has no fit
+    rules = Rules(scoring=ScoringRules(offload_penalty=7.0))
+    assert total(local(fit=fit("offload")), rules=rules).offload_penalty == 7.0
 
 
 def test_score_warm_bonus_and_evict_penalty() -> None:

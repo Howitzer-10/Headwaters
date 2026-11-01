@@ -3,7 +3,8 @@
     floor = base[task] + k[task] * complexity + high_risk_bonus * (risk == high)
             + agentic_bonus * agentic          (agentic also needs agentic_tools >= floor)
     score = quality[task] - complexity_penalty + session_bonus + warm_bonus - latency_penalty
-            - evict_penalty - cost_weight * cost
+            - evict_penalty - offload_penalty - cost_weight * cost
+    complexity_penalty = per_level * (complexity - 1) * (100 - quality) / 100
 
 Every number comes from ``rules.yaml`` (``floors`` and ``scoring``); nothing is hard-coded here.
 Strategies (cost_saver, quality_first, primary_first) only change the weights. Pure functions,
@@ -52,6 +53,7 @@ class ScoreBreakdown:
     meets_floor: bool
     below_floor_by: float  # 0 when the floor is met
     session_bonus: float = 0.0  # D11: the session's last good model; separate from residency
+    offload_penalty: float = 0.0  # HDW-133: weights spill to system RAM (slow)
 
 
 def strategy_weights(rules: Rules, strategy: Strategy) -> StrategyWeights:
@@ -112,7 +114,10 @@ def score_candidate(
     w = strategy_weights(rules, strategy)
     floor = floor_for(soft, rules).value
     quality = float(c.scores.get(soft.task, 0.0))
-    complexity_penalty = s.complexity_penalty_per_level * max(0, soft.complexity - 1)
+    # Model-dependent (HDW-133): a model at 100 is not hurt by hard requests, a weak one is.
+    weakness = min(1.0, max(0.0, 100.0 - quality) / 100.0)
+    complexity_penalty = s.complexity_penalty_per_level * max(0, soft.complexity - 1) * weakness
+    offload = s.offload_penalty if c.fit is not None and c.fit.status == "offload" else 0.0
     res = c.residency
     warm = res.warm_bonus * s.residency_scale * w.warm_mult if res else 0.0
     evict = res.eviction_penalty * s.residency_scale * w.evict_mult if res else 0.0
@@ -131,6 +136,7 @@ def score_candidate(
         - evict
         - cost_penalty
         - soft_penalty
+        - offload
         + primary
     )
     ok = meets_floor(c, soft, floor)
@@ -139,7 +145,7 @@ def score_candidate(
         gap = max(gap, floor - c.scores.get(AGENTIC_TASK, 0.0), 0.0)
     return ScoreBreakdown(
         c.id, quality, complexity_penalty, warm, latency, evict, cost, cost_penalty,
-        soft_penalty, primary, total, floor, ok, 0.0 if ok else gap, session,
+        soft_penalty, primary, total, floor, ok, 0.0 if ok else gap, session, offload,
     )  # fmt: skip
 
 
