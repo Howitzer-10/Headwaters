@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 from headwaters.core.candidates import fit_for_row
 from headwaters.core.catalog.merge import CatalogLookup
@@ -17,7 +18,7 @@ from headwaters.core.hardware.sysmem import expected_tps_for
 from headwaters.core.quotas import model_subject
 from headwaters.core.state_decisions import get_outcome, set_user_feedback
 from headwaters.core.state_limits import get_quota
-from headwaters.core.state_misc import get_job, kv_delete, kv_get, kv_set
+from headwaters.core.state_misc import JobRow, get_job, kv_delete, kv_get, kv_set
 from headwaters.core.state_models import list_models
 from headwaters.mcp.tools.context import ToolContext, ToolFailure
 from headwaters.mcp.tools.schemas import ErrorInfo
@@ -114,37 +115,63 @@ def _no_job(job_id: str) -> JobResult:
         error=ErrorInfo(
             code="unknown_job",
             message="No job has that id.",
-            fix="Background jobs arrive with HDW-206; today every call runs and returns directly.",
+            fix="Use the job_id a tool returned when it started the work in the background.",
         ),
+    )
+
+
+def _job_error(row: JobRow) -> ErrorInfo | None:
+    """The structured failure kept with a job that did not finish."""
+    if row.status != "failed":
+        return None
+    if row.error_json:
+        try:
+            return ErrorInfo.model_validate_json(row.error_json)
+        except ValueError:
+            pass
+    return ErrorInfo(code="job_failed", message="The job failed.", fix="Run the task again.")
+
+
+def _view(row: JobRow) -> JobResult:
+    error = _job_error(row)
+    return JobResult(
+        ok=error is None,
+        job_id=row.job_id,
+        status=row.status,
+        progress=row.progress,
+        message=row.message,
+        tool=row.tool,
+        error=error,
     )
 
 
 def job_status(tc: ToolContext, job_id: str) -> JobResult:
     row = get_job(tc.state(), job_id)
-    if row is None:
-        return _no_job(job_id)
-    return JobResult(ok=True, job_id=row.job_id, status=row.status, progress=row.progress)
+    return _no_job(job_id) if row is None else _view(row)
 
 
 def job_result(tc: ToolContext, job_id: str) -> JobResult:
+    """The finished job's compact result (the one the foreground call would have returned).
+
+    It is kept in the daemon's memory, like ``headwaters://result/<id>``: after a daemon restart a
+    finished job still has its row and its result link, but not the answer text (SQLite never
+    holds output text), and the result says so.
+    """
     row = get_job(tc.state(), job_id)
     if row is None:
         return _no_job(job_id)
-    if row.status not in ("done", "completed") or not row.result_ref:
-        return JobResult(
-            ok=True,
-            job_id=row.job_id,
-            status=row.status,
-            progress=row.progress,
-            notes=["The job has not finished; ask again later."],
-        )
-    return JobResult(
-        ok=True,
-        job_id=row.job_id,
-        status=row.status,
-        progress=row.progress,
-        result={"result_uri": row.result_ref},
-    )
+    view = _view(row)
+    if row.status == "failed":
+        return view
+    if row.status != "done":
+        return view.model_copy(update={"notes": ["The job has not finished; ask again later."]})
+    kept = tc.jobs.result_of(job_id)
+    link = {"result_uri": row.result_ref} if row.result_ref else {}
+    if kept is None:
+        note = "The answer is no longer in memory (the daemon restarted). Run the task again."
+        update: dict[str, Any] = {"notes": [note], "result": link or None}
+        return view.model_copy(update=update)
+    return view.model_copy(update={"result": {**kept, **link}})
 
 
 def pin_model(tc: ToolContext, model: str | None) -> PinResult:

@@ -89,5 +89,14 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         ALTER TABLE models ADD COLUMN reasoning_ok INTEGER;
         """,
     ),
+    (
+        4,
+        "job detail columns",
+        """
+        ALTER TABLE jobs ADD COLUMN tool TEXT;
+        ALTER TABLE jobs ADD COLUMN message TEXT;
+        ALTER TABLE jobs ADD COLUMN error_json TEXT;
+        """,
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]

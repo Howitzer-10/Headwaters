@@ -56,22 +56,34 @@ def pin_session(
 
 @dataclass(frozen=True)
 class JobRow:
+    """One background job. ``message`` is a short fixed status line (a stage or a model id),
+    ``error_json`` the structured failure of a job that did not finish. Never request text."""
+
     job_id: str
     status: str
     progress: float
     result_ref: str | None
     created: float
     updated: float
+    tool: str | None = None
+    message: str | None = None
+    error_json: str | None = None
 
 
-def create_job(db: Database, job_id: str, status: str = "queued") -> JobRow:
+UNFINISHED_JOB_STATES = ("queued", "running")
+
+
+def create_job(
+    db: Database, job_id: str, status: str = "queued", *, tool: str | None = None
+) -> JobRow:
     now = time.time()
     with db.write() as c:
         c.execute(
-            "INSERT INTO jobs (job_id, status, progress, created, updated) VALUES (?,?,0,?,?)",
-            (job_id, status, now, now),
+            "INSERT INTO jobs (job_id, status, progress, created, updated, tool)"
+            " VALUES (?,?,0,?,?,?)",
+            (job_id, status, now, now, tool),
         )
-    return JobRow(job_id, status, 0.0, None, now, now)
+    return JobRow(job_id, status, 0.0, None, now, now, tool)
 
 
 def update_job(
@@ -81,11 +93,19 @@ def update_job(
     status: str | None = None,
     progress: float | None = None,
     result_ref: str | None = None,
+    message: str | None = None,
+    error_json: str | None = None,
 ) -> bool:
     """Update only the fields given."""
     sets = ["updated = ?"]
     args: list[str | float] = [time.time()]
-    for column, value in (("status", status), ("progress", progress), ("result_ref", result_ref)):
+    for column, value in (
+        ("status", status),
+        ("progress", progress),
+        ("result_ref", result_ref),
+        ("message", message),
+        ("error_json", error_json),
+    ):
         if value is not None:
             sets.append(f"{column} = ?")
             args.append(value)
@@ -96,6 +116,17 @@ def update_job(
             ).rowcount
             > 0
         )
+
+
+def fail_unfinished_jobs(db: Database, error_json: str) -> int:
+    """Mark every queued or running job failed (a daemon that stopped took its tasks with it)."""
+    marks = ",".join("?" for _ in UNFINISHED_JOB_STATES)
+    with db.write() as c:
+        return c.execute(
+            f"UPDATE jobs SET status = 'failed', error_json = ?, updated = ?"
+            f" WHERE status IN ({marks})",
+            (error_json, time.time(), *UNFINISHED_JOB_STATES),
+        ).rowcount
 
 
 def get_job(db: Database, job_id: str) -> JobRow | None:

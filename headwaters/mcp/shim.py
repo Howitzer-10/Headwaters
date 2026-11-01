@@ -94,9 +94,18 @@ def build_shim_server(link: DaemonLink) -> Server[Any]:
     ) -> types.CallToolResult:
         # The daemon is shared, so it cannot know this host's project folder: say it (D9).
         meta: Any = {META_CWD: workdir(), META_CLIENT: client_id}
+
+        async def pass_progress(progress: float, total: float | None, message: str | None) -> None:
+            # HDW-206: the daemon's progress goes on to this shim's host. A host that did not ask
+            # for progress makes this a no-op, and a failed forward never fails the call.
+            with contextlib.suppress(Exception):
+                await ctx.session.report_progress(progress, total, message)
+
         try:
             result = await link.call(
-                lambda c: c.call_tool(params.name, params.arguments, meta=meta)
+                lambda c: c.call_tool(
+                    params.name, params.arguments, meta=meta, progress_callback=pass_progress
+                )
             )
             if params.name == MORE_TOOL and not result.is_error:
                 await _announce_new_tools(ctx, bus)

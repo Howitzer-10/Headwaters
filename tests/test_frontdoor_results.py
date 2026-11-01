@@ -63,12 +63,13 @@ def test_the_result_detail_never_holds_the_task_or_the_file(tmp_path: Path) -> N
     assert detail["model"] == "qwen:14b"
 
 
-def test_async_is_accepted_and_runs_now_with_a_note(tmp_path: Path) -> None:
+def test_async_is_accepted_and_starts_a_background_job(tmp_path: Path) -> None:
     data = structured(
         asyncio.run(Rig(tmp_path).call("headwaters_do", {"task": CODE_TASK, "async": True}))
     )
     assert data["ok"] is True
-    assert any("async" in n for n in data["notes"])
+    assert data["job_id"]  # HDW-206: the work runs in the background; the full lifecycle is in
+    assert data["answer"] is None  # tests/test_run_jobs.py
 
 
 def test_the_store_drops_the_oldest_entry_past_its_bound() -> None:

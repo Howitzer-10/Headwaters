@@ -90,9 +90,11 @@ def test_the_full_path_host_to_shim_to_tools_uses_the_hosts_folder(tmp_path: Pat
     rig = Rig(tmp_path, reply="It returns 1.")
 
     class Upstream(FakeUpstream):
-        async def call_tool(self, name, arguments=None, *, meta=None):  # type: ignore[no-untyped-def,override]
+        async def call_tool(self, name, arguments=None, *, meta=None, progress_callback=None):  # type: ignore[no-untyped-def,override]
             async with rig.client() as inner:
-                return await inner.call_tool(name, arguments, meta=meta)
+                return await inner.call_tool(
+                    name, arguments, meta=meta, progress_callback=progress_callback
+                )
 
     async def scenario() -> dict[str, object]:
         link = make_link([Upstream()])

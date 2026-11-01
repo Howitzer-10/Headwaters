@@ -91,9 +91,13 @@ ADVANCED: Final = {
     "headwaters_quota_status": (
         "Walls with reset times and each cloud model's request counters.\nExample: {}"
     ),
-    "headwaters_job_status": ('Progress of a background job.\nExample: {"job_id": "abc"}'),
+    "headwaters_job_status": (
+        "Progress of a background job (queued, running, done or failed) and what it is doing.\n"
+        'Example: {"job_id": "abc"}'
+    ),
     "headwaters_job_result": (
-        'The result of a finished background job.\nExample: {"job_id": "abc"}'
+        "The finished background job's result, shaped like the tool's own result. Ask again "
+        'while it is still running.\nExample: {"job_id": "abc"}'
     ),
     "headwaters_pin_model": (
         "Pin one model for later calls, or clear the pin (omit `model`). The scope and locks "

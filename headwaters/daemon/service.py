@@ -26,6 +26,7 @@ from headwaters.core.rules import Rules, RulesProvider
 from headwaters.core.state import Database
 from headwaters.gateway.server import HttpServer, build_app
 from headwaters.mcp.endpoint import build_endpoint
+from headwaters.mcp.jobs import recover_orphans
 from headwaters.mcp.tools.context import ToolContext
 
 __all__ = ["Daemon", "pick_ports", "run_in_daemon_thread"]
@@ -224,6 +225,11 @@ class Daemon:
 
     async def serve(self) -> None:
         self._stop = asyncio.Event()
+        # A previous daemon took its background jobs with it: fail them so none stays "running".
+        # One short UPDATE, so it runs here before the first request, not on a worker thread.
+        failed = recover_orphans(self.db)
+        if failed:
+            _log.info("failed jobs left by a previous daemon", extra={"jobs": failed})
         endpoint = build_endpoint(headwaters.__version__, tools=self.tool_context())
         app = build_app(
             token=self.token,

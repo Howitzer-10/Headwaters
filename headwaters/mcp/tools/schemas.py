@@ -16,6 +16,7 @@ __all__ = [
     "AskResult",
     "CheckItem",
     "CheckResult",
+    "ConfirmInfo",
     "DoResult",
     "ErrorInfo",
     "FileNote",
@@ -59,6 +60,27 @@ class CheckItem(BaseModel):
     detail: str = ""
 
 
+class ConfirmInfo(BaseModel):
+    """What needs the user's yes before a call goes ahead (HDW-206). Never holds request text."""
+
+    reasons: list[str] = Field(description="spend and/or scope_loosening.")
+    model: str | None = Field(default=None, description="The model the call would use.")
+    tier: str | None = None
+    estimated_cost_usd: float | None = Field(
+        default=None, description="Expected spend of that call, first model only."
+    )
+    confirm_above_usd: float | None = Field(
+        default=None, description="The user's limit (rules.yaml budget.confirm_above_usd)."
+    )
+    requested_scope: str | None = None
+    default_scope: str | None = None
+    retry_with: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Extra arguments to repeat the same call with, but ONLY after you asked the "
+        "USER and they agreed. The Private lock and project rules still apply.",
+    )
+
+
 class _ModelResult(BaseModel):
     """Fields shared by every tool that calls a model."""
 
@@ -95,6 +117,18 @@ class _ModelResult(BaseModel):
     decision_id: int | None = Field(
         default=None, description="For headwaters_feedback (thumbs up or down on this answer)."
     )
+    job_id: str | None = Field(
+        default=None,
+        description="Set when the work runs in the background: there is no answer yet. Poll "
+        "headwaters_job_status, then read headwaters_job_result.",
+    )
+    eta_s: float | None = Field(
+        default=None, description="Expected seconds until a background job ends."
+    )
+    confirmation_required: bool = Field(
+        default=False, description="True when the user must agree first; see confirm."
+    )
+    confirm: ConfirmInfo | None = None
     error: ErrorInfo | None = None
 
 

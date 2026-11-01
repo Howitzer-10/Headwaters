@@ -9,11 +9,12 @@ contents are never logged or stored.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from typing import Any
 
 from headwaters.core.engine import Engine
 from headwaters.core.executor.types import Message
-from headwaters.core.router_types import RouteRequest
+from headwaters.core.router_types import ProgressCallback, RouteRequest
 from headwaters.core.rules import Scope
 from headwaters.core.state_misc import kv_get
 from headwaters.mcp.threads import run_blocking
@@ -23,9 +24,16 @@ from headwaters.mcp.tools.context import ToolContext, ToolFailure
 from headwaters.mcp.tools.outcome import Outcome, build_outcome
 from headwaters.mcp.tools.schemas import FileNote
 from headwaters.mcp.tools.status import PIN_KEY
-from headwaters.mcp.tools.workspace import note_for, open_workspace
+from headwaters.mcp.tools.workspace import Workspace, note_for, open_workspace
 
-__all__ = ["current_engine", "current_pin", "run_model_tool"]
+__all__ = [
+    "Prepared",
+    "current_engine",
+    "current_pin",
+    "prepare_request",
+    "run_model_tool",
+    "run_prepared",
+]
 
 
 def current_pin(tc: ToolContext) -> str | None:
@@ -56,7 +64,20 @@ def _user_message(task: str, packed: str, images: list[str]) -> Message:
     return {"role": "user", "content": parts}
 
 
-async def run_model_tool(
+@dataclass(frozen=True)
+class Prepared:
+    """A request ready to route: built once, so the estimate and the run use the same one."""
+
+    tool: str
+    want: str
+    request: RouteRequest
+    engine: Engine
+    workspace: Workspace
+    files: tuple[FileNote, ...]
+    notes: tuple[str, ...]
+
+
+async def prepare_request(
     tc: ToolContext,
     tool: str,
     *,
@@ -69,11 +90,12 @@ async def run_model_tool(
     verify_always: bool,
     task_hint: str | None = None,
     reasoning: bool | str | None = None,
-) -> Outcome:
-    """Run one request. Raises ``ToolFailure`` or a routing error; the caller maps it.
+) -> Prepared:
+    """Workspace, project rule, packed files and images, then the ``RouteRequest``.
 
-    ``task_hint`` and ``reasoning`` are the HDW-140 hooks ``headwaters_think`` uses. The user's
-    pin (``headwaters_pin_model``) rides every call; the hard filter still applies to it.
+    Raises ``ToolFailure`` or a routing error; the caller maps it. ``task_hint`` and
+    ``reasoning`` are the HDW-140 hooks ``headwaters_think`` uses. The user's pin
+    (``headwaters_pin_model``) rides every call; the hard filter still applies to it.
     """
     engine = current_engine(tc)
     workspace = open_workspace(meta, tc.rules(), tc.configured_roots())
@@ -118,5 +140,54 @@ async def run_model_tool(
         task_hint=task_hint,
         reasoning=reasoning,
     )
-    result = await engine.router.run(request)
-    return await build_outcome(tc, engine, tool, result, workspace, files, notes, want)
+    return Prepared(tool, want, request, engine, workspace, tuple(files), tuple(notes))
+
+
+async def run_prepared(
+    tc: ToolContext, prepared: Prepared, on_progress: ProgressCallback | None = None
+) -> Outcome:
+    """Route a prepared request, reporting each step to ``on_progress`` when given."""
+    request = replace(prepared.request, on_progress=on_progress)
+    result = await prepared.engine.router.run(request)
+    return await build_outcome(
+        tc,
+        prepared.engine,
+        prepared.tool,
+        result,
+        prepared.workspace,
+        list(prepared.files),
+        list(prepared.notes),
+        prepared.want,
+    )
+
+
+async def run_model_tool(
+    tc: ToolContext,
+    tool: str,
+    *,
+    task: str,
+    want: str,
+    paths: list[str],
+    images: list[str],
+    scope: Scope | None,
+    meta: Mapping[str, Any] | None,
+    verify_always: bool,
+    task_hint: str | None = None,
+    reasoning: bool | str | None = None,
+    on_progress: ProgressCallback | None = None,
+) -> Outcome:
+    """Prepare and run one request (what ``headwaters_think`` and the tests call)."""
+    prepared = await prepare_request(
+        tc,
+        tool,
+        task=task,
+        want=want,
+        paths=paths,
+        images=images,
+        scope=scope,
+        meta=meta,
+        verify_always=verify_always,
+        task_hint=task_hint,
+        reasoning=reasoning,
+    )
+    return await run_prepared(tc, prepared, on_progress)

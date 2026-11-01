@@ -206,4 +206,10 @@ def _job_envelope(result: JobResult) -> types.CallToolResult:
     line = f"Job {result.job_id}: {result.status}"
     if result.progress is not None:
         line += f" ({int(result.progress * 100)}%)"
-    return envelope(result, "\n".join([line, *result.notes]))
+    if result.message:
+        line += f" - {result.message}"
+    lines = [line, *result.notes]
+    kept = result.result or {}
+    if kept.get("text"):  # the answer the foreground call would have shown
+        lines = [str(kept["text"]), line]
+    return envelope(result, "\n".join(lines))

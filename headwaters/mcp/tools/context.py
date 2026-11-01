@@ -15,6 +15,7 @@ from headwaters.core.engine import Engine
 from headwaters.core.rules import Rules
 from headwaters.core.rules_edit import set_setting
 from headwaters.core.state import Database
+from headwaters.mcp.jobs import JobRegistry
 from headwaters.mcp.tools.schemas import FileNote
 from headwaters.mcp.tools.store import ResultStore
 
@@ -34,6 +35,16 @@ class ToolSettings:
     max_check_chars: int = 1_000_000
     max_handoff_turns: int = 6  # recent turns kept verbatim in a handoff packet
     max_handoff_chars: int = 4_000  # per turn, goal and last error
+    # HDW-206: how long a call is expected to take, and how it reports back. First-draft tuning
+    # numbers for the estimate behind ``mcp.async_threshold_s`` and the spend question.
+    progress_heartbeat_s: float = 5.0  # repeat the last progress message this often
+    est_output_tokens: int = 400  # a typical answer or diff
+    reasoning_factor: float = 2.0  # ``headwaters_think`` writes this many times more
+    cold_load_s_per_gb: float = 2.0  # loading a cold local model into the GPU
+    local_tps_fallback: float = 50.0  # when the catalog has no speed for this GPU
+    cloud_tps: float = 80.0
+    cloud_overhead_s: float = 2.0
+    max_jobs: int = 4  # background jobs running at once
 
 
 @dataclass
@@ -54,6 +65,8 @@ class ToolContext:
     reload_rules: Callable[[], object] = field(default=lambda: None)
     # Advanced tools enabled per host (``headwaters_more``); in memory, one set per daemon.
     enabled_hosts: set[str] = field(default_factory=set)
+    # Background jobs (HDW-206). Their rows live in the ``jobs`` table; the running tasks here.
+    jobs: JobRegistry = field(default_factory=JobRegistry)
 
     def state(self) -> Database:
         if self.db is None:

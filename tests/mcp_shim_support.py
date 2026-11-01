@@ -24,6 +24,7 @@ class FakeUpstream:
         self.list_metas: list[Any] = []
         self.reads: list[str] = []
         self.fail: Exception | None = None
+        self.progress: list[str] = []
         self.tool_description = "status"
 
     async def list_tools(
@@ -40,12 +41,20 @@ class FakeUpstream:
         return types.ListToolsResult(tools=[tool])
 
     async def call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None, *, meta: Any = None
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        meta: Any = None,
+        progress_callback: Any = None,
     ) -> types.CallToolResult:
         self.calls.append((name, arguments))
         self.metas.append(meta)
         if self.fail is not None:
             raise self.fail
+        for step, message in enumerate(self.progress, start=1):  # what the daemon reports
+            if progress_callback is not None:
+                await progress_callback(float(step), None, message)
         return types.CallToolResult(content=[types.TextContent(type="text", text="ok")])
 
     async def list_resources(self, *, cursor: str | None = None) -> types.ListResourcesResult:

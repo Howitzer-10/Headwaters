@@ -1,8 +1,9 @@
 """Register the second wave of front-door tools (HDW-205, v3.4 B1).
 
-``headwaters_think``, ``headwaters_status``, ``headwaters_scope``, ``headwaters_handoff`` and
-``headwaters_more``. The eight advanced tools are in ``frontdoor_advanced`` and appear in
-``tools/list`` only for a host that called ``headwaters_more`` (progressive disclosure).
+``headwaters_status``, ``headwaters_scope``, ``headwaters_handoff`` and ``headwaters_more``
+(``headwaters_think`` moved to ``frontdoor_run`` in HDW-206 with the other model tools). The eight
+advanced tools are in ``frontdoor_advanced`` and appear in ``tools/list`` only for a host that
+called ``headwaters_more`` (progressive disclosure).
 
 No ``from __future__ import annotations`` here on purpose: the scope tool's resolver is a local
 variable, and the SDK evaluates the tool's annotations to find it, so they must not be strings.
@@ -21,25 +22,23 @@ from headwaters.mcp.threads import run_blocking
 from headwaters.mcp.tools import descriptions
 from headwaters.mcp.tools.context import ToolContext
 from headwaters.mcp.tools.failures import Failure
-from headwaters.mcp.tools.flow import current_engine, run_model_tool
+from headwaters.mcp.tools.flow import current_engine
 from headwaters.mcp.tools.frontdoor import classify, meta_of, tool_annotations
 from headwaters.mcp.tools.handoff import build_handoff
-from headwaters.mcp.tools.render import render_ask
 from headwaters.mcp.tools.render_more import (
     render_handoff,
     render_more,
     render_scope,
     render_status,
 )
-from headwaters.mcp.tools.results import ask_error, ask_result, envelope
-from headwaters.mcp.tools.schemas import AskResult, ErrorInfo
+from headwaters.mcp.tools.results import envelope
+from headwaters.mcp.tools.schemas import ErrorInfo
 from headwaters.mcp.tools.schemas_more import (
     AdvancedToolInfo,
     HandoffResult,
     MoreResult,
     ScopeResult,
     StatusResult,
-    ThinkResult,
 )
 from headwaters.mcp.tools.scope_tool import Confirm, apply_scope, make_resolver
 from headwaters.mcp.tools.status import build_status
@@ -55,45 +54,7 @@ def _error(failure: Failure) -> ErrorInfo:
 def register_more(
     server: MCPServer, tc: ToolContext, disclosure: Disclosure, advanced: dict[str, str]
 ) -> None:
-    """Add the five tools. ``advanced`` maps each advanced tool name to its summary."""
-
-    @server.tool(
-        name="headwaters_think",
-        title="Think hard about a question",
-        description=descriptions.THINK,
-        annotations=tool_annotations(
-            "Think hard about a question", read_only=True, open_world=True
-        ),
-    )
-    async def headwaters_think(
-        question: Annotated[str, Field(min_length=1, description="The question.")],
-        ctx: Context,
-        paths: Annotated[
-            list[str] | None, Field(description="Files to read, relative to the project.")
-        ] = None,
-        scope: Annotated[
-            Scope | None, Field(description="Narrow the models: auto, free, local or cloud.")
-        ] = None,
-    ) -> Annotated[types.CallToolResult, ThinkResult]:
-        try:
-            outcome = await run_model_tool(
-                tc,
-                "ask",
-                task=question,
-                want="answer",
-                paths=paths or [],
-                images=[],
-                scope=scope,
-                meta=meta_of(ctx),
-                verify_always=False,
-                task_hint="reasoning",
-                reasoning=True,
-            )
-        except Exception as exc:
-            failure = classify(exc, "think")
-            return ask_error(failure)
-        result = ThinkResult(**ask_result(outcome).model_dump())
-        return envelope(result, render_ask(AskResult(**result.model_dump())))
+    """Add the four tools. ``advanced`` maps each advanced tool name to its summary."""
 
     @server.tool(
         name="headwaters_status",

@@ -25,7 +25,15 @@ from headwaters.mcp.tools.schemas import ErrorInfo
 from headwaters.mcp.tools.schemas_more import ScopeResult
 from headwaters.mcp.tools.status import scope_info
 
-__all__ = ["Change", "Confirm", "apply_scope", "make_resolver", "plan_change", "user_command"]
+__all__ = [
+    "Change",
+    "Confirm",
+    "apply_scope",
+    "loosens_scope",
+    "make_resolver",
+    "plan_change",
+    "user_command",
+]
 
 NO_ASK = "none"  # nothing loosens: no question needed
 NO_CHANNEL = "no_channel"  # something loosens and the host cannot be asked
@@ -43,7 +51,8 @@ class Change(BaseModel):
     same: list[str] = Field(default_factory=list)
 
 
-def _loosens_scope(current: Scope, new: Scope) -> bool:
+def loosens_scope(current: Scope, new: Scope) -> bool:
+    """True when ``new`` allows a tier that ``current`` does not."""
     return not SCOPE_TIERS[new] <= SCOPE_TIERS[current]
 
 
@@ -54,7 +63,7 @@ def plan_change(
     if scope is not None:
         if scope == rules.default_scope:
             change.same.append("default_scope")
-        elif _loosens_scope(rules.default_scope, scope):
+        elif loosens_scope(rules.default_scope, scope):
             change.loosen["default_scope"] = scope
         else:
             change.tighten["default_scope"] = scope

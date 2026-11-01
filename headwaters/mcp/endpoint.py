@@ -7,7 +7,8 @@ server (``headwaters.gateway.server``) mounts the app and owns authentication.
 The front-door tools are registered here when the daemon passes a ``ToolContext``:
 ``headwaters_do``, ``_ask``, ``_check`` (HDW-204), ``_think``, ``_status``, ``_scope``,
 ``_handoff`` and ``_more`` (HDW-205), the ``headwaters://result/<id>`` resource, and eight
-advanced tools that ``tools/list`` shows only to a host that called ``headwaters_more``.
+advanced tools that ``tools/list`` shows only to a host that called ``headwaters_more``. The
+model tools (``do``, ``ask``, ``think``) plan, ask the user and run in the background (HDW-206).
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from headwaters.mcp.tools.context import ToolContext
 from headwaters.mcp.tools.frontdoor import register_frontdoor
 from headwaters.mcp.tools.frontdoor_advanced import register_advanced
 from headwaters.mcp.tools.frontdoor_more import register_more
+from headwaters.mcp.tools.frontdoor_run import register_run
+from headwaters.mcp.tools.guarded import Gate
 
 __all__ = ["MCP_PATH", "ASGIApp", "McpEndpoint", "build_endpoint"]
 
@@ -65,6 +68,7 @@ def build_endpoint(
         disclosure = Disclosure(tools.enabled_hosts, descriptions.ADVANCED)
         summaries = {name: text.split("\n", 1)[0] for name, text in descriptions.ADVANCED.items()}
         register_frontdoor(mcp, tools)
+        register_run(mcp, tools, Gate(tools))
         register_more(mcp, tools, disclosure, summaries)
         register_advanced(mcp, tools)
         mcp.middleware.append(disclosure)

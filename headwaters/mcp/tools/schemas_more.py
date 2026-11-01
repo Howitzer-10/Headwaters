@@ -208,8 +208,10 @@ class QuotaResult(BaseModel):
 class JobResult(BaseModel):
     ok: bool
     job_id: str | None = None
-    status: str | None = None
-    progress: float | None = None
+    status: str | None = Field(default=None, description="queued, running, done or failed.")
+    progress: float | None = Field(default=None, description="0 to 1; never goes down.")
+    message: str | None = Field(default=None, description="What the job is doing now.")
+    tool: str | None = Field(default=None, description="Which tool started the job.")
     result: dict[str, Any] | None = None
     notes: list[str] = Field(default_factory=list)
     error: ErrorInfo | None = None
