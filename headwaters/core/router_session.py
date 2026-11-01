@@ -16,8 +16,13 @@ _MAX_ID_CHARS = 128
 _HASH_CHARS = 32
 
 
-def text_of(content: object) -> str:
-    """Plain text of a message ``content``: a string, a text part or a list of parts."""
+def content_text(content: object) -> str:
+    """Plain text of a message ``content``: a string, a text part or a list of parts.
+
+    Used for session keys and the executor system message only. It reads ``content`` and
+    nothing else (no tool calls, no tool results), so it is NOT the secret-scan path; that is
+    ``headwaters.core.analyzer._extract.collect(...).scan_text``.
+    """
     if content is None or isinstance(content, bytes | bytearray):
         return ""
     if isinstance(content, str):
@@ -26,10 +31,10 @@ def text_of(content: object) -> str:
         for key in ("text", "content"):
             value = content.get(key)
             if value is not None:
-                return text_of(value)
+                return content_text(value)
         return ""
     if isinstance(content, Sequence):
-        return "\n".join(t for t in (text_of(part) for part in content) if t)
+        return "\n".join(t for t in (content_text(part) for part in content) if t)
     return ""
 
 
@@ -37,12 +42,12 @@ def system_text(
     system: str | Sequence[Mapping[str, Any]] | None, messages: Sequence[Mapping[str, Any]] = ()
 ) -> str:
     """The system prompt: the Anthropic top-level ``system`` or the first system message."""
-    top = text_of(system)
+    top = content_text(system)
     if top:
         return top
     for message in messages:
         if message.get("role") == "system":
-            return text_of(message.get("content"))
+            return content_text(message.get("content"))
     return ""
 
 
@@ -69,7 +74,7 @@ def session_key(
     if given:
         return "id:" + given[:_MAX_ID_CHARS]
     first_user = next(
-        (text_of(m.get("content")) for m in messages if m.get("role") == "user"),
+        (content_text(m.get("content")) for m in messages if m.get("role") == "user"),
         "",
     )
     raw = system_text(system, messages) + "\x00" + first_user

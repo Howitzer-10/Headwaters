@@ -657,6 +657,12 @@
           "title": "Residency Scale",
           "type": "number"
         },
+        "session_bonus": {
+          "default": 5.0,
+          "minimum": 0,
+          "title": "Session Bonus",
+          "type": "number"
+        },
         "soft_quota_penalty": {
           "default": 10.0,
           "minimum": 0,

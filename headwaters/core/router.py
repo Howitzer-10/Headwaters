@@ -58,7 +58,7 @@ from headwaters.core.router_prep import (
     local_usable,
     only_local,
     scan_texts,
-    with_warm_preference,
+    with_session_model,
     without_reasoning,
 )
 from headwaters.core.router_run import RouteRun
@@ -286,8 +286,8 @@ class Router:
         if rules.airplane:
             candidates = only_local(candidates)
         session = self._get_session(key)
-        warm = session.pinned_model if session is not None else None
-        candidates = with_warm_preference(candidates, warm, self._config.residency)
+        last_good = session.pinned_model if session is not None else None
+        candidates = with_session_model(candidates, last_good)
         hw = self._hardware() if self._hardware is not None else None
         self._progress(request, "scope")
         scope = resolve_scope(
@@ -534,7 +534,10 @@ class Router:
         )
         decision_id = router_log.write(self._db, entry)
         router_log.notify_ledgers(self._ledgers(), entry, decision_id)
-        self._remember(run, decision)
+        if failed:  # F16: never pin a model whose answer just failed verification
+            self._forget(run, decision)
+        else:
+            self._remember(run, decision)
         self._emit(run, "done", decision, "verify_failed" if failed else "ok")
         return RouteResult(
             result=result,
@@ -603,12 +606,22 @@ class Router:
         router_log.notify_ledgers(self._ledgers(), entry, router_log.write(self._db, entry))
 
     def _remember(self, run: RouteRun, decision: RouteDecision) -> None:
-        """Remember the answering model so the next turn of this session prefers it warm."""
+        """Pin the model that answered ``ok`` so the next turn of this session keeps it (D11)."""
         session = self._get_session(run.key)
         if session is not None and session.pinned_model == decision.model:
             return
         try:
             pin_session(self._db, run.key, decision.model, decision.tier)
+        except Exception:  # best effort
+            return
+
+    def _forget(self, run: RouteRun, decision: RouteDecision) -> None:
+        """Drop the pin when the pinned model itself just failed verification (F16)."""
+        session = self._get_session(run.key)
+        if session is None or session.pinned_model != decision.model:
+            return
+        try:
+            pin_session(self._db, run.key, None, None)
         except Exception:  # best effort
             return
 

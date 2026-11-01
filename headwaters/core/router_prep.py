@@ -11,9 +11,8 @@ from dataclasses import replace
 from headwaters.core.analyzer._extract import collect
 from headwaters.core.analyzer.requirements import KNOWN_TASKS, AnalyzerInput, Requirements
 from headwaters.core.executor.types import ExecOptions, ExecResult, Message, StreamEvent
-from headwaters.core.hardware.residency import ResidencyConfig, ResidencyInputs
 from headwaters.core.policy.filters import Candidate
-from headwaters.core.router_session import text_of
+from headwaters.core.router_session import content_text
 from headwaters.core.router_types import RouteRequest
 from headwaters.core.router_verify import schema_of
 
@@ -33,7 +32,7 @@ def analyzer_input(request: RouteRequest) -> AnalyzerInput:
 def executor_messages(request: RouteRequest) -> list[Message]:
     """Messages for the executor. An Anthropic top-level ``system`` becomes a system message."""
     messages: list[Message] = list(request.messages)
-    top = text_of(request.system)
+    top = content_text(request.system)
     if top and not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": top})
     return messages
@@ -100,23 +99,18 @@ def scan_texts(request: RouteRequest) -> list[str]:
     return [t for t in collect(request.messages, request.system).scan_text if t]
 
 
-def with_warm_preference(
-    candidates: Sequence[Candidate], warm_model: str | None, config: ResidencyConfig | None = None
+def with_session_model(
+    candidates: Sequence[Candidate], session_model: str | None
 ) -> tuple[Candidate, ...]:
-    """Give the session's previous model the warm bonus (the policy turns it into a score term).
+    """Mark the session's last successful model (D11, F15).
 
-    Models Ollama already holds keep their own residency data; only a candidate without a warm
-    flag gets the session preference.
+    Only the ``is_session`` flag changes: residency (warm bonus, eviction penalty) stays what
+    the hardware says, and a cloud model never gets a VRAM bonus. The policy turns the flag
+    into the small ``session_bonus`` term and keeps the model first while it meets the floor.
     """
-    if warm_model is None:
+    if session_model is None:
         return tuple(candidates)
-    bonus = (config or ResidencyConfig()).warm_bonus
-    out: list[Candidate] = []
-    for c in candidates:
-        if c.id == warm_model and not (c.residency is not None and c.residency.warm):
-            c = replace(c, residency=ResidencyInputs(True, bonus, (), 0.0))
-        out.append(c)
-    return tuple(out)
+    return tuple(replace(c, is_session=True) if c.id == session_model else c for c in candidates)
 
 
 def local_usable(candidates: Sequence[Candidate]) -> bool:

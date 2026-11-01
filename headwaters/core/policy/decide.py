@@ -79,6 +79,23 @@ def _decision(
     )
 
 
+def _session_leads(ladder: list[Entry], reasons: list[str]) -> list[Entry]:
+    """D11: the session's last good model leads while it still meets the floor.
+
+    It is already usable, in scope and past the hard filter (it is in the ladder). A model
+    below the floor never jumps the queue; it only stays first when it already is the same
+    best-effort choice.
+    """
+    at = next((i for i, e in enumerate(ladder) if e[0].is_session), None)
+    if at is None:
+        return ladder
+    entry = ladder[at]
+    if at > 0 and not entry[1].meets_floor:
+        return ladder
+    reasons.append(f"kept session model {entry[0].id}")
+    return [entry, *ladder[:at], *ladder[at + 1 :]]
+
+
 def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
     """Run the ladder. Raises ``NoRouteError`` when nothing can serve the request."""
     reqs = req.requirements
@@ -101,6 +118,7 @@ def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
 
     ladder = build_ladder([k for k in kept if k.role != "premium"], req, ctx)
     if ladder:
+        ladder = _session_leads(ladder, reasons)
         return _decision(ladder[0], ladder[1:], req, ctx, reasons)
     # Local scope serves below-floor local models (HDW-123), so an empty ladder in a local-only
     # state means no local model passed the hard filter: ``no_candidates``.

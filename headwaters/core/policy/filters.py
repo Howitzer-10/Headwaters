@@ -54,6 +54,7 @@ class Candidate:
     is_primary: bool = False
     scope_tier: TierName | None = None
     role: Role = "normal"
+    is_session: bool = False  # the session's last successful model (D11); not a residency fact
 
     @property
     def id(self) -> str:

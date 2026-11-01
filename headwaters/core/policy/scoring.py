@@ -2,7 +2,7 @@
 
     floor = base[task] + k[task] * complexity + high_risk_bonus * (risk == high)
             + agentic_bonus * agentic          (agentic also needs agentic_tools >= floor)
-    score = quality[task] - complexity_penalty + warm_bonus - latency_penalty
+    score = quality[task] - complexity_penalty + session_bonus + warm_bonus - latency_penalty
             - evict_penalty - cost_weight * cost
 
 Every number comes from ``rules.yaml`` (``floors`` and ``scoring``); nothing is hard-coded here.
@@ -51,6 +51,7 @@ class ScoreBreakdown:
     floor: float
     meets_floor: bool
     below_floor_by: float  # 0 when the floor is met
+    session_bonus: float = 0.0  # D11: the session's last good model; separate from residency
 
 
 def strategy_weights(rules: Rules, strategy: Strategy) -> StrategyWeights:
@@ -120,9 +121,11 @@ def score_candidate(
     cost_penalty = w.cost_weight * cost
     soft_penalty = s.soft_quota_penalty if c.availability.status == "soft" else 0.0
     primary = w.primary_bonus if c.is_primary else 0.0
+    session = s.session_bonus if c.is_session else 0.0
     total = (
         quality
         - complexity_penalty
+        + session
         + warm
         - latency
         - evict
@@ -136,7 +139,7 @@ def score_candidate(
         gap = max(gap, floor - c.scores.get(AGENTIC_TASK, 0.0), 0.0)
     return ScoreBreakdown(
         c.id, quality, complexity_penalty, warm, latency, evict, cost, cost_penalty,
-        soft_penalty, primary, total, floor, ok, 0.0 if ok else gap,
+        soft_penalty, primary, total, floor, ok, 0.0 if ok else gap, session,
     )  # fmt: skip
 
 

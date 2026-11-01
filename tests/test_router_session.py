@@ -40,16 +40,16 @@ def test_session_key_handles_openai_system_messages_and_content_parts() -> None:
     assert session_key(messages=plain) == session_key(messages=anthropic, system="sys")
 
 
-def test_the_answering_model_is_remembered_and_preferred_warm(tmp_path: Path) -> None:
+def test_the_answering_model_is_remembered_and_kept(tmp_path: Path) -> None:
     models = [candidate("loc-a", "local", 86.0), candidate("loc-b", "local", 86.0)]
     rig = Rig(tmp_path, {"loc-a": OK, "loc-b": OK}, models)
     assert rig.run(session_id="s1").decision.model == "loc-a"  # a tie ranks by id
     session = get_session(rig.db, "id:s1")
     assert session is not None
     assert session.pinned_model == "loc-a"
-    # A fresh session has no preference; the remembered one earns the warm bonus.
-    assert rig.run(session_id="s1").decision.breakdown.warm_bonus > 0
-    assert rig.run(session_id="other").decision.breakdown.warm_bonus == 0
+    # A fresh session has no preference; the remembered one gets the session bonus (D11).
+    assert rig.run(session_id="s1").decision.breakdown.session_bonus > 0
+    assert rig.run(session_id="other").decision.breakdown.session_bonus == 0
 
 
 def test_progress_callback_reports_each_stage_without_request_text(tmp_path: Path) -> None:

@@ -138,6 +138,7 @@ class ScoringRules(_Model):
     on_battery_local_penalty: float = Field(default=20.0, ge=0)  # local.on_battery=prefer_cloud
     gpu_busy_local_penalty: float = Field(default=15.0, ge=0)
     soft_quota_penalty: float = Field(default=10.0, ge=0)  # model near its free-tier limit
+    session_bonus: float = Field(default=5.0, ge=0)  # the session's last good model, any tier (D11)
     strategies: StrategiesRules = Field(default_factory=StrategiesRules)
 
 
