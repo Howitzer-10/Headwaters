@@ -21,11 +21,15 @@ class FakeUpstream:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any] | None]] = []
         self.metas: list[Any] = []
+        self.list_metas: list[Any] = []
         self.reads: list[str] = []
         self.fail: Exception | None = None
         self.tool_description = "status"
 
-    async def list_tools(self, *, cursor: str | None = None) -> types.ListToolsResult:
+    async def list_tools(
+        self, *, cursor: str | None = None, meta: Any = None, cache_mode: str = "use"
+    ) -> types.ListToolsResult:
+        self.list_metas.append(meta)
         if self.fail is not None:
             raise self.fail
         tool = types.Tool(

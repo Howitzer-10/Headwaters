@@ -60,6 +60,7 @@ def _detail(
     d = result.decision
     return {
         "tool": tool,
+        "decision_id": result.decision_id,
         "answer": result.result.content,
         "diffs": list(extracted.diffs),
         "commands": list(extracted.commands),

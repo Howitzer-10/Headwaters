@@ -1,7 +1,8 @@
 """Targeted edits to ``rules.yaml`` that keep the user's comments and layout (HDW-118).
 
-Only top-level scalar settings can be changed here (``default_scope``, ``private_lock``); the CLI
-uses it for ``headwaters scope`` and ``headwaters private``. The edit replaces one line, is
+Only top-level scalar settings can be changed here (``default_scope``, ``private_lock``,
+``strategy``); the CLI uses it for ``headwaters scope`` and ``headwaters private``, and the MCP
+``headwaters_scope`` tool for all three (HDW-205). The edit replaces one line, is
 validated against ``Rules`` before anything is written, and is swapped in atomically so the
 hot-reload watcher never sees a half-written file. Line endings of the file are kept.
 """
@@ -28,7 +29,7 @@ from headwaters.core.rules_io import (
     rules_path,
 )
 
-EDITABLE_KEYS: frozenset[str] = frozenset({"default_scope", "private_lock"})
+EDITABLE_KEYS: frozenset[str] = frozenset({"default_scope", "private_lock", "strategy"})
 _SAFE_VALUE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 

@@ -59,6 +59,7 @@ def run(*, preferred_port: int | None = None) -> int:
             ports,
             load_or_create_token(),
             rules_source=lambda: manager.current,
+            reload_rules=manager.reload,
         )
         try:
             daemon.rebuild_engine()

@@ -92,6 +92,9 @@ class _ModelResult(BaseModel):
     )
     files: list[FileNote] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    decision_id: int | None = Field(
+        default=None, description="For headwaters_feedback (thumbs up or down on this answer)."
+    )
     error: ErrorInfo | None = None
 
 

@@ -57,6 +57,7 @@ def _common(o: Outcome) -> dict[str, Any]:
         "result_uri": o.uri,
         "files": list(o.files),
         "notes": list(o.notes),
+        "decision_id": o.result.decision_id,
     }
 
 

@@ -96,6 +96,7 @@ class Rig:
         seed(self.db, local_score=local_score, cloud=cloud)
         self.backend = Scripted(reply)
         self.cloud_calls = 0
+        self.edits: list[tuple[str, bool | str]] = []
 
         def cloud_factory() -> Scripted:
             self.cloud_calls += 1
@@ -116,20 +117,35 @@ class Rig:
             rules=lambda: self.rules,
             settings=settings or ToolSettings(),
             configured_roots=lambda: list(configured),
+            db=self.db,
+            edit_rules=self._edit_rules,
         )
         self.server = MCPServer(name="t", version="0")
         build_endpoint("0", server=self.server, tools=self.context)
 
+    def _edit_rules(self, key: str, value: bool | str) -> tuple[Any, Any]:
+        """The rig's stand-in for ``rules_edit.set_setting``: edits the in-memory rules."""
+        previous = getattr(self.rules, key)
+        self.rules = self.rules.model_copy(update={key: value})
+        self.edits.append((key, value))
+        return previous, value
+
     @asynccontextmanager
-    async def client(self) -> AsyncIterator[Client]:
-        async with Client(self.server) as client:
+    async def client(self, **kwargs: Any) -> AsyncIterator[Client]:
+        async with Client(self.server, **kwargs) as client:
             yield client
 
     async def call(
-        self, name: str, args: Mapping[str, Any], cwd: Path | None = None
+        self,
+        name: str,
+        args: Mapping[str, Any],
+        cwd: Path | None = None,
+        *,
+        elicit: Any = None,
     ) -> types.CallToolResult:
+        """One call on a fresh client. ``elicit`` is an elicitation callback (None: no support)."""
         meta: Any = {META_CWD: str(cwd)} if cwd is not None else None
-        async with self.client() as client:
+        async with self.client(elicitation_callback=elicit) as client:
             return await client.call_tool(name, dict(args), meta=meta)
 
 

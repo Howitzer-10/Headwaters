@@ -13,6 +13,14 @@ from headwaters.mcp.tools import descriptions
 from tests.frontdoor_support import CODE_TASK, Rig, structured, text_of
 
 TOOLS = ("headwaters_do", "headwaters_ask", "headwaters_check")
+CORE_EIGHT = (
+    *TOOLS,
+    "headwaters_think",
+    "headwaters_status",
+    "headwaters_scope",
+    "headwaters_handoff",
+    "headwaters_more",
+)
 
 
 def _listed(tmp_path: Path) -> dict[str, Any]:
@@ -23,8 +31,8 @@ def _listed(tmp_path: Path) -> dict[str, Any]:
     return asyncio.run(go())
 
 
-def test_the_three_front_door_tools_are_listed(tmp_path: Path) -> None:
-    assert sorted(_listed(tmp_path)) == sorted(TOOLS)
+def test_the_eight_front_door_tools_are_listed(tmp_path: Path) -> None:
+    assert sorted(_listed(tmp_path)) == sorted(CORE_EIGHT)
 
 
 @pytest.mark.parametrize("name", TOOLS)

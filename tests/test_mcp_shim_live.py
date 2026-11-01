@@ -39,7 +39,16 @@ def test_a_client_drives_the_shim_and_a_cold_start_launches_the_daemon(live_home
             return [t.name for t in listed.tools], daemon.info.pid if daemon else None
 
     names, pid = asyncio.run(scenario())
-    assert sorted(names) == ["headwaters_ask", "headwaters_check", "headwaters_do"]
+    assert sorted(names) == [
+        "headwaters_ask",
+        "headwaters_check",
+        "headwaters_do",
+        "headwaters_handoff",
+        "headwaters_more",
+        "headwaters_scope",
+        "headwaters_status",
+        "headwaters_think",
+    ]
     assert pid is not None, "the shim did not start the daemon"
 
 

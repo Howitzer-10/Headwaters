@@ -82,6 +82,9 @@ class Daemon:
     last_key_poll: KeyPollResult | None = None
     # ``RulesManager.current`` in production: the live rules, read at each use (HDW-131).
     rules_source: RulesProvider | None = None
+    # ``RulesManager.reload`` in production: re-reads rules.yaml now, after ``headwaters_scope``
+    # edited it, so the change is seen by the next call without waiting for the file watcher.
+    reload_rules: Callable[[], object] | None = None
     _server: HttpServer | None = None
     _stop: asyncio.Event | None = None
 
@@ -96,7 +99,12 @@ class Daemon:
 
     def tool_context(self) -> ToolContext:
         """What the MCP tools read per call: the live engine and the live rules (HDW-204)."""
-        return ToolContext(engine=lambda: self.engine, rules=lambda: self.live_rules)
+        return ToolContext(
+            engine=lambda: self.engine,
+            rules=lambda: self.live_rules,
+            db=self.db,
+            reload_rules=self.reload_rules or (lambda: None),
+        )
 
     # ------------------------------------------------------------------ http payloads
 

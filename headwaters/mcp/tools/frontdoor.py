@@ -28,7 +28,7 @@ from headwaters.mcp.tools.results import ask_envelope, ask_error, do_envelope, d
 from headwaters.mcp.tools.schemas import AskResult, CheckResult, DoResult, ErrorInfo, Want
 from headwaters.mcp.tools.store import RESULT_URI_PREFIX
 
-__all__ = ["ASYNC_NOTE", "register_frontdoor"]
+__all__ = ["ASYNC_NOTE", "classify", "meta_of", "register_frontdoor", "tool_annotations"]
 
 _log = get_logger("mcp.tools")
 
@@ -42,12 +42,12 @@ _INTERNAL = Failure(
 )
 
 
-def _meta(ctx: Context) -> dict[str, Any] | None:
+def meta_of(ctx: Context) -> dict[str, Any] | None:
     meta = ctx.request_context.meta
     return dict(meta) if meta else None
 
 
-def _classify(exc: Exception, tool: str) -> Failure:
+def classify(exc: Exception, tool: str) -> Failure:
     known = failure_info(exc)
     if known is not None:
         return known
@@ -55,7 +55,7 @@ def _classify(exc: Exception, tool: str) -> Failure:
     return _INTERNAL
 
 
-def _annotations(title: str, *, read_only: bool, open_world: bool) -> types.ToolAnnotations:
+def tool_annotations(title: str, *, read_only: bool, open_world: bool) -> types.ToolAnnotations:
     return types.ToolAnnotations(
         title=title,
         read_only_hint=read_only,
@@ -72,7 +72,7 @@ def register_frontdoor(server: MCPServer, tc: ToolContext) -> None:
         name="headwaters_do",
         title="Do a coding task",
         description=descriptions.DO,
-        annotations=_annotations("Do a coding task", read_only=False, open_world=True),
+        annotations=tool_annotations("Do a coding task", read_only=False, open_world=True),
     )
     async def headwaters_do(
         task: Annotated[str, Field(min_length=1, description="What to do, in plain words.")],
@@ -104,11 +104,11 @@ def register_frontdoor(server: MCPServer, tc: ToolContext) -> None:
                 paths=paths or [],
                 images=images or [],
                 scope=scope,
-                meta=_meta(ctx),
+                meta=meta_of(ctx),
                 verify_always=True,
             )
         except Exception as exc:
-            return do_error(_classify(exc, "do"))
+            return do_error(classify(exc, "do"))
         if run_async:
             outcome = replace(outcome, notes=(*outcome.notes, ASYNC_NOTE))
         return do_envelope(outcome)
@@ -117,7 +117,7 @@ def register_frontdoor(server: MCPServer, tc: ToolContext) -> None:
         name="headwaters_ask",
         title="Ask about code",
         description=descriptions.ASK,
-        annotations=_annotations("Ask about code", read_only=True, open_world=True),
+        annotations=tool_annotations("Ask about code", read_only=True, open_world=True),
     )
     async def headwaters_ask(
         question: Annotated[str, Field(min_length=1, description="The question.")],
@@ -138,18 +138,18 @@ def register_frontdoor(server: MCPServer, tc: ToolContext) -> None:
                 paths=paths or [],
                 images=[],
                 scope=scope,
-                meta=_meta(ctx),
+                meta=meta_of(ctx),
                 verify_always=False,
             )
         except Exception as exc:
-            return ask_error(_classify(exc, "ask"))
+            return ask_error(classify(exc, "ask"))
         return ask_envelope(outcome)
 
     @server.tool(
         name="headwaters_check",
         title="Check a diff or code",
         description=descriptions.CHECK,
-        annotations=_annotations("Check a diff or code", read_only=True, open_world=False),
+        annotations=tool_annotations("Check a diff or code", read_only=True, open_world=False),
     )
     async def headwaters_check(
         ctx: Context,
@@ -159,7 +159,7 @@ def register_frontdoor(server: MCPServer, tc: ToolContext) -> None:
             str | None, Field(description="Language of `code`, such as python.")
         ] = None,
     ) -> Annotated[types.CallToolResult, CheckResult]:
-        return await run_check(tc, diff=diff, code=code, language=language, meta=_meta(ctx))
+        return await run_check(tc, diff=diff, code=code, language=language, meta=meta_of(ctx))
 
     @server.resource(
         RESULT_URI_PREFIX + "{result_id}",

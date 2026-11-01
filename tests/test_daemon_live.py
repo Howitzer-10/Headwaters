@@ -114,7 +114,12 @@ def test_two_mcp_clients_connect_to_the_same_endpoint(live_home: Path) -> None:
                 "headwaters_ask",
                 "headwaters_check",
                 "headwaters_do",
-            ]  # the front-door tools of HDW-204; HDW-205 adds the rest
+                "headwaters_handoff",
+                "headwaters_more",
+                "headwaters_scope",
+                "headwaters_status",
+                "headwaters_think",
+            ]  # the eight front-door tools; the advanced ones wait for headwaters_more
             return name
 
     async def both() -> list[str]:

@@ -15,15 +15,25 @@ from headwaters.core.engine import Engine
 from headwaters.core.executor.types import Message
 from headwaters.core.router_types import RouteRequest
 from headwaters.core.rules import Scope
+from headwaters.core.state_misc import kv_get
 from headwaters.mcp.threads import run_blocking
 from headwaters.mcp.tools import prompts
 from headwaters.mcp.tools.attach import load_images, pack_paths
 from headwaters.mcp.tools.context import ToolContext, ToolFailure
 from headwaters.mcp.tools.outcome import Outcome, build_outcome
 from headwaters.mcp.tools.schemas import FileNote
+from headwaters.mcp.tools.status import PIN_KEY
 from headwaters.mcp.tools.workspace import note_for, open_workspace
 
-__all__ = ["current_engine", "run_model_tool"]
+__all__ = ["current_engine", "current_pin", "run_model_tool"]
+
+
+def current_pin(tc: ToolContext) -> str | None:
+    """The model the user pinned through ``headwaters_pin_model``, if any."""
+    if tc.db is None:
+        return None
+    value = kv_get(tc.db, PIN_KEY)
+    return value if isinstance(value, str) and value else None
 
 
 def current_engine(tc: ToolContext) -> Engine:
@@ -57,8 +67,14 @@ async def run_model_tool(
     scope: Scope | None,
     meta: Mapping[str, Any] | None,
     verify_always: bool,
+    task_hint: str | None = None,
+    reasoning: bool | str | None = None,
 ) -> Outcome:
-    """Run one request. Raises ``ToolFailure`` or a routing error; the caller maps it."""
+    """Run one request. Raises ``ToolFailure`` or a routing error; the caller maps it.
+
+    ``task_hint`` and ``reasoning`` are the HDW-140 hooks ``headwaters_think`` uses. The user's
+    pin (``headwaters_pin_model``) rides every call; the hard filter still applies to it.
+    """
     engine = current_engine(tc)
     workspace = open_workspace(meta, tc.rules(), tc.configured_roots())
     notes: list[str] = []
@@ -98,6 +114,9 @@ async def run_model_tool(
         scope=scope,
         verify="always" if verify_always else None,
         project=workspace.project,
+        pin=current_pin(tc),
+        task_hint=task_hint,
+        reasoning=reasoning,
     )
     result = await engine.router.run(request)
     return await build_outcome(tc, engine, tool, result, workspace, files, notes, want)
