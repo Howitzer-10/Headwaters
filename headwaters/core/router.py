@@ -35,6 +35,7 @@ from typing import Any, Protocol
 
 from headwaters.core import router_log
 from headwaters.core.analyzer.requirements import AnalyzerInput, Requirements
+from headwaters.core.catalog.schema import GpuProfile
 from headwaters.core.executor.errors import ExecutorError, ScopeViolation
 from headwaters.core.executor.executor import Executor
 from headwaters.core.executor.types import ExecResult
@@ -57,6 +58,7 @@ from headwaters.core.router_prep import (
     executor_options,
     local_usable,
     only_local,
+    pull_hint,
     scan_texts,
     with_session_model,
     without_reasoning,
@@ -136,7 +138,9 @@ class Router:
         hardware: Callable[[], HardwareState | None] | None = None,
         config: RouterConfig | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        gpu_profiles: Mapping[str, GpuProfile] | None = None,
     ) -> None:
+        self._gpu_profiles: Mapping[str, GpuProfile] = gpu_profiles or {}
         self._rules_source = as_provider(rules)  # read once per request (HDW-131)
         self._db = db
         self._analyzer = analyzer
@@ -289,6 +293,7 @@ class Router:
         last_good = session.pinned_model if session is not None else None
         candidates = with_session_model(candidates, last_good)
         hw = self._hardware() if self._hardware is not None else None
+        hint = pull_hint(reqs, hw, self._gpu_profiles)
         self._progress(request, "scope")
         scope = resolve_scope(
             rules,
@@ -300,11 +305,12 @@ class Router:
             secret_override=request.secret_override,
             paid_scopes=paid_scopes_available(self._registry),
             local_available=local_usable(candidates),
+            local_fix_hint=hint,
         )
         self._progress(request, "deciding")
         first = decide(
             PolicyRequest(reqs, scope, request.pin, request.force),
-            PolicyContext(candidates, rules, hw, self._escalation()),
+            PolicyContext(candidates, rules, hw, self._escalation(), hint),
         )
         return _Selection(rules, scope, candidates, hw, first)
 

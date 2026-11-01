@@ -178,6 +178,7 @@ def build_engine(
         secrets=SecretDetector.from_catalog(catalog),
         registry=registry,
         hardware=read_hardware,
+        gpu_profiles=catalog.gpu_profiles,
     )
     return Engine(
         router, rules, catalog, catalog_source, patterns, targets, registry, read_hardware

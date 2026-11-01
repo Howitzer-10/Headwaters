@@ -33,6 +33,7 @@ class PolicyContext:
     rules: Rules
     hw: HardwareState | None = None
     escalation: EscalationPlugin | None = None
+    pull_hint: str | None = None  # "pull <catalog model>" for this GPU and role (HDW-137)
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,8 @@ External APIs and behaviours assumed, each verified against current official doc
 | 2026-10-30 | State (HDW-102) | stdlib `sqlite3` with WAL, `busy_timeout` and `BEGIN IMMEDIATE` writes lets several processes write one DB without "database is locked". Upserts (`ON CONFLICT DO UPDATE`) need SQLite >= 3.24. WAL needs a local (non-network) drive. | SQLite docs (WAL, lang_upsert) | Verified by `tests/test_state_records.py` (two real processes) |
 | 2026-10-30 | State (HDW-102) | JSON blobs stored in the DB have keys `prompt`, `content`, `messages`, `output`, `text` stripped (`state.scrub`), so prompt/output text cannot be persisted by accident. `walls` is keyed `(subject, kind)`; `quotas` by `(subject, window)`. Column details beyond the v3 §3 list are our own first design (schema version 1). | ticket | Assumed |
 | 2026-10-30 | Plugins (HDW-004) | The eight interfaces' method signatures are our own first design (api_version 1); later tickets may extend them with a version bump. | - | Assumed |
+| 2026-11-01 | Router (HDW-137) | The router builds `local_fix_hint` and the `pull_model` suggestion text from `catalog.gpu_profiles[hw.profile].recommended` for the request's role: vision when the request needs images, else agentic_coder for agentic or code tasks, else general; the first listed model wins (`pull <model>`). Profile `custom`, an unknown profile or no hardware reading falls back to the smallest-VRAM profile that lists the role (as the classifier does); if the catalog lists none, the generic "Start Ollama" text stays. `Router` takes `gpu_profiles` (wired from the catalog in `build_engine` and the CLI dry run). No external API used. | ticket / F20 | Assumed |
+
 
 
 ---

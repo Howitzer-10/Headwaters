@@ -146,4 +146,5 @@ def build_router(rt: Runtime, hw: HardwareState | None, tokens: int | None = Non
         secrets=SecretDetector.from_catalog(catalog),
         registry=rt.registry,
         hardware=lambda: hw,
+        gpu_profiles=catalog.gpu_profiles,
     )

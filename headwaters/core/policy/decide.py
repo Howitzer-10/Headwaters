@@ -45,13 +45,13 @@ def _override(
         if match is None:
             why = next((r.reason for r in rejected if r.model_id == req.pin), "unknown_model")
             msg = f"Pinned model {req.pin!r} cannot serve this request ({why})."
-            raise no_route("pin_rejected", msg, rejected, ctx.candidates, req)
+            raise no_route("pin_rejected", msg, rejected, ctx.candidates, req, ctx.pull_hint)
         return match, "pin", f"pinned {match.id}"
     if req.force == FORCE_PREMIUM:
         premium = next((c for c in kept if c.role == "premium"), None)
         if premium is None:
             msg = "Premium is not available in this scope."
-            raise no_route("premium_unavailable", msg, rejected, ctx.candidates, req)
+            raise no_route("premium_unavailable", msg, rejected, ctx.candidates, req, ctx.pull_hint)
         return premium, "force", "forced premium"
     return None
 
@@ -125,4 +125,4 @@ def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
     has_normal = any(k.role == "normal" for k in kept)
     code = "no_route" if has_normal else "no_candidates"
     msg = "No model can serve this request in the current scope."
-    raise no_route(code, msg, rejected, ctx.candidates, req)
+    raise no_route(code, msg, rejected, ctx.candidates, req, ctx.pull_hint)

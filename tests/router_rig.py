@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from headwaters.core.analyzer.requirements import Requirements
-from headwaters.core.catalog.schema import FreeLimit
+from headwaters.core.catalog.schema import FreeLimit, GpuProfile
 from headwaters.core.executor.executor import Executor
 from headwaters.core.features import FeatureRegistry
 from headwaters.core.policy.filters import Candidate
@@ -39,6 +39,7 @@ class Rig:
         free_limits: Sequence[FreeLimit] = (),
         clock: Callable[[], float] | None = None,
         rules_source: Callable[[], Rules] | None = None,
+        gpu_profiles: Mapping[str, GpuProfile] | None = None,
     ) -> None:
         self.rules = rules or Rules()
         live: Rules | Callable[[], Rules] = rules_source or self.rules  # HDW-131
@@ -80,6 +81,7 @@ class Rig:
             registry=registry if registry is not None else registry_with(),
             config=config,
             sleep=sleep,
+            gpu_profiles=gpu_profiles,
         )
 
     def run(self, **kw: Any) -> RouteResult:

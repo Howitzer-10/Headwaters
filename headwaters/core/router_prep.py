@@ -5,12 +5,14 @@ Pure helpers. Nothing here stores or logs request text.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from headwaters.core.analyzer._extract import collect
 from headwaters.core.analyzer.requirements import KNOWN_TASKS, AnalyzerInput, Requirements
+from headwaters.core.catalog.schema import GpuProfile, Role
 from headwaters.core.executor.types import ExecOptions, ExecResult, Message, StreamEvent
+from headwaters.core.hardware.state import HardwareState
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.router_session import content_text
 from headwaters.core.router_types import RouteRequest
@@ -111,6 +113,35 @@ def with_session_model(
     if session_model is None:
         return tuple(candidates)
     return tuple(replace(c, is_session=True) if c.id == session_model else c for c in candidates)
+
+
+def request_role(reqs: Requirements) -> Role:
+    """The catalog role a request needs: vision, agentic_coder or general (HDW-137)."""
+    if reqs.hard.vision:
+        return "vision"
+    if reqs.soft.agentic or reqs.soft.task == "code":
+        return "agentic_coder"
+    return "general"
+
+
+def pull_hint(
+    reqs: Requirements, hw: HardwareState | None, profiles: Mapping[str, GpuProfile]
+) -> str | None:
+    """``pull <model>`` from the catalog's recommendation for this GPU profile and role.
+
+    Unknown or ``custom`` profiles fall back to the smallest-VRAM profile that lists the role
+    (the safe choice, as the classifier does). ``None`` when the catalog names nothing.
+    """
+    role = request_role(reqs)
+    ordered: list[GpuProfile] = []
+    if hw is not None and hw.profile in profiles:
+        ordered.append(profiles[hw.profile])
+    ordered.extend(sorted(profiles.values(), key=lambda p: p.vram_gb))
+    for profile in ordered:
+        models = profile.recommended.get(role)
+        if models:
+            return f"pull {models[0]}"
+    return None
 
 
 def local_usable(candidates: Sequence[Candidate]) -> bool:

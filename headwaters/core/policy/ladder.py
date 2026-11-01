@@ -20,6 +20,11 @@ def _entries(
     return [(c, b, rung) for c, b in ranked if only_ok is None or b.meets_floor == only_ok]
 
 
+def _pull_text(base: str, hint: str | None) -> str:
+    """``base`` that fits your GPU, naming the catalog model when the router knows one."""
+    return f"{base} that fits your GPU: {hint}." if hint else f"{base} that fits your GPU."
+
+
 def is_local_only(req: PolicyRequest, ctx: PolicyContext) -> bool:
     """Local scope, a lock, or battery ``local_only``: nothing may leave the machine."""
     return req.scope.local_only or (ctx.hw is not None and ctx.hw.battery_policy == "local_only")
@@ -36,7 +41,9 @@ def suggestions_for(
     """
     tips: list[Suggestion] = []
     if below_floor and chosen.is_local and is_local_only(req, ctx):
-        tips.append(Suggestion("pull_model", "Pull a larger local model that fits your GPU."))
+        tips.append(
+            Suggestion("pull_model", _pull_text("Pull a larger local model", ctx.pull_hint))
+        )
         tips.append(Suggestion("split_task", "Split the task into smaller steps."))
         if req.scope.local_only and not req.scope.active_locks:
             tips.append(Suggestion("use_cloud", "Use headwaters/cloud to allow cloud models."))
@@ -61,6 +68,7 @@ def no_route(
     rejected: tuple[Rejection, ...],
     cands: Sequence[Candidate],
     req: PolicyRequest,
+    pull_hint: str | None = None,
 ) -> NoRouteError:
     etas = {
         c.id: c.availability.eta
@@ -80,7 +88,7 @@ def no_route(
             )
         )
     if any(x.startswith("no_fit_") for x in codes) and "local" in req.scope.tiers:
-        tips.append(Suggestion("pull_model", "Pull a local model that fits your GPU."))
+        tips.append(Suggestion("pull_model", _pull_text("Pull a local model", pull_hint)))
     if codes & {"no_vision", "no_tools", "no_json"}:
         tips.append(Suggestion("add_capable_model", "No model supports what this needs."))
     if req.scope.local_only and not req.scope.active_locks:
