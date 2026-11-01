@@ -85,6 +85,8 @@ of the verification-v2 gain, re-scope ★ verification v2; do not weaken core.
 
 **Owner confirmation (2026-10-31, HDW-119 question 2):** yes. `headwaters/local` answers with the best local model, flagged and verified, rather than refusing.
 
+**Refinement (2026-11-01, FU-129-2; the owner accepted the triage recommendation):** for an agentic request the retry also keeps tool-call strength. A candidate qualifies only if its task score is above the failed model's **and** its `agentic_tools` score is not below it. Not-below, rather than higher, so a good escalation is not lost. With none left the answer is flagged `verify_failed` and says why. Ticket HDW-154.
+
 ### D11 detail: sticky sessions in core
 
 **Decision.** On the next turn, core puts the session's last *successful* model first while it is
@@ -174,3 +176,4 @@ two external-package contracts.
 **Tickets.** HDW-201. HDW-202 onward add MCP tools inside `headwaters/mcp/` and routes inside
 `headwaters/gateway/`.
 
+**Refinement (2026-11-01, FU-201-9; the owner accepted the triage recommendation):** `headwaters.control` (`doctor`, the status page) and the CLI read daemon state only through `headwaters.core.daemon_client` and `core.daemon_info`, never by importing `headwaters.daemon`. The `daemon-is-a-root` contract already enforces it. HDW-402 adds a `sys.modules` test that importing the doctor loads neither the web framework nor the MCP SDK.

@@ -688,7 +688,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 
 ## Phase 2.5: Phase 2 review follow-ups
 
-Tickets HDW-144 to HDW-153 come from the Phase 2 review (`docs/PHASE2_REVIEW.md`) and the triage session of 2026-11-01 (`docs/FOLLOWUPS.md`). **Before HDW-301** = merge before Phase 3 starts (only HDW-148); "Before HDW-xxx" = merge before that ticket; **Can wait** = any time before the Beta 0.1 gate (SPW-407). Ticket text is new, written from the follow-up and the live code.
+Tickets HDW-144 to HDW-154 come from the Phase 2 review (`docs/PHASE2_REVIEW.md`) and the triage session of 2026-11-01 (`docs/FOLLOWUPS.md`). **Before HDW-301** = merge before Phase 3 starts (only HDW-148); "Before HDW-xxx" = merge before that ticket; **Can wait** = any time before the Beta 0.1 gate (SPW-407). Ticket text is new, written from the follow-up and the live code.
 
 ### HDW-144 · Local GPU-busy check counts Ollama's own memory as another app's · **Before HDW-407**
 **Model** Sonnet · **Effort** Medium · **Depends** 108, 201 · **Class** Core · **Refs** FU-201-2, FU-125-1
@@ -727,13 +727,14 @@ Tickets HDW-144 to HDW-153 come from the Phase 2 review (`docs/PHASE2_REVIEW.md`
 **Accept when:** with `workspace.roots` set, a host root outside it is ignored and a path outside it is refused; unset behaves as today; a schema test covers the key; HDW-403 can write it.
 
 ### HDW-148 · Rebuild the engine when rules change · **Before HDW-301**
-**Model** Sonnet · **Effort** Medium · **Depends** 131, 201 · **Class** Core · **Refs** FU-131-1, FU-131-2, FU-131-4
+**Model** Sonnet · **Effort** Medium/High · **Depends** 131, 201 · **Class** Core · **Refs** FU-131-1, FU-131-2, FU-131-4
 **Build:**
 - `build_engine` takes one reading of the rules for the candidate builder, hardware, feature flags, `TargetBuilder`, `build_chain` and keep-warm. Make the daemon rebuild the engine on `on_reload` (or give each of them the provider) so edits to `tiers.paid.models`, the local host, `features`, endpoints and `kv_cache_type` apply without a restart. A rebuild must not drop a request in flight.
 - Remove the `Daemon.rules` and `Engine.rules` startup snapshot once nothing reads it.
 - The gateway (HDW-301) uses the same hook, so it never holds its own copy of the rules. Airplane and Private lock already apply per request and must keep doing so.
-- (FU-131-4, owner answered (b) on 2026-11-01) A privacy switch must be true when it answers. Add an authenticated `POST /v1/reload` to the daemon API (next to `/v1/shutdown` in `headwaters/gateway/server.py`) that calls the rules manager's `reload()` now and returns whether new rules were applied, plus the live `private_lock`, `airplane` and `default_scope`; add the matching call to `core.daemon_client`. `headwaters private on|off` and `headwaters scope <x>` call it after writing `rules.yaml` and print the daemon's confirmation. No daemon running: say so and exit 0 (the file is the truth and the daemon reads it at start). Daemon running but unreachable, or it rejected the file: exit non-zero with "saved, but the running daemon has not confirmed it". The MCP `headwaters_scope` tool already reloads synchronously (`mcp/tools/scope_tool.py`); keep it. There is no airplane command today (`airplane` is not in `EDITABLE_KEYS`); any command added later uses the same call. A hand edit of `rules.yaml` still waits for the 0.3 s watcher; say so in the privacy notes.
-**Accept when:** tests change each listed key in a running daemon and the next request uses it; a request in flight finishes on the old engine; no reader of the snapshot is left; Private and airplane still apply at once; `headwaters private on` returns only after the daemon reports `private_lock` true, and a request sent right after it cannot reach a cloud model; a daemon that is unreachable gives the non-zero exit and the message above.
+- (FU-131-4, owner answered (b) on 2026-11-01) A privacy switch must be true when it answers. Add an authenticated `POST /v1/reload` to the daemon API (next to `/v1/shutdown` in `headwaters/gateway/server.py`) that calls the rules manager's `reload()` now and returns whether new rules were applied, plus the live `private_lock`, `airplane` and `default_scope`; add the matching call to `core.daemon_client`. `headwaters private on|off` and `headwaters scope <x>` call it after writing `rules.yaml` and print the daemon's confirmation. No daemon running: say so and exit 0 (the file is the truth and the daemon reads it at start). Daemon running but unreachable, or it rejected the file: exit non-zero with "saved, but the running daemon has not confirmed it". The MCP `headwaters_scope` tool already reloads synchronously (`mcp/tools/scope_tool.py`); keep it. There is no airplane command today (`airplane` is not in `EDITABLE_KEYS`); any command added later uses the same call. A hand edit of `rules.yaml` is covered by the next item.
+- (FU-131-4, hand edits) Close the 0.3 s window for a hand edit too. `RulesManager.current` compares the file's `(mtime_ns, size)` with the signature of the last read (one `os.stat`, measured at 25 microseconds on this machine) and, when it differs, calls `reload()` before returning. Record the signature even when the file is invalid, so an unfinished save is not re-parsed on every request; the next save changes it and reloads. An invalid file keeps the last good rules, as today. `on_reload` may now run on a request thread, so the engine rebuild above must be safe to call there. The watcher stays for the idle case. Tests: write `private_lock: true` by hand and read `current` at once, with no sleep; a half-written file keeps the last good rules and is read again after the next write; many reads of an unchanged file parse it once.
+**Accept when:** tests change each listed key in a running daemon and the next request uses it; a request in flight finishes on the old engine; no reader of the snapshot is left; Private and airplane still apply at once; `headwaters private on` returns only after the daemon reports `private_lock` true, and a request sent right after it cannot reach a cloud model; a daemon that is unreachable gives the non-zero exit and the message above; a hand edit of `rules.yaml` that sets `private_lock: true` is seen by the very next request, with no wait.
 
 ### HDW-149 · Real seed catalog entries and the catalog gaps behind hints · **Before HDW-407**
 **Model** Sonnet · **Effort** Medium · **Depends** 139, 140 · **Class** Core · **Refs** FU-139-1, FU-139-2, FU-140-1, FU-136-1, FU-137-1, FU-204-4
@@ -776,6 +777,16 @@ Tickets HDW-144 to HDW-153 come from the Phase 2 review (`docs/PHASE2_REVIEW.md`
 - `discover_features` skips packages whose name starts with `_` unless asked; the test fixtures ask (FU-126-3).
 - A request carrying a remote image URL drops local candidates in the hard filter instead of wasting one attempt on a refusal (FU-135-2), and the reasons say why.
 **Accept when:** a stale `local` row for `gpt-oss:120b-cloud` is dropped before the executor; a `_`-prefixed package is not registered in production; a golden row covers the remote-image case; R4 is marked closed in the next review.
+
+
+### HDW-154 · Escalation keeps tool-call strength for agentic requests · **Before HDW-304**
+**Model** Sonnet · **Effort** Low · **Depends** 129 · **Class** Core · **Refs** FU-129-2, D10
+**Build:**
+- `Router._redecide` (`headwaters/core/router.py:413`) keeps only candidates whose task score is above the failed model's (`stronger_than`). For an agentic request (`run.reqs.soft.agentic`), also keep only candidates whose `agentic_tools` score is **not below** the failed model's. Take the failed model's score from its candidate (`run.candidate(decision.model)`); a model with no `agentic_tools` score counts as 0.
+- Not-below, not strictly-above: requiring both scores to rise would empty the pool more often, and the answer would then come back flagged `verify_failed` when a perfectly good escalation existed.
+- When this filter removes the only stronger candidate, add a note to the result saying so (`no stronger model keeps tool strength`), so the flagged answer explains itself.
+- Non-agentic requests are unchanged. The rule is written down in D10's detail (`docs/DECISIONS.md`, refinement of 2026-11-01).
+**Accept when:** an agentic request whose model failed verification escalates to a model with a higher task score and an equal or higher tool score; a candidate with a higher task score but a lower tool score is skipped; if it was the only stronger one, the answer comes back flagged `verify_failed` with the note; local scope stays local; a non-agentic request escalates as before (the existing escalation tests pass unchanged).
 
 ---
 
@@ -868,10 +879,10 @@ Tickets HDW-144 to HDW-153 come from the Phase 2 review (`docs/PHASE2_REVIEW.md`
 - `--bundle`: redacted diagnostic zip (no prompts, keys or paths beyond the app dirs).
 - (FU-121-1) Hint: set `OLLAMA_NO_CLOUD=1` (or `disable_ollama_cloud` in `~/.ollama/server.json`) and restart Ollama when Private Mode is used.
 - (FU-201-5) Note that on Windows `daemon.token` relies on the per-user profile folder with no explicit ACL, so another process of the same user can read it; say so in `doctor` and the privacy docs.
-- (FU-201-9, owner question) Read daemon state through `core.daemon_client`, not by importing `headwaters.daemon`, unless the owner decides otherwise.
+- (FU-201-9, owner confirmed (a) on 2026-11-01, D14) Read daemon state through `core.daemon_client`, never by importing `headwaters.daemon` (the `daemon-is-a-root` contract forbids it). A `sys.modules` test shows that importing the doctor loads neither the web framework nor the MCP SDK.
 - (FU-201-10) Offer `headwaters stop --force`, which kills the pid in `daemon.json` when the API does not answer (a hung daemon).
 - (FU-202-6) The "cannot start the daemon" error tells a locked-out port, an invalid `rules.yaml` (exit 2) and an already-running lock holder apart.
-**Accept when:** each check is unit-tested with mocks; the bundle redaction test passes.
+**Accept when:** each check is unit-tested with mocks; the bundle redaction test passes; importing the doctor module loads neither `starlette` nor `mcp`.
 
 ### SPW-403 · Host installer framework + first 4 hosts
 **Model** Sonnet · **Effort** High · **Depends** 202, 301, 207, 002 · **Class** Core · **Refs** v3.4 §H, v3.2 §D, v3.1 §C5–C6
