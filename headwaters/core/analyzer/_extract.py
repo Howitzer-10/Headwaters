@@ -28,6 +28,7 @@ class Collected:
         "code_extra_chars",
         "image_count",
         "last_user_text",
+        "scan_groups",
         "scan_text",
         "system_text",
         "user_side_text",
@@ -38,6 +39,9 @@ class Collected:
         # Every string leaf of the system blocks and of every message (content parts, tool-call
         # arguments, tool_use input, nested tool_result content). For the secret scan (HDW-120).
         self.scan_text: list[str] = []
+        # The same leaves grouped per message (the system blocks are one group), in order, so
+        # the detector can join a message's leaves (HDW-142).
+        self.scan_groups: list[list[str]] = []
         self.system_text: list[str] = []
         self.user_side_text: list[str] = []  # everything except system prompts (for languages)
         self.last_user_text = ""
@@ -114,12 +118,18 @@ def collect(
     if system is not None:
         texts: list[str] = []
         _scan_content(system, texts, out, 0)
-        _leaves(system, out.scan_text)
+        group: list[str] = []
+        _leaves(system, group)
+        out.scan_text.extend(group)
+        out.scan_groups.append(group)
         out.system_text.extend(texts)
         out.all_text.extend(texts)
     for message in messages:
         role = str(message.get("role", "user"))
-        _leaves([v for k, v in message.items() if k != "role"], out.scan_text)
+        group = []
+        _leaves([v for k, v in message.items() if k != "role"], group)
+        out.scan_text.extend(group)
+        out.scan_groups.append(group)
         texts = []
         _scan_content(message.get("content"), texts, out, 0)
         tool_calls = message.get("tool_calls")

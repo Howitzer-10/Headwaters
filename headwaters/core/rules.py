@@ -23,6 +23,17 @@ class _Model(BaseModel):
 
 class SecretsRules(_Model):
     action: Literal["local", "refuse", "off"] = "local"
+    # HDW-142: joined and encoded forms. All bounds are rules, not code constants.
+    scan_join: bool = True
+    scan_decode: bool = True
+    scan_join_window_chars: int = Field(default=2048, ge=64)
+    scan_join_span: int = Field(default=2, ge=1, le=8)
+    scan_base64_min_chars: int = Field(default=24, ge=8)
+    scan_base64_max_chars: int = Field(default=16384, ge=64)
+    scan_percent_max_chars: int = Field(default=262144, ge=64)
+    scan_max_candidates: int = Field(default=256, ge=1)
+    scan_max_decoded_bytes: int = Field(default=1048576, ge=1024)
+    scan_budget_ms: int = Field(default=2000, ge=50)
 
 
 class PickerRules(_Model):

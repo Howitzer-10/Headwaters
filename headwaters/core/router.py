@@ -59,7 +59,7 @@ from headwaters.core.router_prep import (
     local_usable,
     only_local,
     pull_hint,
-    scan_texts,
+    scan_groups,
     with_session_model,
     without_reasoning,
 )
@@ -83,7 +83,7 @@ from headwaters.core.scope import (
     paid_scopes_available,
     resolve_scope,
 )
-from headwaters.core.secrets_detect import SecretDetector, SecretMatch
+from headwaters.core.secrets_detect import ScanLimits, SecretDetector, SecretMatch
 from headwaters.core.state import Database
 from headwaters.core.state_misc import SessionRow, get_session, pin_session
 
@@ -332,7 +332,8 @@ class Router:
     def _scan_secrets(self, request: RouteRequest) -> list[SecretMatch]:
         if self._secrets is None:
             return []
-        return self._secrets.scan_all(scan_texts(request))
+        limits = ScanLimits.from_rules(self._rules_source().secrets)
+        return self._secrets.scan_groups(scan_groups(request), limits)
 
     def _get_session(self, key: str) -> SessionRow | None:
         try:

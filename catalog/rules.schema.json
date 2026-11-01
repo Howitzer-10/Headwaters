@@ -721,6 +721,65 @@
           ],
           "title": "Action",
           "type": "string"
+        },
+        "scan_base64_max_chars": {
+          "default": 16384,
+          "minimum": 64,
+          "title": "Scan Base64 Max Chars",
+          "type": "integer"
+        },
+        "scan_base64_min_chars": {
+          "default": 24,
+          "minimum": 8,
+          "title": "Scan Base64 Min Chars",
+          "type": "integer"
+        },
+        "scan_budget_ms": {
+          "default": 2000,
+          "minimum": 50,
+          "title": "Scan Budget Ms",
+          "type": "integer"
+        },
+        "scan_decode": {
+          "default": true,
+          "title": "Scan Decode",
+          "type": "boolean"
+        },
+        "scan_join": {
+          "default": true,
+          "title": "Scan Join",
+          "type": "boolean"
+        },
+        "scan_join_span": {
+          "default": 2,
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Scan Join Span",
+          "type": "integer"
+        },
+        "scan_join_window_chars": {
+          "default": 2048,
+          "minimum": 64,
+          "title": "Scan Join Window Chars",
+          "type": "integer"
+        },
+        "scan_max_candidates": {
+          "default": 256,
+          "minimum": 1,
+          "title": "Scan Max Candidates",
+          "type": "integer"
+        },
+        "scan_max_decoded_bytes": {
+          "default": 1048576,
+          "minimum": 1024,
+          "title": "Scan Max Decoded Bytes",
+          "type": "integer"
+        },
+        "scan_percent_max_chars": {
+          "default": 262144,
+          "minimum": 64,
+          "title": "Scan Percent Max Chars",
+          "type": "integer"
         }
       },
       "title": "SecretsRules",

@@ -101,6 +101,11 @@ def scan_texts(request: RouteRequest) -> list[str]:
     return [t for t in collect(request.messages, request.system).scan_text if t]
 
 
+def scan_groups(request: RouteRequest) -> list[list[str]]:
+    """The same leaves as ``scan_texts``, grouped per message (HDW-142)."""
+    return [g for g in collect(request.messages, request.system).scan_groups if g]
+
+
 def with_session_model(
     candidates: Sequence[Candidate], session_model: str | None
 ) -> tuple[Candidate, ...]:
