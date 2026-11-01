@@ -7,7 +7,7 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 - If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
 - Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
 - **Decisions override packets.** Every packet carries a `DECISIONS OVERRIDE PACKET TEXT` block (just above `WORKFLOW FOR THIS TICKET`) that tells the session to read `docs/DECISIONS.md` and `docs/ASSUMPTIONS.md` first; D7 and later win over conflicting packet text, and tickets listed under "Deferred tickets" are not built. **If you regenerate the packets, put this block back into the Context Pack template**, or the protection is lost.
-- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings. HDW-142 and later come from triage sessions (`docs/FOLLOWUPS.md`); their Part 3 names the follow-up.
+- Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings. HDW-142 and later (HDW-144 to HDW-153 are the Phase 2.5 tickets) come from triage sessions (`docs/FOLLOWUPS.md`); their Part 3 names the follow-up.
 
 | Ticket | Title | Model | Design sections included | ≈ k tokens |
 | --- | --- | --- | --- | --- |
@@ -66,6 +66,16 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-206 | Progress, async jobs, elicitation | Sonnet | v3 §5.2.2, v3.4 §B3 | 1.8 |
 | HDW-207 | MCP prompts, command files, rules packs | Sonnet | v3 §5.2.3, v3.3 §C | 1.8 |
 | HDW-208 | MCP integration tests and host-eval harness skeleton | Sonnet | v3.4 §B2 | 1.4 |
+| HDW-144 | Local GPU-busy check counts Ollama's own memory as another app's | Sonnet | FU-201-2, FU-125-1, triage | 2.0 |
+| HDW-145 | Check the daemon, shim and tools on real hosts and a real model | Opus | FU-202-1, FU-204-3, FU-206-3, triage, triage | 2.7 |
+| HDW-146 | The shim forwards elicitation and cancellation; jobs can be cancelled | Sonnet | FU-206-1, FU-205-1, FU-202-2, FU-202-3, FU-206-4, FU-206-8, triage | 2.1 |
+| HDW-147 | Workspace root rule (`workspace.roots`) | Sonnet | FU-203-2, FU-204-2, triage | 1.7 |
+| HDW-148 | Rebuild the engine when rules change | Sonnet | FU-131-1, FU-131-2, triage | 1.8 |
+| HDW-149 | Real seed catalog entries and the catalog gaps behind hints | Sonnet | FU-139-1, FU-139-2, FU-140-1, FU-136-1, FU-137-1, FU-204-4, triage | 2.2 |
+| HDW-150 | OpenCode free models can be called | Sonnet | FU-201-3, A-OC-3, triage | 1.6 |
+| HDW-151 | Move the remaining tunables to rules and catalog | Sonnet | FU-138-1, FU-138-2, FU-138-3, triage | 1.7 |
+| HDW-152 | Test and cleanup sweep | Sonnet | FU-125-2, FU-126-1, FU-126-2, FU-127-1, FU-134-2, FU-136-2, FU-140-4, FU-141-2, FU-143-1, FU-143-2, FU-203-6, FU-205-7, FU-205-8, FU-208-3, triage | 2.6 |
+| HDW-153 | Remote-model and feature guards | Sonnet | FU-121-4, FU-126-3, FU-135-2, Phase 1 recheck R4, triage | 1.8 |
 | HDW-301 | OpenAI-compatible endpoints and virtual models | Sonnet | v3 §5.1, v3.3 §B | 1.9 |
 | HDW-302 | Streaming failover, headers, session key | Sonnet | v3 §4.8, v3 §5.1 | 1.7 |
 | HDW-303 | Anthropic `/v1/messages` endpoint | Sonnet | v3 §5.1, v3.2 §D | 1.9 |

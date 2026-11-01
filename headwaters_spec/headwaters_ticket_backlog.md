@@ -686,6 +686,98 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 
 ---
 
+## Phase 2.5: Phase 2 review follow-ups
+
+Tickets HDW-144 to HDW-153 come from the Phase 2 review (`docs/PHASE2_REVIEW.md`) and the triage session of 2026-11-01 (`docs/FOLLOWUPS.md`). **Before HDW-301** = merge before Phase 3 starts (only HDW-148); "Before HDW-xxx" = merge before that ticket; **Can wait** = any time before the Beta 0.1 gate (SPW-407). Ticket text is new, written from the follow-up and the live code.
+
+### HDW-144 · Local GPU-busy check counts Ollama's own memory as another app's · **Before HDW-407**
+**Model** Sonnet · **Effort** Medium · **Depends** 108, 201 · **Class** Core · **Refs** FU-201-2, FU-125-1
+**Build:**
+- `detect_gpu_busy` (`headwaters/core/hardware/state.py:150-155`): when Windows hides per-process memory and no Ollama process is listed, it counts all used VRAM as "other". With only Ollama's loaded model on the GPU it reads as busy, which matches the live symptom `skipped (gpu_busy)` in keep-warm. Subtract the VRAM Ollama reports for its loaded models (`/api/ps` `size_vram`) from the used total before deciding. **Reproduce first** on the dev GPU (one model loaded, nothing else running) and put the numbers in the report. This needs the owner's GPU machine.
+- Record what `nvidia-smi --query-compute-apps` really prints on Windows (the encoding of process names), keep the capture in `docs/` like `ollama_tags_sample.json`, and set the decode from it (FU-125-1). A non-ASCII process name must never give a wrong busy reading.
+- Unit tests with a fake `/api/ps` and fake GPU info: Ollama's model alone is not busy; a game plus Ollama's model is busy when the game's share is over the threshold; unknown per-process memory with no Ollama on the GPU still counts all used VRAM.
+**Accept when:** the live repro no longer reports `gpu_busy` with only Ollama on the GPU and keep-warm pings; the unit cases pass; the `nvidia-smi` capture is in `docs/` and the assumption row is updated.
+
+### HDW-145 · Check the daemon, shim and tools on real hosts and a real model · **Before HDW-407**
+**Model** **Opus** · **Effort** High · **Depends** 206, 208 · **Class** – · **Refs** FU-202-1, FU-204-3, FU-206-3, triage
+**Build:**
+- A verification spike like HDW-002, on a real machine with real hosts and a real Ollama model. Record every result in `docs/ASSUMPTIONS.md` with the host version and date; every failure becomes a follow-up in the report.
+- **Daemon lifetime (FU-202-1):** start the shim from VS Code, Claude Desktop and Cursor (whichever are installed), close the first IDE, and check the daemon still answers. If it dies, say which Job Object rule applies and propose the fix (scheduled task, service or `cmd /c start`).
+- **Shim working folder (FU-204-3):** which folder each host starts the shim in, and whether it sends roots.
+- **Real model through the shim:** `headwaters_do` end to end, a job with progress, `headwaters_more` (list, call, list again), result links after a daemon restart, job status and result tools (FU-204-6, FU-204-9, FU-205-10, FU-206-6, FU-206-7).
+- **Real thinking model:** `headwaters_think` with a model that takes named levels (gpt-oss) and one that does not think (FU-205-4, FU-140-2); keep-warm against a real Ollama (FU-201-8).
+- **Estimates:** measure real cold-load seconds, output tokens and cloud tokens per second against the numbers in `headwaters/mcp/tools/context.py` (FU-206-3); HDW-704 tunes them later.
+- Add `-m live` tests wherever a check can be repeated.
+**Accept when:** the report holds a table of host x check x result; every failure has a follow-up; ASSUMPTIONS rows exist with versions and dates; the daemon-lifetime question is answered for each installed host.
+
+### HDW-146 · The shim forwards elicitation and cancellation; jobs can be cancelled · **Before HDW-407**
+**Model** Sonnet · **Effort** High · **Depends** 206 · **Class** Core · **Refs** FU-206-1, FU-205-1, FU-202-2, FU-202-3, FU-206-4, FU-206-8
+**Build:**
+- The shim's client to the daemon declares the elicitation capability when the host does, forwards the daemon's question to the host and returns the answer. Scope and spend confirmations then ask inside the host instead of taking the `force` text fallback (D9: a host that can be asked is always asked).
+- Forward a host's cancellation to the daemon: a cancelled call stops the model call and marks its job cancelled (progress is already relayed, `headwaters/mcp/shim.py:98`).
+- Add a cancel tool for jobs and a retention rule for finished jobs (rows older than a rules value are deleted; the answer stays in memory only, as today).
+- Bind a confirmation answer to the question's model and cost (FU-206-8): if the cached plan is gone and the new plan differs, ask again.
+**Accept when:** a direct client and a shim client are both asked; tests with a fake host answering yes, no and cancel; cancelling a running job stops it; finished jobs past the retention are deleted; a changed plan asks again.
+
+### HDW-147 · Workspace root rule (`workspace.roots`) · **Before HDW-403**
+**Model** Sonnet · **Effort** Low · **Depends** 203, 204 · **Class** Core · **Refs** FU-203-2, FU-204-2
+**Build:**
+- Add `workspace.roots` (list of folders) to `rules.yaml` and its schema. `workspace_select.py` already applies the D9 order (host roots inside a configured root, else the configured root, else valid host roots, else the shim's folder); nothing supplies the configured part yet.
+- Pass the configured roots from `Daemon.tool_context()`. A project config may only tighten.
+**Accept when:** with `workspace.roots` set, a host root outside it is ignored and a path outside it is refused; unset behaves as today; a schema test covers the key; HDW-403 can write it.
+
+### HDW-148 · Rebuild the engine when rules change · **Before HDW-301**
+**Model** Sonnet · **Effort** Medium · **Depends** 131, 201 · **Class** Core · **Refs** FU-131-1, FU-131-2
+**Build:**
+- `build_engine` takes one reading of the rules for the candidate builder, hardware, feature flags, `TargetBuilder`, `build_chain` and keep-warm. Make the daemon rebuild the engine on `on_reload` (or give each of them the provider) so edits to `tiers.paid.models`, the local host, `features`, endpoints and `kv_cache_type` apply without a restart. A rebuild must not drop a request in flight.
+- Remove the `Daemon.rules` and `Engine.rules` startup snapshot once nothing reads it.
+- The gateway (HDW-301) uses the same hook, so it never holds its own copy of the rules. Airplane and Private lock already apply per request and must keep doing so.
+**Accept when:** tests change each listed key in a running daemon and the next request uses it; a request in flight finishes on the old engine; no reader of the snapshot is left; Private and airplane still apply at once.
+
+### HDW-149 · Real seed catalog entries and the catalog gaps behind hints · **Before HDW-407**
+**Model** Sonnet · **Effort** Medium · **Depends** 139, 140 · **Class** Core · **Refs** FU-139-1, FU-139-2, FU-140-1, FU-136-1, FU-137-1, FU-204-4
+**Build:**
+- Replace the `example-*` seed models with real catalog entries: a real tiny classifier slug with measured tps, local model recommendations per GPU profile (including a vision model) and free-limit values. Check each against current official docs and record sources in `docs/ASSUMPTIONS.md` (clean room).
+- Pin the exact OpenRouter free-limit, Gemini daily-limit and Anthropic credit-balance body texts with live captured bodies; update `wall_patterns` and their tests.
+- Add an optional `reasoning_ok` field to the catalog `ModelEntry` so a model known only from the catalog (or from OpenCode and OpenAI-compatible endpoints) can serve `think`.
+- `_from_live` in `catalog/merge.py` must not present a defaulted `ctx` as known: mark it assumed (a flag on `ModelRow`) or skip the fill, so those models stop reporting `ctx_too_small`.
+- Hints name real models: `pull_model` for an image request when only text-only local models exist (use `gpu_profiles.*.recommended.vision`), and the local fix hints from HDW-137.
+**Accept when:** no `example-*` id in the seed; hints name real models; the catalog schema check is clean and the catalog is signed (`scripts/sign_catalog.py`); a model with unknown context is no longer rejected for it; every wall pattern row has a source and a date.
+
+### HDW-150 · OpenCode free models can be called · **Before HDW-407**
+**Model** Sonnet · **Effort** Medium · **Depends** 201 · **Class** Core · **Refs** FU-201-3, A-OC-3
+**Build:**
+- Check the OpenCode free-model endpoint (base URL, auth, error shapes) against its official docs and record it in `docs/ASSUMPTIONS.md`. A-OC-3 says no base URL is verified, so today these models are discovered and ranked but raise `provider_unsupported` in `headwaters/core/engine.py`.
+- If the endpoint is documented: route these models through the executor and classify their walls. If no public endpoint exists: hide OpenCode free models from the picker, say so in `doctor`, and close the ticket as a decision.
+**Accept when:** a mocked-HTTP test calls an OpenCode free model at the verified URL and classifies its walls, or the decision is written down; ASSUMPTIONS is updated; a Private lock or local scope never reaches it.
+
+### HDW-151 · Move the remaining tunables to rules and catalog · **Can wait**
+**Model** Sonnet · **Effort** Medium · **Depends** 138 · **Class** Core · **Refs** FU-138-1, FU-138-2, FU-138-3
+**Build:**
+- To `rules.yaml`: the remaining design section 5 tunables (reserve defaults, busy percent, residency and sysmem thresholds in `core/hardware/`), `streak_reset_s` in `quotas.py`, executor timeouts, `max_attempts`, and `DEFAULT_EFFORT`.
+- To the catalog: GPU-range and max-loaded facts, the analyzer heuristics in `analyzer/classifier.py` and `requirements.py`, and the OpenRouter URLs in `cloud_map.py`.
+- Defaults stay the same, and an invalid value fails safe at startup as in HDW-138.
+**Accept when:** a test searches `headwaters/core` for the listed constants and finds none left in code; the golden results are identical with the defaults; each new key has a schema test.
+
+### HDW-152 · Test and cleanup sweep · **Can wait**
+**Model** Sonnet · **Effort** Low · **Depends** 143, 208 · **Class** – · **Refs** FU-125-2, FU-126-1, FU-126-2, FU-127-1, FU-134-2, FU-136-2, FU-140-4, FU-141-2, FU-143-1, FU-143-2, FU-203-6, FU-205-7, FU-205-8, FU-208-3
+**Build:**
+- Tests: pass `encoding` to every `read_text()` and `write_text()` (10 calls, FU-125-2); give `tests/test_cli_misc.py` a fixture feature so the `_`-hiding rule is really tested (FU-126-2); list litellm's loggers after import and check none writes to stdout, re-checked on each bump (FU-127-1); a deterministic test for the WAL lock retry by holding an exclusive lock from one connection while another calls `_enable_wal` (FU-143-2).
+- CI: run `ruff check` and `ruff format --check` on the same paths as the local gate and add `bench` (FU-141-2, FU-143-1, FU-208-3); print skip reasons on ubuntu and check the symlink tests ran there (FU-203-6; ubuntu shows 10 skips and nobody has read why).
+- Cleanup: mark the old `features/_example` sentence in `docs/ASSUMPTIONS.md` as superseded (FU-126-1); remove `RouterConfig.residency`, defined at `router.py:107` and never read (FU-134-2); add `set_context` to the suggestion docstring in `mcp/tools/schemas.py` (FU-136-2); `models list --json` shows `reasoning_ok` and `pick` gets a `--reasoning` flag (FU-140-4).
+- MCP tools: `should_switch_host` uses the catalog's id and alias lookup, not a name-suffix match (FU-205-7); `recommend_model` sizes with the token estimate of attached files when paths are given (FU-205-8).
+**Accept when:** each item has its test or file change named in the report; ruff, mypy, pytest and lint-imports are clean; CI is green on windows and ubuntu.
+
+### HDW-153 · Remote-model and feature guards · **Before HDW-306**
+**Model** Sonnet · **Effort** Medium · **Depends** 121, 126, 135 · **Class** Core · **Refs** FU-121-4, FU-126-3, FU-135-2, Phase 1 recheck R4
+**Build:**
+- `CandidateBuilder` re-checks every local row's name and fields against the catalog's remote patterns, so a stale `local` row for a cloud model never becomes a candidate (R4). The executor guard stays as defence in depth.
+- `discover_features` skips packages whose name starts with `_` unless asked; the test fixtures ask (FU-126-3).
+- A request carrying a remote image URL drops local candidates in the hard filter instead of wasting one attempt on a refusal (FU-135-2), and the reasons say why.
+**Accept when:** a stale `local` row for `gpt-oss:120b-cloud` is dropped before the executor; a `_`-prefixed package is not registered in production; a golden row covers the remote-image case; R4 is marked closed in the next review.
+
+---
+
 ## Phase 3: Gateway
 
 ### SPW-301 · OpenAI-compatible endpoints and virtual models
@@ -695,7 +787,9 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - `/v1/models` lists core picker models `headwaters/auto|free|local|cloud`, plus `headwaters/quality|duck` only when `picker.show_extras`.
 - Requests call `Router.handle`.
 - Pin the LiteLLM version (`uv.lock`).
-**Accept when:** an OpenAI SDK client completes chat (streaming and non-streaming) against mocked providers; the model list respects the config.
+- (FU-201-6) The daemon only probes and records the gateway and dashboard ports in `daemon.json`; nothing binds them. Bind through `netports.bind_first_free` and rewrite the state file with the port actually taken.
+- (FU-135-3) A remote image URL sent to a local model is refused as an executor error; the gateway error must tell the user to send the image as a `data:` URL.
+**Accept when:** an OpenAI SDK client completes chat (streaming and non-streaming) against mocked providers; the model list respects the config; the gateway port is bound by `bind_first_free` and `daemon.json` shows it; a remote image URL gives the `data:` URL advice.
 
 ### SPW-302 · Streaming failover, headers, session key
 **Model** Sonnet · **Effort** High · **Depends** 301 · **Class** Core · **Refs** v3 §4.8, §5.1
@@ -706,7 +800,9 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Session key from `x-session-id` or a hash.
 - Advice header and inline note when `advice` is configured (handback advice itself is in SPW-502).
 - (FU-123-2) Add `x-headwaters-below-floor: true` (and `x-headwaters-suggestion` with the first suggestion code) when the decision is below the floor. The body is not changed for it, so clients keep parsing.
-**Accept when:** tests cover a 429 / 402 / 503 before the first token (transparent retry) and a mid-stream failure (clean error); a below-floor local response carries the below-floor header.
+- (FU-130-1, FU-130-2) Show `verify_status == "unchecked"` with the below-floor warning, never as verified. A streamed answer is verified after the fact, so the unchecked flag arrives on the final event; say so in the header or terminal event.
+- (FU-134-3) A session on a streaming request that fails mid-stream is unpinned; today only verification failures unpin.
+**Accept when:** tests cover a 429 / 402 / 503 before the first token (transparent retry) and a mid-stream failure (clean error); a below-floor local response carries the below-floor header; an unchecked answer is never shown as verified; a mid-stream failure unpins the session.
 
 ### SPW-303 · Anthropic `/v1/messages` endpoint
 **Model** Sonnet · **Effort** High · **Depends** 302 · **Class** Core · **Refs** v3 §5.1, v3.2 §D
@@ -758,7 +854,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Validation pings per provider (no prompt content).
 - Never written to logs or diagnostic bundles.
 - (FU-122-1) Supply the callbacks the executor already accepts: `api_key_for(provider)` and `key_alias_for(provider)` (the alias only, never the secret), wired wherever the daemon, gateway and CLI build the `Executor`. No production code passes either today, so key-scoped walls (`key:<alias>:paid`) fall back to the provider subject.
-**Accept when:** tests run with a fake keyring backend; masking is verified; a 402 on a stored key records `key:<alias>:paid` in a test that builds the Executor from the key store (fake keyring).
+- (FU-131-3, FU-201-4) The key-poll timer and the executor read keys only from environment variables (`OPENROUTER_API_KEY`, `openai_compatible.api_key_env`, litellm's own). Read keys saved by alias in the credential store too, so the poller and the executor see the same keys.
+**Accept when:** tests run with a fake keyring backend; masking is verified; a 402 on a stored key records `key:<alias>:paid` in a test that builds the Executor from the key store (fake keyring); a key saved by alias is used by both the poll timer and the executor.
 
 ### SPW-402 · `doctor`
 **Model** Sonnet · **Effort** Medium · **Depends** 108, 109, 201, 401 · **Class** Core · **Refs** v3.1 §C1–C3, v3 §5.3
@@ -768,6 +865,11 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Ports and excluded ranges; daemon health; keys validity; catalog freshness; git `core.autocrlf`.
 - `--host`: live round trip, a tool-call test and a scope test for that host.
 - `--bundle`: redacted diagnostic zip (no prompts, keys or paths beyond the app dirs).
+- (FU-121-1) Hint: set `OLLAMA_NO_CLOUD=1` (or `disable_ollama_cloud` in `~/.ollama/server.json`) and restart Ollama when Private Mode is used.
+- (FU-201-5) Note that on Windows `daemon.token` relies on the per-user profile folder with no explicit ACL, so another process of the same user can read it; say so in `doctor` and the privacy docs.
+- (FU-201-9, owner question) Read daemon state through `core.daemon_client`, not by importing `headwaters.daemon`, unless the owner decides otherwise.
+- (FU-201-10) Offer `headwaters stop --force`, which kills the pid in `daemon.json` when the API does not answer (a hung daemon).
+- (FU-202-6) The "cannot start the daemon" error tells a locked-out port, an invalid `rules.yaml` (exit 2) and an already-running lock holder apart.
 **Accept when:** each check is unit-tested with mocks; the bundle redaction test passes.
 
 ### SPW-403 · Host installer framework + first 4 hosts
@@ -782,11 +884,18 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
   - **OpenCode:** provider `baseURL` + MCP
   - **Claude Desktop:** MCP
 - Templates in `headwaters/installer/templates/`.
+- (FU-202-5) `mcp-path` assumes `headwaters-mcp` sits next to the interpreter; a pipx, `uv tool` or frozen install may not. The installer checks the path exists before writing a host config.
+- (FU-205-3) Write the OpenCode provider and expose its real id, so the local-model switch command in `recommend.py` is exact.
+- (FU-207-1, FU-207-2) Verify each host's command folder, `$ARGUMENTS` convention and rules-file location and front matter against current official docs, then install the command files and rules pack from `integrations/` into the project or host config.
 **Accept when:** golden tests run against sample config files (merge without clobbering, idempotent re-run, uninstall restores the backup).
 
 ### SPW-404 · Status page (core, read-only)
 **Model** Sonnet · **Effort** Medium · **Depends** 201 · **Class** Core · **Refs** v3.5 §B
 **Build:** a minimal page on the dashboard port showing scope, locks, walls with ETAs, warm model, recent decisions (metadata), and the features list with the ★ legend. No editing controls (those are ★ dashboard, SPW-503). Loopback only. (FU-122-4) Show wall subjects readably (for example `OpenRouter: paid credits`) instead of the raw `...:paid` / `...:free` ids, and give `headwaters status` the same labels. Drop its "after a balance check" text for a wall with no end time; every wall now gets an end time (HDW-122).
+- (FU-128-1) `headwaters status` (`cli/cmd_status.py`, `locks_in_force`) reads `decision.active_locks` instead of rebuilding the lock list by hand.
+- (FU-128-2, FU-128-3) The decision log records `active_locks` as well as `locks`, and `headwaters pick` shows every lock in force, so Private Mode plus local scope does not show "none".
+- (FU-133-1) Show `ScoreBreakdown.offload_penalty` in the decision reasons and the status page, so a user can see why an offloaded model ranked low.
+- (FU-205-9) The `quota_status` advanced tool lists local models and shows a wall's provider and key scope separately.
 **Accept when:** it renders with test data; nothing is reachable from a non-loopback address; wall labels are readable in the page and in `headwaters status`.
 
 ### SPW-405 · Windows installer, autostart, itch packaging
@@ -813,6 +922,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Per-host setup pages, generated from the installer templates.
 - Troubleshooting: context truncation, tool-call failures, cold loads, model-name mismatch, port conflicts, sysmem fallback.
 - Privacy notice; ★ legend; beta promises (v3.5 §C, with the chosen tester promise filled in); itch store page draft (v3.5 §H).
+- (FU-121-3) Publish `ollama_remote_patterns` in the signed catalog only after clients that know the key have shipped, or bump `schema_version`: an older client rejects unknown catalog keys.
 **Opus gate:**
 - Run the closed-alpha exit criteria: 10-minute install on 12 GB and 16 GB machines; stable in Cline, OpenCode, Claude Desktop and VS Code Copilot BYOK; no P1 bugs for 1 week.
 - Open-source readiness spot check.
@@ -829,6 +939,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Reports by day, week and model.
 - Optional "subscription credits avoided" estimate from dated catalog rates, labelled as an estimate.
 - Exposed to status, CLI `headwaters savings` and the dashboard.
+- (FU-205-6) `headwaters_status` shows savings only if a `DashboardPlugin.render_summary()` exists under `ledger`. Fix the shape of that dict and test the status tool against the real ledger.
 **Accept when:** the calculations are unit-tested; disabling the feature removes it cleanly.
 
 ### SPW-502 · Paid scopes, budgets, handback advice ★
@@ -917,6 +1028,8 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - File watcher plus git-aware invalidation.
 - Respects ignore files; secrets and env files excluded.
 - Per-workspace DB under the cache dir.
+- (FU-203-4) Ignore rules also read `.git/info/exclude`, the global git ignore file and ignore files above the root.
+- (FU-203-7) `pack_files` reads each file in full up to 1 MiB before counting; use a size-first shortcut for large budgets or many files.
 **Accept when:** index build and update tests pass on a sample multi-language repo; a 10k-file repo indexes within the documented time budget.
 
 ### SPW-602 · Context engine B: embeddings and packing ★
@@ -926,6 +1039,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - `ContextPlugin.pack(task, paths, num_ctx)`: target files → referenced symbols → callers/callees → tests → docs, with token accounting against the chosen model's computed `num_ctx`.
 - Wired into `headwaters_do`/`ask` when enabled.
 - Local-only by construction.
+- (FU-203-5) Token counts in `workspace_files.py` use chars/3.5; use `Analyzer.estimate_tokens` or the chosen model's tokenizer once packing knows the model's `num_ctx`.
 **Accept when:** packing tests cover budget adherence and ranking order; it falls back to simple packing when disabled.
 
 ### SPW-603 · Analyzer layer 2: embedding kNN ★
@@ -943,6 +1057,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - `VerifierPlugin` adding a grounding check: every referenced symbol or file must exist in the index or the diff.
 - Project checks from `.headwaters.yaml`, run with an allowlist (`pwsh` / `powershell` / `cmd` explicitly; no `shell=True` with untrusted strings) and timeouts.
 - Machine-readable failure reasons.
+- (FU-204-5) `headwaters_check` does not run the project's tests or linters (`.headwaters.yaml` `checks:` is read but unused) and does not check that a diff touches only the named `paths`. Add both.
 **Accept when:** fixtures cover hallucinated symbols, failing lint and timeouts.
 
 ### SPW-605 · Worktree execution ★
@@ -962,6 +1077,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Enables the optimistic rung.
 - Local scope escalates locally only.
 - Records pass/fail per (model, task) in outcomes.
+- (FU-206-2) The spend question covers the first pick only; a cascade or verified retry may call a costlier model. Ask again before a paid escalation, or cap spend per request.
 **Accept when:** scenario tests cover a cheap-model fail → escalate → pass, the cap reached, and local-only escalation.
 
 ### SPW-607 · Handoff packets and sticky sessions ★
@@ -971,6 +1087,9 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Deterministic extraction first; code is never summarized.
 - Sticky sessions: choose the tier at session start or on a context threshold; switch only on a wall or repeated verify failures; write a packet on every switch.
 - Full `headwaters_handoff`.
+- (FU-134-1) Revisit the below-floor local session rule if users see flapping: keep the lead only when the same local best-effort model still ranks first.
+- (FU-140-3) Decide whether the short reasoning summary that v3 4.7 allows is wanted; D12 builds none.
+- (FU-205-5) Add an older-turn summary and the router session key to the handoff packet, and have `should_switch_host` return its `handoff_packet_id` (always null today).
 **Accept when:** packet schema tests pass; a switch scenario writes a packet; local scope keeps summarization local.
 
 ### SPW-608 · Beta 0.3 review gate
@@ -1011,6 +1130,7 @@ Tickets HDW-120 to HDW-141 come from the HDW-119 review (`review_bundle_HDW-119/
 - Windsurf
 
 Each ticket: detect the host, show a diff, back up the config, verify, uninstall, add `doctor --host` checks, and generate a per-host docs page.
+- (FU-207-1, FU-207-2) Per host: verify the command folder, `$ARGUMENTS` convention and rules-file location and front matter against current docs, and install the command files and rules pack from `integrations/`.
 **Accept when:** golden merge, idempotency and uninstall tests pass.
 
 ### SPW-704 · HeadwatersBench
@@ -1022,6 +1142,8 @@ Each ticket: detect the host, show a diff, back up the config, verify, uninstall
 4. host tool-call reliability (uses SPW-705)
 
 Also: reference GPU profiles (12 GB, 16 GB); reproducible configs; reports with methodology, n and dates.
+- (FU-133-2) Tune the offload penalty values (30, 10) with bench data.
+- (FU-206-3) Tune the estimate numbers in `mcp/tools/context.py` (output tokens, load seconds per GB, cloud tokens per second), or learn them from `outcomes.latency_ms`.
 **Accept when:** the full run completes on one reference machine and produces a Markdown/HTML report.
 
 ### SPW-705 · Host tool-call eval suite (full)
@@ -1031,6 +1153,8 @@ Also: reference GPU profiles (12 GB, 16 GB); reproducible configs; reports with 
 - Run them per (host profile, dispatcher model), including weak free models and local dispatchers.
 - Nightly optional live job.
 - Feeds tool-description tuning.
+- (FU-208-1, FU-208-2) Real dispatcher models, a 100+ task set, per-host tool-description variants and host quirks in the profiles, and a CLI entry point plus CI job that publishes a report.
+- (FU-204-7, FU-204-8) Score the tool descriptions on tool-selection rate, argument validity and relay compliance, and measure on real local-model output whether a diff written mid-answer without a fence needs extraction heuristics.
 **Accept when:** the report shows per-model selection, argument validity and relay rates; a regression threshold fails CI when breached (mocked mode).
 
 ### SPW-706 · Beta 0.4 review gate
@@ -1049,6 +1173,7 @@ Also: reference GPU profiles (12 GB, 16 GB); reproducible configs; reports with 
 - Dependency licence audit: permissive only in any closed package; complete `THIRD_PARTY_NOTICES.md`.
 - Secrets scan of the repo; ★ separation report; a "ready to open-source core" checklist (for D1).
 - Start the ≥ 4-week evidence window.
+- (FU-143-3) Pin GitHub Actions (`checkout`, `setup-uv`, `upload-artifact`) by commit SHA, not tag, before the public release.
 
 ### SPW-802 · Decision evidence report
 **Model** Sonnet (scripts) + **Opus** (analysis) · **Effort** Medium/High · **Depends** 508, 704, 801
