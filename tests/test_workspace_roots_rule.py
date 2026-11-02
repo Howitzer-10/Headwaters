@@ -31,14 +31,14 @@ def test_a_project_config_cannot_set_roots() -> None:
 
 def test_the_daemon_passes_live_configured_roots(tmp_path: Path) -> None:
     daemon = Daemon.__new__(Daemon)
-    daemon.rules = Rules(workspace={"roots": [str(tmp_path)]})  # type: ignore[arg-type]
-    daemon.rules_source = None
+    current = [Rules(workspace={"roots": [str(tmp_path)]})]  # type: ignore[arg-type]
+    daemon.rules_source = lambda: current[0]
     daemon.engine = None
     daemon.db = object()  # type: ignore[assignment]
     daemon.reload_rules = None
     context = daemon.tool_context()
     assert list(context.configured_roots()) == [str(tmp_path)]
-    daemon.rules = Rules()
+    current[0] = Rules()
     assert list(context.configured_roots()) == []
 
 
