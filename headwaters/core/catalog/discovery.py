@@ -83,8 +83,16 @@ def _gather(
 
     paths_ = opencode_config_paths(rules.models.opencode_config, env, home)
     oc, oc_warn = opencode_models(paths_, rules.tiers.free_cloud.opencode_free)
-    found["opencode"] = oc
+    # OpenCode's free-tier models answer only inside OpenCode (HTTP 403 for other clients, A-OC-3,
+    # HDW-150), so they are never offered. The source still "answers" with no models, which
+    # removes rows saved by an earlier version.
+    found["opencode"] = []
     result.warnings.extend(oc_warn)
+    if oc:
+        result.warnings.append(
+            f"opencode: {len(oc)} free model(s) not offered; OpenCode serves its free models "
+            "only inside OpenCode, so Headwaters cannot call them. Use them from OpenCode itself."
+        )
 
     if blocked:
         result.warnings.append(f"cloud discovery skipped: {blocked}")

@@ -80,10 +80,11 @@ class TargetBuilder:
             base = endpoint.base_url.rstrip("/")
             return ExecTarget(model, provider, f"{_OPENAI_ROUTE}/{name}", api_base=base)
         if provider == OPENCODE:
-            # No verified base URL for OpenCode's free gateway yet (ASSUMPTIONS A-OC-3).
+            # Free-tier models are served only to OpenCode itself (403 elsewhere); defence in
+            # depth, since discovery no longer offers them (A-OC-3, HDW-150).
             raise ExecutorError(
                 "provider_unsupported",
-                "OpenCode free models cannot be called by the daemon yet.",
+                "OpenCode free models can only be used from inside OpenCode.",
                 provider=provider,
                 model=model,
             )

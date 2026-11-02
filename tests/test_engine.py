@@ -67,6 +67,7 @@ def test_opencode_free_models_are_refused_with_a_clear_error() -> None:
     with pytest.raises(ExecutorError) as raised:
         TargetBuilder(Rules())(decision("free_cloud", "opencode/some-free"))
     assert raised.value.code == "provider_unsupported"
+    assert "inside OpenCode" in str(raised.value)
 
 
 def test_local_target_without_a_fit_has_no_num_ctx() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -150,11 +151,25 @@ def test_opencode_user_list_and_config(db: Database, catalog: Catalog, tmp_path:
             "tiers": {"free_cloud": {"opencode_free": ["listed-free"]}},
         }
     )
-    refresh(db, catalog, Http(routes()), rules)
+    result = refresh(db, catalog, Http(routes()), rules)
     for name in ("opencode/cfg-free", "opencode/listed-free"):
-        row = get_model(db, name)
-        assert row is not None
-        assert (row.tier, row.retains_data, row.unscored) == ("free_cloud", True, True)
+        assert get_model(db, name) is None  # HDW-150: free-tier models work only inside OpenCode
+    assert any("2 free model(s) not offered" in w for w in result.warnings)
+
+
+def test_opencode_rows_from_an_earlier_version_are_removed(db: Database, catalog: Catalog) -> None:
+    from headwaters.core.state_models import upsert_model
+
+    refresh(db, catalog, Http(routes()))
+    old = get_model(db, "qwen:14b")
+    assert old is not None
+    upsert_model(
+        db,
+        replace(old, id="opencode/old", provider="opencode", source="opencode"),
+    )
+    result = refresh(db, catalog, Http(routes()), now=200.0)
+    assert get_model(db, "opencode/old") is None
+    assert result.removed >= 1
 
 
 def test_openai_compatible_endpoint_and_its_failure(db: Database, catalog: Catalog) -> None:
