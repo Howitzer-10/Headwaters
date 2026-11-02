@@ -53,8 +53,8 @@ class ToolContext:
     rules: Callable[[], Rules]
     store: ResultStore = field(default_factory=ResultStore)
     settings: ToolSettings = field(default_factory=ToolSettings)
-    # The configured workspace root(s). No rules key names them yet (FU-203-2), so the daemon
-    # passes none and the shim's working directory is the boundary.
+    # The configured workspace root(s) (``workspace.roots`` in rules.yaml, HDW-147). Empty means
+    # the shim's working directory is the boundary.
     configured_roots: Callable[[], Sequence[str]] = field(default=lambda: ())
     # The shared SQLite state (walls, jobs, handoffs, feedback). Without it the tools that need it
     # answer ``no_state``.

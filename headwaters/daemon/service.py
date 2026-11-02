@@ -163,6 +163,7 @@ class Daemon:
             rules=lambda: self.live_rules,
             db=self.db,
             reload_rules=self.reload_rules or (lambda: None),
+            configured_roots=lambda: self.live_rules.workspace.roots,
         )
 
     # ------------------------------------------------------------------ http payloads

@@ -196,6 +196,11 @@ class McpRules(_Model):
     job_retention_days: float = Field(default=7, gt=0)
 
 
+class WorkspaceRules(_Model):
+    # Absolute folders that bound file access (D9). Empty = the shim's folder is the boundary.
+    roots: list[str] = Field(default_factory=list)
+
+
 class AttributionRules(_Model):
     referer: str | None = None
     title: str = "Headwaters"
@@ -281,6 +286,7 @@ class Rules(_Model):
     gateway: GatewayRules = Field(default_factory=GatewayRules)
     dashboard: DashboardRules = Field(default_factory=DashboardRules)
     mcp: McpRules = Field(default_factory=McpRules)
+    workspace: WorkspaceRules = Field(default_factory=WorkspaceRules)
     attribution: AttributionRules = Field(default_factory=AttributionRules)
     telemetry: Literal[False] = False
     catalog: CatalogRules = Field(default_factory=CatalogRules)

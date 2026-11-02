@@ -954,6 +954,20 @@
       },
       "title": "WallsRules",
       "type": "object"
+    },
+    "WorkspaceRules": {
+      "additionalProperties": false,
+      "properties": {
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roots",
+          "type": "array"
+        }
+      },
+      "title": "WorkspaceRules",
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1071,6 +1085,9 @@
     },
     "walls": {
       "$ref": "#/$defs/WallsRules"
+    },
+    "workspace": {
+      "$ref": "#/$defs/WorkspaceRules"
     }
   },
   "title": "Headwaters rules.yaml",
