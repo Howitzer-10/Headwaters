@@ -34,7 +34,7 @@ def test_the_daemon_passes_live_configured_roots(tmp_path: Path) -> None:
     daemon.rules = Rules(workspace={"roots": [str(tmp_path)]})  # type: ignore[arg-type]
     daemon.rules_source = None
     daemon.engine = None
-    daemon.db = None
+    daemon.db = object()  # type: ignore[assignment]
     daemon.reload_rules = None
     context = daemon.tool_context()
     assert list(context.configured_roots()) == [str(tmp_path)]
