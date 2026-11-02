@@ -88,6 +88,8 @@ def no_route(
         )
     if any(x.startswith("no_fit_") for x in codes) and "local" in req.scope.tiers:
         tips.append(Suggestion("pull_model", _pull_text("Pull a local model", pull_hint)))
+    elif "no_vision" in codes and "local" in req.scope.tiers and pull_hint:
+        tips.append(Suggestion("pull_model", _pull_text("Pull a local vision model", pull_hint)))
     if codes & {"no_vision", "no_tools", "no_json"}:
         tips.append(Suggestion("add_capable_model", "No model supports what this needs."))
     if req.scope.local_only and not req.scope.active_locks:

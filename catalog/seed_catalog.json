@@ -12,41 +12,43 @@
   },
   "models": [
     {
-      "id": "example-paid/model-large",
-      "aliases": ["example-large"],
+      "id": "claude-sonnet-4-5",
+      "aliases": ["claude-sonnet-4-5-20250929"],
       "tier_hints": ["paid"],
-      "provider": "example-paid",
-      "modalities": ["text"],
+      "provider": "anthropic",
+      "modalities": ["text", "image"],
       "tools_ok": true,
       "json_ok": true,
+      "reasoning_ok": true,
       "ctx": 200000,
       "price_in": 3.0,
       "price_out": 15.0,
-      "price_date": "2026-01-01",
+      "price_date": "2026-11-02",
       "scores": {"code": 0.9, "reasoning": 0.9, "chat": 0.9, "agentic_tools": 0.9},
       "deprecated_by": null,
       "retains_data": false,
       "verify": true
     },
     {
-      "id": "example-openrouter/model-free:free",
+      "id": "google/gemma-4-31b-it:free",
       "aliases": [],
       "tier_hints": ["free"],
-      "provider": "example-openrouter",
+      "provider": "openrouter",
       "modalities": ["text"],
       "tools_ok": true,
       "json_ok": true,
-      "ctx": 131072,
+      "reasoning_ok": true,
+      "ctx": 262144,
       "price_in": 0,
       "price_out": 0,
-      "price_date": "2026-01-01",
+      "price_date": "2026-11-02",
       "scores": {"code": 0.6, "reasoning": 0.6, "chat": 0.7, "agentic_tools": 0.5},
       "retains_data": true,
       "verify": true
     },
     {
-      "id": "example-local:14b",
-      "aliases": ["example-local-14b"],
+      "id": "qwen2.5-coder:14b",
+      "aliases": ["qwen2.5-coder:14b-instruct"],
       "tier_hints": ["local"],
       "provider": "ollama",
       "modalities": ["text"],
@@ -55,12 +57,28 @@
       "ctx": 32768,
       "size_gb": 9.0,
       "arch": {"n_layers": 48, "n_kv_heads": 8, "head_dim": 128},
-      "scores": {"code": 0.7, "reasoning": 0.6, "chat": 0.7, "agentic_tools": 0.6},
-      "expected_tps": {"laptop_12gb": 35.0, "desktop_16gb": 50.0},
+      "scores": {"code": 0.7, "reasoning": 0.5, "chat": 0.6, "agentic_tools": 0.6},
+      "expected_tps": {"laptop_12gb": 25.0, "desktop_16gb": 35.0},
       "verify": true
     },
     {
-      "id": "example-local-vision:7b",
+      "id": "qwen3:14b",
+      "aliases": [],
+      "tier_hints": ["local"],
+      "provider": "ollama",
+      "modalities": ["text"],
+      "tools_ok": true,
+      "json_ok": true,
+      "reasoning_ok": true,
+      "ctx": 40960,
+      "size_gb": 9.3,
+      "arch": {"n_layers": 40, "n_kv_heads": 8, "head_dim": 128},
+      "scores": {"code": 0.65, "reasoning": 0.7, "chat": 0.7, "agentic_tools": 0.6},
+      "expected_tps": {"laptop_12gb": 25.0, "desktop_16gb": 35.0},
+      "verify": true
+    },
+    {
+      "id": "qwen2.5vl:7b",
       "aliases": [],
       "tier_hints": ["local"],
       "provider": "ollama",
@@ -71,11 +89,11 @@
       "size_gb": 6.0,
       "arch": {"n_layers": 28, "n_kv_heads": 4, "head_dim": 128},
       "scores": {"vision": 0.6, "chat": 0.5},
-      "expected_tps": {"laptop_12gb": 45.0, "desktop_16gb": 60.0},
+      "expected_tps": {"laptop_12gb": 40.0, "desktop_16gb": 55.0},
       "verify": true
     },
     {
-      "id": "example-local-tiny:1b",
+      "id": "llama3.2:1b",
       "aliases": [],
       "tier_hints": ["local"],
       "provider": "ollama",
@@ -83,7 +101,7 @@
       "tools_ok": false,
       "json_ok": true,
       "ctx": 8192,
-      "size_gb": 1.0,
+      "size_gb": 1.3,
       "arch": {"n_layers": 16, "n_kv_heads": 8, "head_dim": 64},
       "scores": {"chat": 0.3, "extract": 0.3},
       "expected_tps": {"laptop_12gb": 150.0, "desktop_16gb": 200.0},
@@ -91,26 +109,26 @@
     }
   ],
   "free_limits": [
-    {"provider": "example-openrouter", "model": null, "rpm": 20, "rpd": 50, "verify": true}
+    {"provider": "openrouter", "model": null, "rpm": 20, "rpd": 50, "verify": true}
   ],
   "wall_patterns": [
-    {"provider": "*", "status_codes": [429], "body_regex": null, "kind": "rate_limit", "scope": "model", "verify": true},
-    {"provider": "*", "status_codes": [402], "body_regex": null, "kind": "exhausted", "scope": "key", "verify": true},
-    {"provider": "*", "status_codes": [503, 529], "body_regex": null, "kind": "overloaded", "scope": "model", "verify": true},
-    {"provider": "*", "status_codes": [], "body_regex": "(?i)overloaded_error|\\boverloaded\\b", "kind": "overloaded", "scope": "model", "verify": true},
-    {"provider": "*", "status_codes": [400, 413, 422], "body_regex": "(?i)context[_ ]length|context window|maximum context|prompt is too long|too many tokens|input is too long|input length exceeds|exceeds the (maximum|context)", "kind": "context", "scope": "model", "verify": true},
-    {"provider": "openai", "status_codes": [429], "body_regex": "insufficient_quota", "kind": "exhausted", "scope": "key", "verify": true},
-    {"provider": "anthropic", "status_codes": [400, 402], "body_regex": "(?i)credit balance is too low", "kind": "exhausted", "scope": "key", "verify": true},
-    {"provider": "anthropic", "status_codes": [429], "body_regex": "rate_limit_error", "kind": "rate_limit", "scope": "model", "verify": true},
-    {"provider": "anthropic", "status_codes": [529], "body_regex": "overloaded_error", "kind": "overloaded", "scope": "provider", "verify": true},
-    {"provider": "gemini", "status_codes": [429], "body_regex": "(?is)RESOURCE_EXHAUSTED.*(per ?day|daily)", "kind": "exhausted", "scope": "model", "verify": true},
-    {"provider": "gemini", "status_codes": [429], "body_regex": "RESOURCE_EXHAUSTED", "kind": "rate_limit", "scope": "model", "verify": true},
-    {"provider": "openrouter", "status_codes": [402], "body_regex": "(?i)credits|afford", "kind": "exhausted", "scope": "provider", "verify": true},
-    {"provider": "openrouter", "status_codes": [429], "body_regex": "(?i)free-models-per-day", "kind": "exhausted", "scope": "key", "verify": true},
-    {"provider": "openrouter", "status_codes": [429], "body_regex": "(?i)rate.?limit", "kind": "rate_limit", "scope": "model", "verify": true},
-    {"provider": "ollama", "status_codes": [503], "body_regex": "(?i)server busy|maximum pending requests", "kind": "overloaded", "scope": "provider", "verify": true},
-    {"provider": "opencode", "status_codes": [401, 402, 429], "body_regex": "(?i)CreditsError|insufficient balance", "kind": "exhausted", "scope": "provider", "verify": true},
-    {"provider": "opencode", "status_codes": [429], "body_regex": "(?i)FreeUsageLimitError|rate limit", "kind": "rate_limit", "scope": "provider", "verify": true}
+    {"provider": "*", "status_codes": [429], "body_regex": null, "kind": "rate_limit", "scope": "model", "verify": true, "source": "RFC 9110 / provider error docs: 429 is rate limiting", "checked": "2026-11-01"},
+    {"provider": "*", "status_codes": [402], "body_regex": null, "kind": "exhausted", "scope": "key", "verify": true, "source": "RFC 9110: 402 payment required; Anthropic and OpenRouter use it for credits", "checked": "2026-11-02"},
+    {"provider": "*", "status_codes": [503, 529], "body_regex": null, "kind": "overloaded", "scope": "model", "verify": true, "source": "Anthropic errors docs: 529 overloaded_error; 503 service unavailable", "checked": "2026-11-02"},
+    {"provider": "*", "status_codes": [], "body_regex": "(?i)overloaded_error|\\boverloaded\\b", "kind": "overloaded", "scope": "model", "verify": true, "source": "Anthropic errors docs: error type overloaded_error", "checked": "2026-11-02"},
+    {"provider": "*", "status_codes": [400, 413, 422], "body_regex": "(?i)context[_ ]length|context window|maximum context|prompt is too long|too many tokens|input is too long|input length exceeds|exceeds the (maximum|context)", "kind": "context", "scope": "model", "verify": true, "source": "Provider context-length messages as read in HDW-139 (not re-read)", "checked": "2026-11-01"},
+    {"provider": "openai", "status_codes": [429], "body_regex": "insufficient_quota", "kind": "exhausted", "scope": "key", "verify": true, "source": "OpenAI error code insufficient_quota as read in HDW-139 (not re-read)", "checked": "2026-11-01"},
+    {"provider": "anthropic", "status_codes": [400, 402], "body_regex": "(?i)credit balance is too low|billing_error", "kind": "exhausted", "scope": "key", "verify": true, "source": "Anthropic errors docs: 402 billing_error; message 'Your credit balance is too low to access the Anthropic API' from community reports, not in the docs", "checked": "2026-11-02"},
+    {"provider": "anthropic", "status_codes": [429], "body_regex": "rate_limit_error", "kind": "rate_limit", "scope": "model", "verify": true, "source": "Anthropic errors docs: 429 rate_limit_error", "checked": "2026-11-02"},
+    {"provider": "anthropic", "status_codes": [529], "body_regex": "overloaded_error", "kind": "overloaded", "scope": "provider", "verify": true, "source": "Anthropic errors docs: 529 overloaded_error", "checked": "2026-11-02"},
+    {"provider": "gemini", "status_codes": [429], "body_regex": "(?is)RESOURCE_EXHAUSTED.*(per ?day|daily)", "kind": "exhausted", "scope": "model", "verify": true, "source": "Gemini API troubleshooting docs: 429 RESOURCE_EXHAUSTED; daily quota ids contain PerDay (not live-captured)", "checked": "2026-11-02"},
+    {"provider": "gemini", "status_codes": [429], "body_regex": "RESOURCE_EXHAUSTED", "kind": "rate_limit", "scope": "model", "verify": true, "source": "Gemini API troubleshooting docs: 429 RESOURCE_EXHAUSTED", "checked": "2026-11-02"},
+    {"provider": "openrouter", "status_codes": [402], "body_regex": "(?i)credits|afford", "kind": "exhausted", "scope": "provider", "verify": true, "source": "OpenRouter limits docs: 402 messages mention credits (error.metadata.limit_source)", "checked": "2026-11-02"},
+    {"provider": "openrouter", "status_codes": [429], "body_regex": "(?i)free-models-per-day", "kind": "exhausted", "scope": "key", "verify": true, "source": "OpenRouter limits docs give 50 or 1000 free requests per day; the body token free-models-per-day is from community reports, not in the docs", "checked": "2026-11-02"},
+    {"provider": "openrouter", "status_codes": [429], "body_regex": "(?i)rate.?limit", "kind": "rate_limit", "scope": "model", "verify": true, "source": "OpenRouter limits docs: 429 body message 'Rate limit exceeded'", "checked": "2026-11-02"},
+    {"provider": "ollama", "status_codes": [503], "body_regex": "(?i)server busy|maximum pending requests", "kind": "overloaded", "scope": "provider", "verify": true, "source": "Ollama docs/FAQ on OLLAMA_MAX_QUEUE as read in HDW-139 (not re-read)", "checked": "2026-11-01"},
+    {"provider": "opencode", "status_codes": [401, 402, 429], "body_regex": "(?i)CreditsError|insufficient balance", "kind": "exhausted", "scope": "provider", "verify": true, "source": "OpenCode Zen docs as read in HDW-139 (not re-read)", "checked": "2026-11-01"},
+    {"provider": "opencode", "status_codes": [429], "body_regex": "(?i)FreeUsageLimitError|rate limit", "kind": "rate_limit", "scope": "provider", "verify": true, "source": "OpenCode Zen docs as read in HDW-139 (not re-read)", "checked": "2026-11-01"}
   ],
   "placeholder_patterns": [
     {"name": "example-placeholder", "regex": "(?i)\\byour[_-]?api[_-]?key\\b", "verify": true},
@@ -126,19 +144,19 @@
     "laptop_12gb": {
       "vram_gb": 12,
       "recommended": {
-        "agentic_coder": ["example-local:14b"],
-        "general": ["example-local:14b"],
-        "vision": ["example-local-vision:7b"],
-        "classifier": ["example-local-tiny:1b"]
+        "agentic_coder": ["qwen2.5-coder:14b"],
+        "general": ["qwen3:14b"],
+        "vision": ["qwen2.5vl:7b"],
+        "classifier": ["llama3.2:1b"]
       }
     },
     "desktop_16gb": {
       "vram_gb": 16,
       "recommended": {
-        "agentic_coder": ["example-local:14b"],
-        "general": ["example-local:14b"],
-        "vision": ["example-local-vision:7b"],
-        "classifier": ["example-local-tiny:1b"]
+        "agentic_coder": ["qwen2.5-coder:14b"],
+        "general": ["qwen3:14b"],
+        "vision": ["qwen2.5vl:7b"],
+        "classifier": ["llama3.2:1b"]
       }
     }
   },
@@ -166,8 +184,8 @@
     ".aws/", ".ssh/", ".gnupg/", ".git/", ".headwaters/"
   ],
   "subscription_rates": [
-    {"plan": "example-plan", "usd_per_month": 20.0, "included_credits": null,
-     "price_date": "2026-01-01", "verify": true}
+    {"plan": "claude-pro", "usd_per_month": 20.0, "included_credits": null,
+     "price_date": "2026-11-02", "verify": true}
   ],
   "analyzer_hints": {
     "agentic_system_prompt_tokens": 1500,

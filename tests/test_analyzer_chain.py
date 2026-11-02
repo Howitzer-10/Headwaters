@@ -67,9 +67,9 @@ def test_chain_falls_through_when_layer2_crashes(base: Analyzer) -> None:
 
 
 def test_resolve_classifier_model(catalog: Catalog) -> None:
-    assert resolve_classifier_model(catalog, LocalTier()) == "example-local-tiny:1b"
+    assert resolve_classifier_model(catalog, LocalTier()) == "llama3.2:1b"
     desktop = LocalTier(profile="desktop_16gb")
-    assert resolve_classifier_model(catalog, desktop) == "example-local-tiny:1b"
+    assert resolve_classifier_model(catalog, desktop) == "llama3.2:1b"
     explicit = LocalTier(classifier=ClassifierRules(model="my-tiny:1b"))
     assert resolve_classifier_model(catalog, explicit) == "my-tiny:1b"
 

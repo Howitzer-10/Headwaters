@@ -109,9 +109,9 @@ def test_bad_catalogs_are_rejected_clearly(tmp_path: Path, mutate: Any, message:
 
 def test_known_model_resolves_by_id_and_alias() -> None:
     index = CatalogIndex(load_catalog(REPO_ROOT / SEED_RELATIVE_PATH))
-    by_id = index.resolve("example-local:14b")
+    by_id = index.resolve("qwen2.5-coder:14b")
     assert by_id.unscored is False
-    assert index.resolve("EXAMPLE-LOCAL-14B") is by_id
+    assert index.resolve("QWEN2.5-CODER:14B-INSTRUCT") is by_id
     assert index.find("nothing") is None
 
 

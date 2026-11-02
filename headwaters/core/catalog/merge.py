@@ -102,7 +102,9 @@ def _from_live(
                 modalities=item.modalities or entry.modalities,
                 tools_ok=item.tools_ok if item.tools_ok is not None else entry.tools_ok,
                 json_ok=item.json_ok if item.json_ok is not None else entry.json_ok,
-                reasoning_ok=item.reasoning_ok,
+                reasoning_ok=(
+                    item.reasoning_ok if item.reasoning_ok is not None else entry.reasoning_ok
+                ),
                 ctx=item.ctx or entry.ctx,
                 price_in=item.price_in if item.price_in is not None else entry.price_in,
                 price_out=item.price_out if item.price_out is not None else entry.price_out,
@@ -127,7 +129,7 @@ def _from_live(
             tools_ok=item.tools_ok if item.tools_ok is not None else defaults.tools_ok,
             json_ok=item.json_ok if item.json_ok is not None else defaults.json_ok,
             reasoning_ok=item.reasoning_ok,
-            ctx=item.ctx or defaults.ctx,
+            ctx=item.ctx,  # left unknown: CandidateBuilder flags the default as assumed (F18)
             price_in=item.price_in,
             price_out=item.price_out,
             size_gb=item.size_gb,
@@ -152,6 +154,7 @@ def _from_catalog_only(entry: ModelEntry, tier: str, now: float) -> ModelRecord:
             modalities=entry.modalities,
             tools_ok=entry.tools_ok,
             json_ok=entry.json_ok,
+            reasoning_ok=entry.reasoning_ok,
             ctx=entry.ctx,
             price_in=entry.price_in,
             price_out=entry.price_out,

@@ -91,9 +91,9 @@ def test_local_candidates_get_fit_and_residency(db: Database) -> None:
 
 
 def test_catalog_speed_is_used_for_known_models(db: Database) -> None:
-    add_model(db, "example-local:14b", "local", 70.0)
-    found = by_id(builder(db, gpu_state(16))(requirements()))["example-local:14b"]
-    assert found.expected_tps == 50.0  # desktop_16gb in the seed
+    add_model(db, "qwen2.5-coder:14b", "local", 70.0)
+    found = by_id(builder(db, gpu_state(16))(requirements()))["qwen2.5-coder:14b"]
+    assert found.expected_tps == 35.0  # desktop_16gb in the seed
     add_model(db, "mystery:1b", "local", 10.0)
     assert by_id(builder(db, gpu_state(16))(requirements()))["mystery:1b"].expected_tps is None
 

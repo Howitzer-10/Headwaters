@@ -39,25 +39,25 @@ def rules_with(overrides: dict[str, Any]) -> Rules:
 
 def test_alias_and_latest_matching(catalog: Catalog) -> None:
     lookup = CatalogLookup(catalog)
-    local = lookup.find(["example-local-14b"])
+    local = lookup.find(["qwen2.5-coder:14b-instruct"])
     assert local is not None
-    assert local.id == "example-local:14b"
-    upper = lookup.find(["EXAMPLE-LOCAL:14B"])
+    assert local.id == "qwen2.5-coder:14b"
+    upper = lookup.find(["QWEN2.5-CODER:14B"])
     assert upper is not None
-    assert upper.id == "example-local:14b"
-    latest = lookup.find(["example-large:latest"])
+    assert upper.id == "qwen2.5-coder:14b"
+    latest = lookup.find(["claude-sonnet-4-5:latest"])
     assert latest is not None
-    assert latest.id == "example-paid/model-large"
+    assert latest.id == "claude-sonnet-4-5"
     assert lookup.find(["nothing"]) is None
     assert lookup.get("nothing") is None
 
 
 def test_known_model_takes_live_facts_and_catalog_scores(catalog: Catalog) -> None:
-    item = live("example-local-14b", ctx=16384, tools_ok=False, size_gb=8.5, warm=True)
+    item = live("qwen2.5-coder:14b-instruct", ctx=16384, tools_ok=False, size_gb=8.5, warm=True)
     record = one(item, catalog, Rules())
     row = record.row
-    assert row.id == "example-local-14b"  # the id the live source reported
-    assert record.catalog_id == "example-local:14b"
+    assert row.id == "qwen2.5-coder:14b-instruct"  # the id the live source reported
+    assert record.catalog_id == "qwen2.5-coder:14b"
     assert (row.ctx, row.tools_ok, row.size_gb, row.warm) == (16384, False, 8.5, True)
     assert row.json_ok is True  # live said nothing, so the catalog fills the gap
     assert row.arch == {"n_layers": 48, "n_kv_heads": 8, "head_dim": 128}
@@ -72,8 +72,7 @@ def test_unknown_model_gets_conservative_defaults(catalog: Catalog) -> None:
     assert row.unscored is True
     assert row.tools_ok is False
     assert row.json_ok is False
-    assert row.ctx == catalog.unknown_model_defaults.ctx
-    assert record.catalog_id is None
+    assert row.ctx is None  # not presented as known (FU-136-1); CandidateBuilder flags the default
     assert max(record.seed_scores.values()) <= 40.0
     assert record.seed_scores["agentic_tools"] == 20.0
 
@@ -82,38 +81,52 @@ def test_deprecation_is_carried(catalog: Catalog) -> None:
     data = json.loads(catalog.model_dump_json())
     data["models"][0]["deprecated_by"] = data["models"][2]["id"]
     deprecated = Catalog.model_validate(data)
-    item = live("example-paid/model-large", tier="paid", provider="x", source="openrouter")
+    item = live("claude-sonnet-4-5", tier="paid", provider="x", source="openrouter")
     record = one(item, deprecated, Rules())
-    assert record.row.deprecated_by == "example-local:14b"
+    assert record.row.deprecated_by == "qwen2.5-coder:14b"
 
 
 def test_retains_data_comes_from_catalog_or_source(catalog: Catalog) -> None:
-    free = live("example-openrouter/model-free:free", tier="free_cloud", source="openrouter")
+    free = live("google/gemma-4-31b-it:free", tier="free_cloud", source="openrouter")
     unknown = live("opencode/x", tier="free_cloud", source="opencode", retains_data=True)
     records = {r.row.id: r.row for r in merge_models([free, unknown], catalog, Rules(), NOW)}
-    assert records["example-openrouter/model-free:free"].retains_data is True  # catalog flag
+    assert records["google/gemma-4-31b-it:free"].retains_data is True  # catalog flag
     assert records["opencode/x"].retains_data is True  # source flag
 
 
 def test_source_supplied_names_match_catalog(catalog: Catalog) -> None:
-    item = live("vendor/odd-id", tier="paid", source="openrouter", match_names=["example-large"])
+    item = live(
+        "vendor/odd-id",
+        tier="paid",
+        source="openrouter",
+        match_names=["claude-sonnet-4-5-20250929"],
+    )
     record = one(item, catalog, Rules())
-    assert record.catalog_id == "example-paid/model-large"
+    assert record.catalog_id == "claude-sonnet-4-5"
     assert record.row.unscored is False
 
 
 def test_catalog_only_cloud_entries_are_added_but_local_need_install(catalog: Catalog) -> None:
     records = {r.row.id: r for r in merge_models([], catalog, Rules(), NOW)}
-    assert set(records) == {"example-paid/model-large", "example-openrouter/model-free:free"}
-    paid = records["example-paid/model-large"].row
+    assert set(records) == {"claude-sonnet-4-5", "google/gemma-4-31b-it:free"}
+    paid = records["claude-sonnet-4-5"].row
     assert (paid.tier, paid.source) == ("paid", "catalog")
-    assert records["example-openrouter/model-free:free"].row.tier == "free_cloud"
+    assert paid.reasoning_ok is True  # catalog-only models can serve think (FU-140-1)
+    assert records["google/gemma-4-31b-it:free"].row.tier == "free_cloud"
+
+
+def test_catalog_reasoning_fills_a_source_with_no_capability_data(catalog: Catalog) -> None:
+    item = live("qwen3:14b")
+    assert item.reasoning_ok is None
+    assert one(item, catalog, Rules()).row.reasoning_ok is True
+    live_says_no = live("qwen3:14b", reasoning_ok=False)
+    assert one(live_says_no, catalog, Rules()).row.reasoning_ok is False
 
 
 def test_user_overrides_win_last(catalog: Catalog) -> None:
     rules = rules_with(
         {
-            "example-local-14b": {
+            "qwen2.5-coder:14b-instruct": {
                 "scores": {"code": 95},
                 "tools_ok": False,
                 "ctx": 4096,
@@ -121,7 +134,7 @@ def test_user_overrides_win_last(catalog: Catalog) -> None:
             }
         }
     )
-    item = live("example-local:14b", tools_ok=True, ctx=32768)
+    item = live("qwen2.5-coder:14b", tools_ok=True, ctx=32768)
     record = one(item, catalog, rules)
     assert (record.row.tools_ok, record.row.ctx, record.row.tier) == (False, 4096, "free_cloud")
     scores = {s.task: s for s in record.score_rows()}

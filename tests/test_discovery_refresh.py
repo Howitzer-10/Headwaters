@@ -97,8 +97,8 @@ def test_unreachable_sources_degrade_gracefully(db: Database, catalog: Catalog) 
     assert any(w.startswith("ollama:") for w in result.warnings)
     assert any(w.startswith("openrouter:") for w in result.warnings)
     assert {m.id for m in list_models(db)} == {  # curated cloud entries still available
-        "example-paid/model-large",
-        "example-openrouter/model-free:free",
+        "claude-sonnet-4-5",
+        "google/gemma-4-31b-it:free",
     }
 
 

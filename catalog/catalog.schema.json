@@ -339,6 +339,18 @@
           "title": "Provider",
           "type": "string"
         },
+        "reasoning_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Ok"
+        },
         "retains_data": {
           "default": false,
           "title": "Retains Data",
@@ -637,6 +649,19 @@
           "default": null,
           "title": "Body Regex"
         },
+        "checked": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked"
+        },
         "kind": {
           "enum": [
             "rate_limit",
@@ -661,6 +686,18 @@
           ],
           "title": "Scope",
           "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
         },
         "status_codes": {
           "items": {

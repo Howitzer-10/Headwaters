@@ -54,6 +54,7 @@ class ModelEntry(_Model):
     modalities: list[str] = Field(default_factory=lambda: ["text"])
     tools_ok: bool | None = None
     json_ok: bool | None = None
+    reasoning_ok: bool | None = None  # lets a catalog-only or capability-less source serve think
     ctx: int | None = Field(default=None, gt=0)
     price_in: float | None = Field(default=None, ge=0, description="USD per million tokens")
     price_out: float | None = Field(default=None, ge=0, description="USD per million tokens")
@@ -103,6 +104,8 @@ class WallPattern(_Model):
     kind: WallKind
     scope: WallScope
     verify: bool = False
+    source: str | None = None  # where the status code / body text was taken from
+    checked: str | None = Field(default=None, pattern=_DATE)  # date the source was read
 
     @field_validator("body_regex")
     @classmethod
