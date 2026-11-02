@@ -10,10 +10,11 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from headwaters.core.catalog.schema import GpuProfile
 from headwaters.core.hardware.gpu import (
     GpuInfo,
     GpuProbe,
@@ -22,22 +23,15 @@ from headwaters.core.hardware.gpu import (
     probe_nvml,
 )
 from headwaters.core.hardware.ollama_vram import read_ollama_vram_mb
-from headwaters.core.rules import LocalTier
+from headwaters.core.rules import HardwareRules, LocalTier
 
 Profile = Literal["laptop_12gb", "desktop_16gb", "custom"]
 ReserveSource = Literal["override", "display_active", "no_display", "unknown_display"]
 LocalSuggestion = Literal["ok", "degraded", "cloud_only_suggested"]
 OnBatteryPolicy = Literal["prefer_cloud", "normal", "local_only"]
 
-RESERVE_DISPLAY_GB = 2.0  # monitor on the RTX (v3.1 C1: 2.0-2.5)
-RESERVE_UNKNOWN_GB = 2.5  # display status unknown: use the higher value
-RESERVE_NO_DISPLAY_GB = 1.0  # iGPU drives the display (Optimus/MUX)
-
-DEFAULT_BUSY_THRESHOLD_PCT = 50.0
 DEFAULT_CACHE_TTL_S = 5.0
 
-_LAPTOP_RANGE_GB = (10.0, 13.5)
-_DESKTOP_RANGE_GB = (14.0, 17.5)
 _OLLAMA_PREFIX = "ollama"
 _RUNNER_PREFIX = "llama-server"
 
@@ -85,32 +79,40 @@ class HardwareState:
         return self.gpu is not None
 
 
-def select_profile(total_gb: float | None, requested: str = "auto") -> Profile:
-    """Pick a profile: an explicit rules value wins, else classify by total VRAM."""
+def select_profile(
+    total_gb: float | None,
+    requested: str = "auto",
+    profiles: Mapping[str, GpuProfile] | None = None,
+) -> Profile:
+    """Pick a profile: an explicit rules value wins, else classify by total VRAM against the
+    catalog ranges (``vram_range_gb``). Without catalog ranges the profile is ``custom``."""
     if requested == "laptop_12gb":
         return "laptop_12gb"
     if requested == "desktop_16gb":
         return "desktop_16gb"
     if requested == "custom" or total_gb is None:
         return "custom"
-    if _LAPTOP_RANGE_GB[0] <= total_gb <= _LAPTOP_RANGE_GB[1]:
-        return "laptop_12gb"
-    if _DESKTOP_RANGE_GB[0] <= total_gb <= _DESKTOP_RANGE_GB[1]:
-        return "desktop_16gb"
+    for name in ("laptop_12gb", "desktop_16gb"):
+        found = (profiles or {}).get(name)
+        if found is not None and found.vram_range_gb is not None:
+            low, high = found.vram_range_gb
+            if low <= total_gb <= high:
+                return name
     return "custom"
 
 
 def compute_reserve(
-    display_active: bool | None, override_gb: float | None
+    display_active: bool | None, override_gb: float | None, rules: HardwareRules | None = None
 ) -> tuple[float, ReserveSource]:
     """Reserve in GB. A user override always wins; unknown display uses the higher value."""
+    rules = rules or HardwareRules()
     if override_gb is not None:
         return override_gb, "override"
     if display_active is None:
-        return RESERVE_UNKNOWN_GB, "unknown_display"
+        return rules.reserve_unknown_gb, "unknown_display"
     if display_active:
-        return RESERVE_DISPLAY_GB, "display_active"
-    return RESERVE_NO_DISPLAY_GB, "no_display"
+        return rules.reserve_display_gb, "display_active"
+    return rules.reserve_no_display_gb, "no_display"
 
 
 def read_battery() -> BatteryState:
@@ -149,7 +151,7 @@ def _is_ollama(proc: GpuProcess) -> bool:
 
 def detect_gpu_busy(
     gpu: GpuInfo | None,
-    threshold_pct: float = DEFAULT_BUSY_THRESHOLD_PCT,
+    threshold_pct: float | None = None,
     own_pid: int | None = None,
     ollama_vram_mb: float | None = None,
 ) -> GpuBusy:
@@ -177,7 +179,8 @@ def detect_gpu_busy(
     else:
         return GpuBusy(False, 0.0, 0.0)
     pct = 100.0 * used / gpu.total_mb
-    busy = pct > threshold_pct
+    limit = HardwareRules().busy_threshold_pct if threshold_pct is None else threshold_pct
+    busy = pct > limit
     reason = f"other processes hold {pct:.0f}% of VRAM" if busy else ""
     return GpuBusy(busy, used, pct, top_name, reason)
 
@@ -186,17 +189,22 @@ def build_state(
     gpu: GpuInfo | None,
     local: LocalTier,
     battery: BatteryState,
-    busy_threshold_pct: float = DEFAULT_BUSY_THRESHOLD_PCT,
+    busy_threshold_pct: float | None = None,
     taken_at: float = 0.0,
     ollama_vram_mb: float | None = None,
+    profiles: Mapping[str, GpuProfile] | None = None,
 ) -> HardwareState:
     notes: list[str] = []
     total_gb = None if gpu is None else gpu.total_mb / 1024
-    profile = select_profile(total_gb, local.profile)
+    profile = select_profile(total_gb, local.profile, profiles)
     display = None if gpu is None else gpu.display_active
-    reserve, reserve_src = compute_reserve(display, local.reserve_gb)
+    reserve, reserve_src = compute_reserve(display, local.reserve_gb, local.hardware)
     budget = 0.0 if total_gb is None else max(0.0, total_gb - reserve)
-    busy = detect_gpu_busy(gpu, busy_threshold_pct, ollama_vram_mb=ollama_vram_mb)
+    busy = detect_gpu_busy(
+        gpu,
+        local.hardware.busy_threshold_pct if busy_threshold_pct is None else busy_threshold_pct,
+        ollama_vram_mb=ollama_vram_mb,
+    )
     policy: OnBatteryPolicy = local.on_battery if battery.on_battery else "normal"
 
     suggestion: LocalSuggestion
@@ -251,7 +259,8 @@ class HardwareMonitor:
         probes: Sequence[GpuProbe] | None = None,
         battery_reader: Callable[[], BatteryState] = read_battery,
         manual: ManualGpu | None = None,
-        busy_threshold_pct: float = DEFAULT_BUSY_THRESHOLD_PCT,
+        busy_threshold_pct: float | None = None,
+        profiles: Mapping[str, GpuProfile] | None = None,
         ttl_s: float = DEFAULT_CACHE_TTL_S,
         clock: Callable[[], float] = time.monotonic,
         ollama_vram: Callable[[str], float | None] = read_ollama_vram_mb,
@@ -264,6 +273,7 @@ class HardwareMonitor:
         self._battery_reader = battery_reader
         self._manual = manual
         self._busy_pct = busy_threshold_pct
+        self._profiles = profiles
         self._ttl = ttl_s
         self._clock = clock
         self._lock = threading.Lock()
@@ -292,6 +302,7 @@ class HardwareMonitor:
                 self._busy_pct,
                 now,
                 self._ollama_share(gpu),
+                self._profiles,
             )
             self._cached = state
             return state

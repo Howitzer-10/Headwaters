@@ -25,16 +25,10 @@ from headwaters.core.catalog.schema import AnalyzerHints, Catalog
 
 SOURCE_DETERMINISTIC = "deterministic"
 
-_KEYWORD_SCAN_HEAD = 4000  # chars of the last user message scanned for keywords (head + tail)
-_KEYWORD_SCAN_TAIL = 4000
-_SHORT_PROMPT_TOKENS = 100
 # Tie-break order when two tasks score the same (first wins, confidence drops).
 _TASK_ORDER = ("vision", "code", "reasoning", "extract", "summarize", "creative", "chat")
 KNOWN_TASKS = _TASK_ORDER  # every task that has a floor in rules.yaml
 _FENCE = re.compile(r"```([^\n`]*)\n(.*?)```", re.DOTALL)
-_IMAGE_BONUS = 3
-_JSON_BONUS = 2
-_FENCE_BONUS = 2
 
 TokenCounter = Callable[[str], int]
 
@@ -183,11 +177,11 @@ class Analyzer:
         for task, patterns in self._task.items():
             scores[task] += _count(patterns, scan_text)
         if images:
-            scores["vision"] += _IMAGE_BONUS
+            scores["vision"] += self.hints.image_bonus
         if wants_json:
-            scores["extract"] += _JSON_BONUS
+            scores["extract"] += self.hints.json_bonus
         if has_fences:
-            scores["code"] += _FENCE_BONUS
+            scores["code"] += self.hints.fence_bonus
         if reasoning_hint:
             scores["reasoning"] += 1
         ranked = sorted(_TASK_ORDER, key=lambda t: (-scores[t], _TASK_ORDER.index(t)))
@@ -195,7 +189,7 @@ class Analyzer:
         if top == 0:
             if agentic:
                 return "chat", 0.45
-            return "chat", 0.7 if last_user_tokens <= _SHORT_PROMPT_TOKENS else 0.4
+            return "chat", 0.7 if last_user_tokens <= self.hints.short_prompt_tokens else 0.4
         margin = top - second
         return ranked[0], 0.45 if margin == 0 else 0.7 if margin == 1 else 0.85
 
@@ -221,8 +215,9 @@ class Analyzer:
         agentic = self._is_agentic(inp, system_tokens, has_tools)
 
         user_text = collected.last_user_text
-        if len(user_text) > _KEYWORD_SCAN_HEAD + _KEYWORD_SCAN_TAIL:
-            scan_text = user_text[:_KEYWORD_SCAN_HEAD] + "\n" + user_text[-_KEYWORD_SCAN_TAIL:]
+        head, tail = self.hints.keyword_scan_head_chars, self.hints.keyword_scan_tail_chars
+        if len(user_text) > head + tail:
+            scan_text = user_text[:head] + "\n" + user_text[-tail:]
         else:
             scan_text = user_text
         reasoning_hint = _count(self._reasoning, scan_text) > 0

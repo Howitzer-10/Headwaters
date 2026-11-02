@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from headwaters.core.executor.errors import ExecutorError
-from headwaters.core.executor.types import Delta, ExecutorConfig
+from headwaters.core.executor.types import Delta
+from headwaters.core.rules import ExecutorRules
 from tests.executor_support import (
     ScriptedBackend,
     Step,
@@ -16,7 +17,7 @@ from tests.executor_support import (
     stream_events,
 )
 
-FAST = ExecutorConfig(
+FAST = ExecutorRules(
     cloud_first_token_s=0.05,
     local_warm_first_token_s=0.05,
     local_cold_first_token_s=1.0,
@@ -47,7 +48,7 @@ def test_cold_or_unknown_local_model_waits_longer(cold: bool | None) -> None:
 
 
 def test_default_config_cold_limit_exceeds_warm_limit() -> None:
-    cfg = ExecutorConfig()
+    cfg = ExecutorRules()
     assert cfg.local_cold_first_token_s > cfg.local_warm_first_token_s
 
 

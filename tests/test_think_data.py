@@ -10,6 +10,7 @@ import pytest
 
 from headwaters.core.analyzer.requirements import HardRequirements
 from headwaters.core.catalog import sources
+from headwaters.core.catalog.schema import Endpoints
 from headwaters.core.policy.filters import Candidate, hard_filter
 from headwaters.core.state import LATEST_VERSION, Database, open_database
 from headwaters.core.state_models import ModelRow, get_model, upsert_model
@@ -89,7 +90,7 @@ def test_openrouter_reasoning_parameter_is_read() -> None:
             },
         ]
     }
-    http = FakeHttp({("GET", f"{sources.OPENROUTER_BASE}/models"): payload})
+    http = FakeHttp({("GET", f"{Endpoints().openrouter_base_url}/models"): payload})
     by_id = {m.id: m for m in sources.openrouter_models(http)}
     assert by_id["vendor/deep:free"].reasoning_ok is True
     assert by_id["vendor/plain"].reasoning_ok is False

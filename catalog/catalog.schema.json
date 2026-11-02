@@ -29,6 +29,19 @@
           "title": "Chars Per Token Prose",
           "type": "number"
         },
+        "classifier_max_prompt_chars": {
+          "default": 2000,
+          "minimum": 2,
+          "title": "Classifier Max Prompt Chars",
+          "type": "integer"
+        },
+        "classifier_min_confidence": {
+          "default": 0.75,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Classifier Min Confidence",
+          "type": "number"
+        },
         "complexity_token_steps": {
           "items": {
             "type": "integer"
@@ -64,10 +77,40 @@
           "title": "Fence Aliases",
           "type": "object"
         },
+        "fence_bonus": {
+          "default": 2,
+          "minimum": 0,
+          "title": "Fence Bonus",
+          "type": "integer"
+        },
+        "image_bonus": {
+          "default": 3,
+          "minimum": 0,
+          "title": "Image Bonus",
+          "type": "integer"
+        },
         "image_tokens": {
           "default": 800,
           "minimum": 0,
           "title": "Image Tokens",
+          "type": "integer"
+        },
+        "json_bonus": {
+          "default": 2,
+          "minimum": 0,
+          "title": "Json Bonus",
+          "type": "integer"
+        },
+        "keyword_scan_head_chars": {
+          "default": 4000,
+          "exclusiveMinimum": 0,
+          "title": "Keyword Scan Head Chars",
+          "type": "integer"
+        },
+        "keyword_scan_tail_chars": {
+          "default": 4000,
+          "exclusiveMinimum": 0,
+          "title": "Keyword Scan Tail Chars",
           "type": "integer"
         },
         "reasoning_keywords": {
@@ -83,6 +126,12 @@
           },
           "title": "Risk Keywords",
           "type": "array"
+        },
+        "short_prompt_tokens": {
+          "default": 100,
+          "minimum": 0,
+          "title": "Short Prompt Tokens",
+          "type": "integer"
         },
         "task_keywords": {
           "additionalProperties": {
@@ -123,6 +172,20 @@
         "head_dim"
       ],
       "title": "Arch",
+      "type": "object"
+    },
+    "Endpoints": {
+      "additionalProperties": false,
+      "description": "Provider URLs that can move without a release (HDW-151).",
+      "properties": {
+        "openrouter_base_url": {
+          "default": "https://openrouter.ai/api/v1",
+          "minLength": 1,
+          "title": "Openrouter Base Url",
+          "type": "string"
+        }
+      },
+      "title": "Endpoints",
       "type": "object"
     },
     "FreeLimit": {
@@ -186,6 +249,12 @@
     "GpuProfile": {
       "additionalProperties": false,
       "properties": {
+        "max_loaded": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Max Loaded",
+          "type": "integer"
+        },
         "recommended": {
           "additionalProperties": {
             "items": {
@@ -208,6 +277,28 @@
           "exclusiveMinimum": 0,
           "title": "Vram Gb",
           "type": "number"
+        },
+        "vram_range_gb": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vram Range Gb"
         }
       },
       "required": [
@@ -738,6 +829,9 @@
       },
       "title": "Default Ignore Patterns",
       "type": "array"
+    },
+    "endpoints": {
+      "$ref": "#/$defs/Endpoints"
     },
     "free_limits": {
       "items": {

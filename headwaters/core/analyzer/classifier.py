@@ -28,7 +28,7 @@ from headwaters.core.analyzer.ollama_client import (
     OllamaHttpClient,
 )
 from headwaters.core.analyzer.requirements import AnalyzerInput, Requirements
-from headwaters.core.catalog.schema import Catalog
+from headwaters.core.catalog.schema import AnalyzerHints, Catalog
 from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.rules import ClassifierRules, LocalTier
 
@@ -36,8 +36,6 @@ SOURCE_CLASSIFIER = "classifier"
 AUTO_SMALL = "auto_small"
 TASKS = ("code", "reasoning", "chat", "summarize", "extract", "creative", "vision")
 RISKS = ("low", "medium", "high")
-_MAX_PROMPT_CHARS = 2000  # head + tail of the last user message sent to the tiny model
-_MIN_CONFIDENCE = 0.75  # model answers are trusted a little above the usual threshold
 _SYSTEM = (
     "Classify the user's request for a model router. Reply with JSON only. "
     "task: the main kind of work. complexity: 1 (trivial) to 5 (very hard). "
@@ -83,11 +81,12 @@ def resolve_classifier_model(catalog: Catalog, tier: LocalTier) -> str | None:
     return None
 
 
-def prompt_text(inp: AnalyzerInput) -> str:
+def prompt_text(inp: AnalyzerInput, max_chars: int | None = None) -> str:
     """The last user message as plain text, clipped to head + tail."""
+    limit = max_chars or AnalyzerHints().classifier_max_prompt_chars
     text = _extract.collect(inp.messages, None).last_user_text
-    if len(text) > _MAX_PROMPT_CHARS:
-        half = _MAX_PROMPT_CHARS // 2
+    if len(text) > limit:
+        half = limit // 2
         text = text[:half] + "\n...\n" + text[-half:]
     return text
 
@@ -125,8 +124,10 @@ class TinyLlmClassifier:
         settings: ClassifierRules | None = None,
         cache_size: int = 256,
         remote_patterns: RemotePatterns = (),
+        hints: AnalyzerHints | None = None,
     ) -> None:
         self.model = model
+        self.hints = hints or AnalyzerHints()
         # A cloud-proxied model would send the prompt to ollama.com (A-OLL-9): never call it.
         self.refused = is_remote_name(model, remote_patterns)
         self.settings = settings or ClassifierRules()
@@ -188,7 +189,7 @@ class TinyLlmClassifier:
         return label
 
     def refine(self, inp: AnalyzerInput, current: Requirements) -> Requirements | None:
-        prompt = prompt_text(inp)
+        prompt = prompt_text(inp, self.hints.classifier_max_prompt_chars)
         if not prompt:
             return None
         label = self.classify(prompt)
@@ -199,7 +200,7 @@ class TinyLlmClassifier:
         return replace(
             current,
             soft=soft,
-            confidence=max(current.confidence, _MIN_CONFIDENCE),
+            confidence=max(current.confidence, self.hints.classifier_min_confidence),
             source=SOURCE_CLASSIFIER,
             ambiguous=False,
         )

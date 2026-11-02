@@ -69,6 +69,7 @@ def _gather(
     home: Path,
     result: RefreshResult,
     remote_patterns: RemotePatterns = (),
+    openrouter_base_url: str | None = None,
 ) -> dict[str, list[LiveModel]]:
     """Live models by source name. Only sources that answered appear in the result."""
     found: dict[str, list[LiveModel]] = {}
@@ -99,7 +100,9 @@ def _gather(
         return found
 
     try:
-        found["openrouter"] = openrouter_models(http, env.get(OPENROUTER_KEY_ENV))
+        found["openrouter"] = openrouter_models(
+            http, env.get(OPENROUTER_KEY_ENV), openrouter_base_url
+        )
     except SourceError as exc:
         result.warnings.append(f"openrouter: {exc}")
     for endpoint in rules.models.openai_compatible:
@@ -144,6 +147,7 @@ def refresh_models(
         home or Path.home(),
         result,
         remote_patterns_from(catalog),
+        catalog.endpoints.openrouter_base_url,
     )
     result.sources_ok = sorted(live)
     flat = [m for models in live.values() for m in models]

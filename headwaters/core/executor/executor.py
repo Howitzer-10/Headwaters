@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
+from dataclasses import replace
 from typing import Any, Literal, overload
 
 from headwaters.core.executor.accumulate import Accumulator
@@ -27,14 +28,13 @@ from headwaters.core.executor.types import (
     ExecOptions,
     ExecResult,
     ExecTarget,
-    ExecutorConfig,
     Message,
     StreamEvent,
     ToolSpec,
 )
 from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.policy.types import RouteDecision
-from headwaters.core.rules import Rules, RulesProvider, as_provider
+from headwaters.core.rules import ExecutorRules, Rules, RulesProvider, as_provider
 from headwaters.core.walls import WallClassifier
 
 # Maps a decision to what to call (litellm route or Ollama name, ``num_ctx``, cold flag).
@@ -53,7 +53,7 @@ class Executor:
         walls: WallClassifier,
         resolve: TargetResolver,
         *,
-        config: ExecutorConfig | None = None,
+        config: ExecutorRules | None = None,
         cloud_factory: Callable[[], Backend] = LiteLLMBackend,
         local_factory: Callable[[str], Backend] | None = None,
         api_key_for: Callable[[str], str | None] | None = None,
@@ -61,15 +61,17 @@ class Executor:
         remote_patterns: RemotePatterns = (),
     ) -> None:
         self._remote_patterns = remote_patterns
+        self._rules_source = as_provider(rules)  # read per call, so rule edits apply (HDW-131)
+        self._override = config  # tests; normally the live ``executor`` rules apply
         if local_factory is None:
 
             def local_factory(host: str) -> Backend:
-                return OllamaBackend(host, remote_patterns=remote_patterns)
+                return OllamaBackend(
+                    host, connect_s=self._cfg().connect_s, remote_patterns=remote_patterns
+                )
 
-        self._rules_source = as_provider(rules)  # read per call, so rule edits apply (HDW-131)
         self._walls = walls
         self._resolve = resolve
-        self._config = config or ExecutorConfig()
         self._cloud_factory = cloud_factory
         self._local_factory: Callable[[str], Backend] = local_factory
         self._api_key_for = api_key_for
@@ -155,8 +157,11 @@ class Executor:
         key = self._api_key_for(target.provider) if self._api_key_for else None
         return self._cloud, target, headers, key
 
+    def _cfg(self) -> ExecutorRules:
+        return self._override or self._rules_source().executor
+
     def _first_token_limit(self, decision: RouteDecision, target: ExecTarget) -> float:
-        cfg = self._config
+        cfg = self._cfg()
         if decision.tier != "local":
             return cfg.cloud_first_token_s
         if target.cold is False:
@@ -194,6 +199,9 @@ class Executor:
         options: ExecOptions,
     ) -> AsyncIterator[StreamEvent]:
         backend, target, headers, key = self._prepare(decision)
+        cfg = self._cfg()
+        if decision.tier != "local" and options.reasoning is True:
+            options = replace(options, reasoning=cfg.default_effort)
         keep_alive = self._rules_source().tiers.local.keep_alive
         request = BackendRequest(target, messages, tools, options, keep_alive, headers, key)
         acc = Accumulator(decision.model, decision.tier)
@@ -203,10 +211,7 @@ class Executor:
         source = backend.stream(request)
         try:
             while True:
-                if first_s is None:
-                    limit = deadline - time.monotonic()
-                else:
-                    limit = self._config.stream_idle_s
+                limit = deadline - time.monotonic() if first_s is None else cfg.stream_idle_s
                 try:
                     async with asyncio.timeout(max(limit, 0.0)):
                         delta = await anext(source)

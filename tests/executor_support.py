@@ -17,12 +17,11 @@ from headwaters.core.executor.types import (
     ExecOptions,
     ExecResult,
     ExecTarget,
-    ExecutorConfig,
     StreamEvent,
 )
 from headwaters.core.policy.scoring import ScoreBreakdown
 from headwaters.core.policy.types import RouteDecision
-from headwaters.core.rules import Rules
+from headwaters.core.rules import ExecutorRules, Rules
 from headwaters.core.scope import ALL_TIERS, LOCAL_TIERS, ScopeDecision, TierName
 from headwaters.core.walls import WallClassifier
 
@@ -78,7 +77,7 @@ def make_executor(
     backend: ScriptedBackend,
     *,
     rules: Rules | None = None,
-    config: ExecutorConfig | None = None,
+    config: ExecutorRules | None = None,
     cold: bool | None = None,
     cloud_calls: list[int] | None = None,
     **kw: Any,

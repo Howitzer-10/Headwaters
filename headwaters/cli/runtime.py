@@ -50,7 +50,8 @@ def load_rules_or_exit() -> Rules:
 def hardware_state(rules: Rules) -> HardwareState | None:
     """Current GPU/battery snapshot, or ``None`` when probing fails."""
     try:
-        return HardwareMonitor(rules.tiers.local).get_state()
+        profiles = catalog_updater.load_active()[0].gpu_profiles
+        return HardwareMonitor(rules.tiers.local, profiles=profiles).get_state()
     except Exception:  # a broken probe must never stop a CLI command
         return None
 

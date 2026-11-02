@@ -250,6 +250,7 @@ class Daemon:
             UrllibHttp(timeout=KEY_POLL_TIMEOUT_S),
             self.live_rules,
             lambda provider: os.environ.get(KEY_ENV.get(provider, "")) or None,
+            key_url=f"{catalog.endpoints.openrouter_base_url}/key",
         )
         self.last_key_poll = result
         return result

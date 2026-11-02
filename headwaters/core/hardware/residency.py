@@ -6,8 +6,13 @@ tunable inputs, not catalog facts; defaults are a first draft.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+
+from headwaters.core.catalog.schema import GpuProfile
+from headwaters.core.rules import HardwareRules
+
+_NO_PROFILE_MAX_LOADED = GpuProfile.model_fields["max_loaded"].default
 
 
 @dataclass(frozen=True)
@@ -20,9 +25,17 @@ class LoadedModel:
 
 @dataclass(frozen=True)
 class ResidencyConfig:
-    max_loaded_models: int = 1  # 12 GB profile: OLLAMA_MAX_LOADED_MODELS=1
-    warm_bonus: float = 0.15
-    eviction_penalty_per_model: float = 0.25
+    """Defaults come from the rules model (``tiers.local.hardware``) and the catalog."""
+
+    max_loaded_models: int = _NO_PROFILE_MAX_LOADED
+    warm_bonus: float = field(default_factory=lambda: HardwareRules().warm_bonus)
+    eviction_penalty_per_model: float = field(
+        default_factory=lambda: HardwareRules().eviction_penalty_per_model
+    )
+
+    @classmethod
+    def from_rules(cls, rules: HardwareRules, max_loaded_models: int) -> ResidencyConfig:
+        return cls(max_loaded_models, rules.warm_bonus, rules.eviction_penalty_per_model)
 
 
 @dataclass(frozen=True)
@@ -33,8 +46,10 @@ class ResidencyInputs:
     eviction_penalty: float
 
 
-def default_max_loaded(profile: str) -> int:
-    return 2 if profile == "desktop_16gb" else 1
+def default_max_loaded(profile: str, profiles: Mapping[str, GpuProfile] | None = None) -> int:
+    """How many models Ollama keeps loaded for a GPU profile (catalog ``max_loaded``)."""
+    found = (profiles or {}).get(profile)
+    return found.max_loaded if found is not None else _NO_PROFILE_MAX_LOADED
 
 
 def residency_inputs(

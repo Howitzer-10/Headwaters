@@ -101,13 +101,13 @@ class RequirementsAnalyzer(Protocol):
 @dataclass(frozen=True)
 class RouterConfig:
     """``max_attempts`` bounds every model call of one request (retries, cascades and
-    escalations together). First-draft value, see docs/ASSUMPTIONS.md."""
+    escalations together). ``None`` reads ``router.max_attempts`` from the live rules."""
 
-    max_attempts: int = 4
+    max_attempts: int | None = None
     residency: ResidencyConfig = field(default_factory=ResidencyConfig)
 
     def __post_init__(self) -> None:
-        if self.max_attempts < 1:
+        if self.max_attempts is not None and self.max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
 
 
@@ -155,6 +155,10 @@ class Router:
         self._sleep = sleep
 
     # ------------------------------------------------------------------ public API
+
+    def _max_attempts(self) -> int:
+        override = self._config.max_attempts
+        return override if override is not None else self._rules_source().router.max_attempts
 
     def handle(
         self, request: RouteRequest
@@ -389,7 +393,7 @@ class Router:
         wall = self._record_wall(run, decision, exc)
         wait = wall.wait_s if wall is not None and wall.action == "retry" else 0.0
         run.attempts.append(Attempt(decision.model, decision.tier, exc.code, wait))
-        if len(run.attempts) >= self._config.max_attempts:
+        if len(run.attempts) >= self._max_attempts():
             self._log_failure(run, decision, "attempts_exhausted")
             raise RouteFailed(
                 "attempts_exhausted",
@@ -484,7 +488,7 @@ class Router:
         self, run: RouteRun, decision: RouteDecision, verify: VerifyOutcome
     ) -> RouteDecision | None:
         """The next decision after a failed check, or ``None`` to report the failure as it is."""
-        if len(run.attempts) >= self._config.max_attempts:
+        if len(run.attempts) >= self._max_attempts():
             return None
         plugin = self._escalation()
         if plugin is None:

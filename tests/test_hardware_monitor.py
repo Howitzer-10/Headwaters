@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
 from headwaters.core.hardware.gpu import GpuInfo
 from headwaters.core.hardware.state import BatteryState, HardwareMonitor, ManualGpu
 from headwaters.core.rules import LocalTier
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PROFILES = load_catalog(REPO_ROOT / SEED_RELATIVE_PATH).gpu_profiles
 AC = BatteryState(False, False)
 
 
@@ -36,7 +41,9 @@ def test_probe_order_falls_back_and_survives_exceptions() -> None:
 
 
 def test_manual_config_fallback() -> None:
-    manual = HardwareMonitor(LocalTier(), probes=[_none], manual=ManualGpu("My GPU", 12.0))
+    manual = HardwareMonitor(
+        LocalTier(), probes=[_none], manual=ManualGpu("My GPU", 12.0), profiles=PROFILES
+    )
     state = manual.get_state()
     assert state.gpu is not None
     assert state.gpu.source == "manual"

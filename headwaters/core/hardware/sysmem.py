@@ -12,9 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from headwaters.core.catalog.schema import ModelEntry
-
-SLOW_RATIO = 0.5  # measured < 50% of expected counts as slow (first-draft threshold)
-SPILL_TOLERANCE = 0.02  # size_vram may be 2% under size before we call it a spill
+from headwaters.core.rules import HardwareRules
 
 SYSMEM_HINT = (
     "The model looks like it is running partly out of system RAM. In the NVIDIA Control Panel "
@@ -45,9 +43,18 @@ def detect_sysmem_fallback(
     size_bytes: int | None,
     size_vram_bytes: int | None,
     gpu_busy: bool = False,
-    slow_ratio: float = SLOW_RATIO,
+    slow_ratio: float | None = None,
+    spill_tolerance: float | None = None,
 ) -> SysmemVerdict:
-    """Slow generation plus ``/api/ps`` evidence. Another busy GPU process explains slowness."""
+    """Slow generation plus ``/api/ps`` evidence. Another busy GPU process explains slowness.
+
+    The thresholds are ``tiers.local.hardware.sysmem_slow_ratio`` and ``sysmem_spill_tolerance``.
+    """
+    defaults = HardwareRules()
+    slow_ratio = defaults.sysmem_slow_ratio if slow_ratio is None else slow_ratio
+    spill_tolerance = (
+        defaults.sysmem_spill_tolerance if spill_tolerance is None else spill_tolerance
+    )
     if not measured_tps or measured_tps <= 0 or not expected_tps or expected_tps <= 0:
         return SysmemVerdict(False, "no_data", measured_tps, expected_tps)
     ratio = measured_tps / expected_tps
@@ -58,7 +65,7 @@ def detect_sysmem_fallback(
     spilled = bool(
         size_bytes
         and size_vram_bytes is not None
-        and size_vram_bytes < size_bytes * (1 - SPILL_TOLERANCE)
+        and size_vram_bytes < size_bytes * (1 - spill_tolerance)
     )
     evidence: Evidence = "spilled" if spilled else "resident_but_slow"
     return SysmemVerdict(True, evidence, measured_tps, expected_tps, ratio, SYSMEM_HINT)

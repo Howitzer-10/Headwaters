@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from headwaters.core.analyzer.layers import build_chain
 from headwaters.core.analyzer.requirements import Requirements
 from headwaters.core.candidates import CandidateBuilder
-from headwaters.core.catalog.schema import Catalog
+from headwaters.core.catalog.schema import Catalog, GpuProfile
 from headwaters.core.executor.cloud import LiteLLMBackend
 from headwaters.core.executor.errors import ExecutorError
 from headwaters.core.executor.executor import Executor
@@ -128,8 +128,10 @@ class Engine:
     hardware: Callable[[], HardwareState | None]
 
 
-def hardware_reader(rules: Rules) -> Callable[[], HardwareState | None]:
-    monitor = HardwareMonitor(rules.tiers.local)
+def hardware_reader(
+    rules: Rules, profiles: Mapping[str, GpuProfile] | None = None
+) -> Callable[[], HardwareState | None]:
+    monitor = HardwareMonitor(rules.tiers.local, profiles=profiles)
 
     def read() -> HardwareState | None:
         try:
@@ -169,7 +171,7 @@ def build_engine(
     registry = FeatureRegistry()
     discover_features(registry)
     registry.set_flags(rules.features)
-    read_hardware = hardware or hardware_reader(rules)
+    read_hardware = hardware or hardware_reader(rules, catalog.gpu_profiles)
     executor = Executor(
         provider,
         WallClassifier(catalog.wall_patterns),

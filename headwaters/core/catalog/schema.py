@@ -133,6 +133,21 @@ class NamedPattern(_Model):
 class GpuProfile(_Model):
     vram_gb: float = Field(gt=0)
     recommended: dict[Role, list[str]] = Field(default_factory=dict)
+    # HDW-151: total VRAM (GB, inclusive) that selects this profile, and Ollama's resident models.
+    vram_range_gb: tuple[float, float] | None = None
+    max_loaded: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def _range_ordered(self) -> Self:
+        if self.vram_range_gb is not None and self.vram_range_gb[0] > self.vram_range_gb[1]:
+            raise ValueError("vram_range_gb must be [low, high] with low <= high")
+        return self
+
+
+class Endpoints(_Model):
+    """Provider URLs that can move without a release (HDW-151)."""
+
+    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", min_length=1)
 
 
 class SubscriptionRate(_Model):
@@ -167,6 +182,15 @@ class AnalyzerHints(_Model):
     chars_per_token_code: float = Field(default=3.5, gt=0)
     chars_per_token_prose: float = Field(default=4.0, gt=0)
     image_tokens: int = Field(default=800, ge=0)
+    # HDW-151: scan window, short-prompt cut-off, task-score bonuses, classifier limits.
+    keyword_scan_head_chars: int = Field(default=4000, gt=0)
+    keyword_scan_tail_chars: int = Field(default=4000, gt=0)
+    short_prompt_tokens: int = Field(default=100, ge=0)
+    image_bonus: int = Field(default=3, ge=0)
+    json_bonus: int = Field(default=2, ge=0)
+    fence_bonus: int = Field(default=2, ge=0)
+    classifier_max_prompt_chars: int = Field(default=2000, ge=2)
+    classifier_min_confidence: float = Field(default=0.75, ge=0, le=1)
     complexity_token_steps: list[int] = Field(default_factory=lambda: [2000, 8000])
     agent_user_agents: list[str] = Field(default_factory=list)  # case-insensitive substrings
     reasoning_keywords: list[str] = Field(default_factory=list)
@@ -218,6 +242,7 @@ class Catalog(_Model):
     default_ignore_patterns: list[str] = Field(default_factory=list)
     subscription_rates: list[SubscriptionRate] = Field(default_factory=list)
     analyzer_hints: AnalyzerHints = Field(default_factory=AnalyzerHints)
+    endpoints: Endpoints = Field(default_factory=Endpoints)
     prompt_bank_ref: str | None = None
 
     @model_validator(mode="after")

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
 from headwaters.core.hardware.gpu import GpuInfo, GpuProcess
 from headwaters.core.hardware.state import (
     BatteryState,
@@ -17,6 +19,9 @@ from headwaters.core.hardware.state import (
     select_profile,
 )
 from headwaters.core.rules import LocalTier
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PROFILES = load_catalog(REPO_ROOT / SEED_RELATIVE_PATH).gpu_profiles
 
 AC = BatteryState(False, False)
 
@@ -61,7 +66,7 @@ def test_compute_reserve(
     ],
 )
 def test_select_profile(total_gb: float | None, requested: str, expected: str) -> None:
-    assert select_profile(total_gb, requested) == expected
+    assert select_profile(total_gb, requested, PROFILES) == expected
 
 
 def test_gpu_busy_by_known_process() -> None:
@@ -95,7 +100,9 @@ def test_gpu_busy_no_gpu_and_threshold() -> None:
 
 
 def test_build_state_laptop_no_display() -> None:
-    state = build_state(gpu_info(display=False), LocalTier(), BatteryState(True, False, 90.0))
+    state = build_state(
+        gpu_info(display=False), LocalTier(), BatteryState(True, False, 90.0), profiles=PROFILES
+    )
     assert state.profile == "laptop_12gb"
     assert state.reserve_gb == 1.0
     assert state.budget_gb == pytest.approx(11.0)
@@ -105,9 +112,9 @@ def test_build_state_laptop_no_display() -> None:
 
 def test_build_state_desktop_display_and_override() -> None:
     gpu = gpu_info(total=16384, free=15000, display=True)
-    state = build_state(gpu, LocalTier(), AC)
+    state = build_state(gpu, LocalTier(), AC, profiles=PROFILES)
     assert (state.profile, state.reserve_gb, state.budget_gb) == ("desktop_16gb", 2.0, 14.0)
-    over = build_state(gpu, LocalTier(reserve_gb=4.0), AC)
+    over = build_state(gpu, LocalTier(reserve_gb=4.0), AC, profiles=PROFILES)
     assert (over.reserve_gb, over.reserve_source, over.budget_gb) == (4.0, "override", 12.0)
 
 

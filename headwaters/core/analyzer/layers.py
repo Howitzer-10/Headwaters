@@ -82,5 +82,6 @@ def build_chain(
             host=tier.host,
             settings=tier.classifier,
             remote_patterns=remote_patterns_from(catalog),
+            hints=catalog.analyzer_hints,
         )
     return AnalyzerChain(base, layer2=layer2, layer3=layer3)

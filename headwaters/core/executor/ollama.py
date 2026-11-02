@@ -17,8 +17,8 @@ from headwaters.core.executor.guard import REMOTE_MODEL_MESSAGE, assert_loopback
 from headwaters.core.executor.ollama_convert import build_payload, parse_line
 from headwaters.core.executor.types import BackendRequest, Delta
 from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
+from headwaters.core.rules import ExecutorRules
 
-DEFAULT_CONNECT_S = 5.0
 _MAX_ERROR_BYTES = 4096
 
 
@@ -33,12 +33,12 @@ class OllamaBackend:
         self,
         host: str,
         *,
-        connect_s: float = DEFAULT_CONNECT_S,
+        connect_s: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         remote_patterns: RemotePatterns = (),
     ) -> None:
         self.host = assert_loopback_url(host)
-        self._connect_s = connect_s
+        self._connect_s = ExecutorRules().connect_s if connect_s is None else connect_s
         self._transport = transport
         self._remote_patterns = remote_patterns
 

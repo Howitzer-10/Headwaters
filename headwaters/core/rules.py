@@ -80,6 +80,19 @@ class ClassifierRules(_Model):
     timeout_s: float = Field(default=2, gt=0)
 
 
+class HardwareRules(_Model):
+    """Local GPU tunables (HDW-151): VRAM reserve, busy check, residency and sysmem thresholds."""
+
+    reserve_display_gb: float = Field(default=2.0, ge=0)  # monitor on the RTX
+    reserve_unknown_gb: float = Field(default=2.5, ge=0)  # display status unknown
+    reserve_no_display_gb: float = Field(default=1.0, ge=0)  # iGPU drives the display
+    busy_threshold_pct: float = Field(default=50.0, ge=0, le=100)
+    warm_bonus: float = Field(default=0.15, ge=0)
+    eviction_penalty_per_model: float = Field(default=0.25, ge=0)
+    sysmem_slow_ratio: float = Field(default=0.5, gt=0, le=1)  # measured/expected below this
+    sysmem_spill_tolerance: float = Field(default=0.02, ge=0, lt=1)
+
+
 class LocalTier(_Model):
     host: str = "http://localhost:11434"
     profile: Literal["auto", "laptop_12gb", "desktop_16gb", "custom"] = "auto"
@@ -95,6 +108,7 @@ class LocalTier(_Model):
     )
     overhead_gb: float = Field(default=1.0, ge=0)
     offload_weight_factor: float = Field(default=2.0, ge=1)
+    hardware: HardwareRules = Field(default_factory=HardwareRules)
 
 
 class TiersRules(_Model):
@@ -175,6 +189,25 @@ class WallsRules(_Model):
     key_poll_minutes: float = Field(default=10, gt=0)
     # HDW-122: an exhausted wall with no reset time ends (the model is tried again) after this.
     exhausted_recheck_s: float = Field(default=900, gt=0)
+    # HDW-151: a wall that ended this long ago no longer counts as "repeated" for the backoff.
+    streak_reset_s: float = Field(default=3600, gt=0)
+
+
+class ExecutorRules(_Model):
+    """Timeouts in seconds. The first-token limit is longer for a cold local model, because the
+    model must be loaded (and the prompt processed) before anything streams."""
+
+    cloud_first_token_s: float = Field(default=30, gt=0)
+    local_warm_first_token_s: float = Field(default=60, gt=0)
+    local_cold_first_token_s: float = Field(default=240, gt=0)
+    stream_idle_s: float = Field(default=60, gt=0)  # max silence between tokens once streaming
+    connect_s: float = Field(default=5, gt=0)
+    default_effort: str = Field(default="medium", min_length=1)  # reasoning switched on (True)
+
+
+class RouterRules(_Model):
+    # Bounds every model call of one request (retries, cascades and escalations together).
+    max_attempts: int = Field(default=4, ge=1)
 
 
 class GatewayRules(_Model):
@@ -283,6 +316,8 @@ class Rules(_Model):
     floors: FloorsRules = Field(default_factory=FloorsRules)
     scoring: ScoringRules = Field(default_factory=ScoringRules)
     walls: WallsRules = Field(default_factory=WallsRules)
+    executor: ExecutorRules = Field(default_factory=ExecutorRules)
+    router: RouterRules = Field(default_factory=RouterRules)
     gateway: GatewayRules = Field(default_factory=GatewayRules)
     dashboard: DashboardRules = Field(default_factory=DashboardRules)
     mcp: McpRules = Field(default_factory=McpRules)

@@ -11,6 +11,7 @@ import pytest
 from headwaters.core.catalog import http as http_mod
 from headwaters.core.catalog import sources
 from headwaters.core.catalog.http import SourceError
+from headwaters.core.catalog.schema import Endpoints
 from headwaters.core.rules import OpenAICompatEndpoint
 
 GIB = 1024**3
@@ -162,7 +163,7 @@ def test_ollama_arch_missing_keys() -> None:
     assert arch == {"n_layers": 2, "n_kv_heads": 4, "head_dim": 16}  # kv heads default to heads
 
 
-OR = sources.OPENROUTER_BASE
+OR = Endpoints().openrouter_base_url
 OR_MODELS = {
     "data": [
         {

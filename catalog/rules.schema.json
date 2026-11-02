@@ -133,6 +133,50 @@
       "title": "EnabledFlag",
       "type": "object"
     },
+    "ExecutorRules": {
+      "additionalProperties": false,
+      "description": "Timeouts in seconds. The first-token limit is longer for a cold local model, because the\nmodel must be loaded (and the prompt processed) before anything streams.",
+      "properties": {
+        "cloud_first_token_s": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Cloud First Token S",
+          "type": "number"
+        },
+        "connect_s": {
+          "default": 5,
+          "exclusiveMinimum": 0,
+          "title": "Connect S",
+          "type": "number"
+        },
+        "default_effort": {
+          "default": "medium",
+          "minLength": 1,
+          "title": "Default Effort",
+          "type": "string"
+        },
+        "local_cold_first_token_s": {
+          "default": 240,
+          "exclusiveMinimum": 0,
+          "title": "Local Cold First Token S",
+          "type": "number"
+        },
+        "local_warm_first_token_s": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "title": "Local Warm First Token S",
+          "type": "number"
+        },
+        "stream_idle_s": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "title": "Stream Idle S",
+          "type": "number"
+        }
+      },
+      "title": "ExecutorRules",
+      "type": "object"
+    },
     "FloorRule": {
       "additionalProperties": false,
       "properties": {
@@ -309,6 +353,65 @@
       "title": "GatewayRules",
       "type": "object"
     },
+    "HardwareRules": {
+      "additionalProperties": false,
+      "description": "Local GPU tunables (HDW-151): VRAM reserve, busy check, residency and sysmem thresholds.",
+      "properties": {
+        "busy_threshold_pct": {
+          "default": 50.0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Busy Threshold Pct",
+          "type": "number"
+        },
+        "eviction_penalty_per_model": {
+          "default": 0.25,
+          "minimum": 0,
+          "title": "Eviction Penalty Per Model",
+          "type": "number"
+        },
+        "reserve_display_gb": {
+          "default": 2.0,
+          "minimum": 0,
+          "title": "Reserve Display Gb",
+          "type": "number"
+        },
+        "reserve_no_display_gb": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Reserve No Display Gb",
+          "type": "number"
+        },
+        "reserve_unknown_gb": {
+          "default": 2.5,
+          "minimum": 0,
+          "title": "Reserve Unknown Gb",
+          "type": "number"
+        },
+        "sysmem_slow_ratio": {
+          "default": 0.5,
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Sysmem Slow Ratio",
+          "type": "number"
+        },
+        "sysmem_spill_tolerance": {
+          "default": 0.02,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Sysmem Spill Tolerance",
+          "type": "number"
+        },
+        "warm_bonus": {
+          "default": 0.15,
+          "minimum": 0,
+          "title": "Warm Bonus",
+          "type": "number"
+        }
+      },
+      "title": "HardwareRules",
+      "type": "object"
+    },
     "HostsRules": {
       "additionalProperties": false,
       "properties": {
@@ -336,6 +439,9 @@
           "minItems": 1,
           "title": "Ctx Steps",
           "type": "array"
+        },
+        "hardware": {
+          "$ref": "#/$defs/HardwareRules"
         },
         "host": {
           "default": "http://localhost:11434",
@@ -630,6 +736,19 @@
         }
       },
       "title": "PremiumTier",
+      "type": "object"
+    },
+    "RouterRules": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "default": 4,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        }
+      },
+      "title": "RouterRules",
       "type": "object"
     },
     "ScoringRules": {
@@ -950,6 +1069,12 @@
           "minimum": 0,
           "title": "Soft Exhaust Pct",
           "type": "number"
+        },
+        "streak_reset_s": {
+          "default": 3600,
+          "exclusiveMinimum": 0,
+          "title": "Streak Reset S",
+          "type": "number"
         }
       },
       "title": "WallsRules",
@@ -1012,6 +1137,9 @@
       "title": "Default Scope",
       "type": "string"
     },
+    "executor": {
+      "$ref": "#/$defs/ExecutorRules"
+    },
     "features": {
       "additionalProperties": {
         "type": "boolean"
@@ -1041,6 +1169,9 @@
       "default": false,
       "title": "Private Lock",
       "type": "boolean"
+    },
+    "router": {
+      "$ref": "#/$defs/RouterRules"
     },
     "scoring": {
       "$ref": "#/$defs/ScoringRules"

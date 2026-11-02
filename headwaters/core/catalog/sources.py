@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 from headwaters.core.catalog.http import HttpClient, SourceError, is_loopback_url
+from headwaters.core.catalog.schema import Endpoints
 from headwaters.core.ollama_remote import RemotePatterns, has_remote_fields, is_remote_name
 from headwaters.core.rules import OpenAICompatEndpoint
 
 LiveTier = Literal["local", "free_cloud", "paid"]
-OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 _GIB = 1024**3
 
 
@@ -156,10 +156,14 @@ def _per_million(value: Any) -> float | None:
     return round(n * 1_000_000, 6) if n is not None and n >= 0 else None
 
 
-def openrouter_models(http: HttpClient, api_key: str | None = None) -> list[LiveModel]:
-    """Models from /api/v1/models. ``:free`` ids are tier free_cloud, the rest paid."""
+def openrouter_models(
+    http: HttpClient, api_key: str | None = None, base_url: str | None = None
+) -> list[LiveModel]:
+    """Models from {base_url}/models (the catalog ``endpoints``). ``:free`` ids are tier
+    free_cloud, the rest paid."""
+    base_url = base_url or Endpoints().openrouter_base_url
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
-    payload = _as_dict(http.request_json("GET", f"{OPENROUTER_BASE}/models", headers=headers))
+    payload = _as_dict(http.request_json("GET", f"{base_url}/models", headers=headers))
     out: list[LiveModel] = []
     for item in _as_list(payload.get("data")):
         entry = _as_dict(item)
@@ -201,11 +205,14 @@ class OpenRouterKeyInfo:
     credit_remaining: float | None
 
 
-def openrouter_key(http: HttpClient, api_key: str) -> OpenRouterKeyInfo:
-    """/api/v1/key. The deprecated ``rate_limit`` field is ignored (A-OR-3)."""
+def openrouter_key(
+    http: HttpClient, api_key: str, base_url: str | None = None
+) -> OpenRouterKeyInfo:
+    """{base_url}/key. The deprecated ``rate_limit`` field is ignored (A-OR-3)."""
+    base_url = base_url or Endpoints().openrouter_base_url
     headers = {"Authorization": f"Bearer {api_key}"}
     data = _as_dict(
-        _as_dict(http.request_json("GET", f"{OPENROUTER_BASE}/key", headers=headers)).get("data")
+        _as_dict(http.request_json("GET", f"{base_url}/key", headers=headers)).get("data")
     )
     free = _as_dict(data.get("free_model_daily_requests"))
     is_free = data.get("is_free_tier")

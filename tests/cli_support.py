@@ -16,6 +16,7 @@ from typer.testing import CliRunner, Result
 from headwaters.cli import runtime
 from headwaters.cli.main import app
 from headwaters.core import paths
+from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
 from headwaters.core.hardware.gpu import GpuInfo
 from headwaters.core.hardware.state import BatteryState, HardwareState, build_state
 from headwaters.core.rules import LocalTier
@@ -31,7 +32,10 @@ FAKE_KEY = "sk-Zq8Xv3Lm9Pw2Rt5Yb7Nc4Hd6Jf1Kg"  # secret-shaped, not a placeholde
 
 def gpu_state(total_gb: int = 16, on_battery: bool = False) -> HardwareState:
     gpu = GpuInfo("Test RTX", total_gb * 1024.0, total_gb * 1024.0 - 512, True, "nvml")
-    return build_state(gpu, LocalTier(), BatteryState(True, on_battery, 80.0))
+    profiles = load_catalog(
+        Path(__file__).resolve().parent.parent / SEED_RELATIVE_PATH
+    ).gpu_profiles
+    return build_state(gpu, LocalTier(), BatteryState(True, on_battery, 80.0), profiles=profiles)
 
 
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hw: HardwareState | None = None) -> Path:

@@ -27,7 +27,8 @@ from headwaters.core.state import Database
 
 __all__ = ["KeyPollResult", "PaidWall", "paid_walls", "poll_paid_walls"]
 
-# The balance endpoint (``OPENROUTER_KEY_URL``) belongs to OpenRouter, the only provider whose
+# The balance endpoint (``{openrouter_base_url}/key``, from the catalog) belongs to OpenRouter,
+# the only provider whose
 # balance this checks. A key wall without a provider is read as OpenRouter's.
 POLLED_PROVIDER = "openrouter"
 _PAID = ":paid"
@@ -74,6 +75,7 @@ def poll_paid_walls(
     key_for: Callable[[str], str | None],
     *,
     now: float | None = None,
+    key_url: str | None = None,
 ) -> KeyPollResult:
     """Poll each key that has a paid wall. ``rules`` is the live rules, read by the caller.
 
@@ -99,6 +101,7 @@ def poll_paid_walls(
             provider=wall.provider,
             airplane=rules.airplane,
             local_lock=rules.private_lock,
+            url=key_url,
         )
         if status is None:
             continue

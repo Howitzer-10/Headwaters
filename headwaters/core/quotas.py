@@ -28,14 +28,13 @@ from typing import Any, Literal
 
 from headwaters.core import state_limits
 from headwaters.core.catalog.http import HttpClient, SourceError
-from headwaters.core.catalog.schema import FreeLimit, WallScope
+from headwaters.core.catalog.schema import Endpoints, FreeLimit, WallScope
 from headwaters.core.rules import RulesProvider, WallsRules
 from headwaters.core.scope import PAID_TIERS
 from headwaters.core.state import Database
 from headwaters.core.state_misc import kv_get, kv_set
 from headwaters.core.walls import WallEvent
 
-OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 ScopeState = Literal["ok", "cooldown", "exhausted"]
 AvailabilityStatus = Literal["ok", "cooldown", "exhausted", "soft"]
 Action = Literal["retry", "cascade", "none"]
@@ -43,12 +42,10 @@ CreditClass = Literal["paid", "free"]
 
 _CREDIT_CLASSES: tuple[CreditClass, ...] = ("paid", "free")
 _TRANSIENT_KINDS = ("rate_limit", "overloaded")
-_STALE_AFTER_S = 3600.0  # a wall that ended this long ago no longer counts as "repeated"
 _RPM = "rpm:"
 _RPD = "rpd:"
 
 __all__ = [
-    "OPENROUTER_KEY_URL",
     "Availability",
     "CreditClass",
     "KeyStatus",
@@ -186,7 +183,7 @@ class QuotaTracker:
     def _forget_stale(self, subject: str, kind: str, now: float) -> None:
         """Drop a long-finished wall so an old streak does not inflate the backoff."""
         prior = state_limits.get_wall(self._db, subject, kind)
-        if prior and prior.until is not None and now - prior.until > _STALE_AFTER_S:
+        if prior and prior.until is not None and now - prior.until > self._walls.streak_reset_s:
             state_limits.clear_walls(self._db, [subject], [kind])
 
     def record_wall(
@@ -358,7 +355,7 @@ class QuotaTracker:
         force: bool = False,
         airplane: bool = False,
         local_lock: bool = False,
-        url: str = OPENROUTER_KEY_URL,
+        url: str | None = None,
     ) -> KeyStatus | None:
         """Check the OpenRouter key every ``key_poll_minutes`` (``force`` = after a paid call).
 
@@ -367,6 +364,7 @@ class QuotaTracker:
         """
         if airplane or local_lock:
             return None
+        url = url or f"{Endpoints().openrouter_base_url}/key"
         now = self._clock()
         if not force and not self._poll_due(alias, now):
             return None

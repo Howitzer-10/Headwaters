@@ -40,18 +40,6 @@ class ExecOptions:
 
 
 @dataclass(frozen=True)
-class ExecutorConfig:
-    """Timeouts in seconds. The first-token limit is longer for a cold local model, because the
-    model must be loaded (and the prompt processed) before anything streams."""
-
-    cloud_first_token_s: float = 30.0
-    local_warm_first_token_s: float = 60.0
-    local_cold_first_token_s: float = 240.0
-    stream_idle_s: float = 60.0  # max silence between tokens once streaming
-    connect_s: float = 5.0
-
-
-@dataclass(frozen=True)
 class Usage:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None

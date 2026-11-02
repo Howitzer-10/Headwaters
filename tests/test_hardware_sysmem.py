@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
 from headwaters.core.catalog.schema import ModelEntry
 from headwaters.core.hardware.residency import (
     LoadedModel,
@@ -16,6 +19,9 @@ from headwaters.core.hardware.sysmem import (
     detect_sysmem_fallback,
     expected_tps_for,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PROFILES = load_catalog(REPO_ROOT / SEED_RELATIVE_PATH).gpu_profiles
 
 
 def test_sysmem_detection_spilled() -> None:
@@ -72,5 +78,5 @@ def test_residency_two_models_and_defaults() -> None:
     two = ResidencyConfig(max_loaded_models=2)
     assert residency_inputs("b", 3.0, loaded, 14.5, two).evicts == ()
     assert residency_inputs("b", 6.0, loaded, 14.5, two).evicts == ("a",)  # VRAM, not count
-    assert default_max_loaded("laptop_12gb") == 1
-    assert default_max_loaded("desktop_16gb") == 2
+    assert default_max_loaded("laptop_12gb", PROFILES) == 1
+    assert default_max_loaded("desktop_16gb", PROFILES) == 2

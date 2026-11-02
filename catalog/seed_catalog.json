@@ -143,6 +143,8 @@
   "gpu_profiles": {
     "laptop_12gb": {
       "vram_gb": 12,
+      "vram_range_gb": [10, 13.5],
+      "max_loaded": 1,
       "recommended": {
         "agentic_coder": ["qwen2.5-coder:14b"],
         "general": ["qwen3:14b"],
@@ -152,6 +154,8 @@
     },
     "desktop_16gb": {
       "vram_gb": 16,
+      "vram_range_gb": [14, 17.5],
+      "max_loaded": 2,
       "recommended": {
         "agentic_coder": ["qwen2.5-coder:14b"],
         "general": ["qwen3:14b"],
@@ -160,6 +164,7 @@
       }
     }
   },
+  "endpoints": {"openrouter_base_url": "https://openrouter.ai/api/v1"},
   "secret_patterns": [
     {"name": "sk-style-api-key", "regex": "\\bsk-[A-Za-z0-9_-]{20,}", "verify": true},
     {"name": "aws-access-key-id", "regex": "\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b", "verify": true},
@@ -193,6 +198,14 @@
     "chars_per_token_code": 3.5,
     "chars_per_token_prose": 4.0,
     "image_tokens": 800,
+    "keyword_scan_head_chars": 4000,
+    "keyword_scan_tail_chars": 4000,
+    "short_prompt_tokens": 100,
+    "image_bonus": 3,
+    "json_bonus": 2,
+    "fence_bonus": 2,
+    "classifier_max_prompt_chars": 2000,
+    "classifier_min_confidence": 0.75,
     "complexity_token_steps": [2000, 8000],
     "agent_user_agents": ["cline", "roo-code", "roocode", "opencode", "claude-cli", "claude-code", "continue", "aider", "kilo"],
     "reasoning_keywords": [

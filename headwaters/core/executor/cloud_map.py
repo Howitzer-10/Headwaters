@@ -10,10 +10,9 @@ from typing import Any
 
 from headwaters.core.executor.errors import ProviderError
 from headwaters.core.executor.types import Delta, ToolCallDelta, Usage
-from headwaters.core.rules import AttributionRules
+from headwaters.core.rules import AttributionRules, ExecutorRules
 
 OPENROUTER = "openrouter"
-DEFAULT_EFFORT = "medium"  # used when reasoning is simply switched on (True)
 _MAX_ERROR_CHARS = 4096
 _TIMEOUT_NAMES = frozenset({"Timeout", "APITimeoutError", "ReadTimeout"})
 _CONNECTION_NAMES = frozenset({"APIConnectionError", "ServiceUnavailableError"})
@@ -27,19 +26,23 @@ def attribution_headers(attribution: AttributionRules) -> dict[str, str]:
     return {"HTTP-Referer": attribution.referer, "X-OpenRouter-Title": attribution.title}
 
 
-def reasoning_kwargs(provider: str, reasoning: bool | str | None) -> dict[str, Any]:
+def reasoning_kwargs(
+    provider: str, reasoning: bool | str | None, default_effort: str | None = None
+) -> dict[str, Any]:
     """The provider's reasoning parameter (A-OR-7): OpenRouter's unified ``reasoning`` object
-    through ``extra_body``; everything else through litellm's ``reasoning_effort``."""
+    through ``extra_body``; everything else through litellm's ``reasoning_effort``.
+    ``True`` means ``default_effort`` (rules ``executor.default_effort``)."""
     if reasoning is None:
         return {}
+    on = default_effort or ExecutorRules().default_effort
     if provider == OPENROUTER:
         if reasoning is False:
             return {"extra_body": {"reasoning": {"enabled": False}}}
-        effort = DEFAULT_EFFORT if reasoning is True else reasoning
+        effort = on if reasoning is True else reasoning
         return {"extra_body": {"reasoning": {"effort": effort}}}
     if reasoning is False:
         return {}
-    return {"reasoning_effort": DEFAULT_EFFORT if reasoning is True else reasoning}
+    return {"reasoning_effort": on if reasoning is True else reasoning}
 
 
 def _header_map(exc: BaseException) -> Mapping[str, str]:

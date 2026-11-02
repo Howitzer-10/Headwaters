@@ -135,7 +135,10 @@ class CandidateBuilder:
         budget = hw.budget_gb if hw is not None else 0.0
         fit = fit_for_row(row, budget, est_tokens, FitConfig.from_rules(self._rules))
         needed = fit.weights_gb + fit.kv_gb if fit.usable else (row.size_gb or 0.0)
-        config = ResidencyConfig(
-            max_loaded_models=default_max_loaded(hw.profile if hw is not None else "custom")
+        config = ResidencyConfig.from_rules(
+            self._rules.tiers.local.hardware,
+            default_max_loaded(
+                hw.profile if hw is not None else "custom", self._catalog.gpu_profiles
+            ),
         )
         return fit, residency_inputs(row.id, needed, loaded, budget, config)
