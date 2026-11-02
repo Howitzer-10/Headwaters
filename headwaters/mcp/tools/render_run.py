@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from headwaters.mcp.tools.schemas import ConfirmInfo
 
-__all__ = ["render_confirmation", "render_declined", "render_job_started"]
+__all__ = ["render_confirmation", "render_declined", "render_job_started", "render_plan_changed"]
 
 
 def _usd(amount: float | None) -> str:
@@ -35,6 +35,15 @@ def render_confirmation(info: ConfirmInfo) -> str:
     return "\n".join(lines)
 
 
+def render_plan_changed(info: ConfirmInfo) -> str:
+    """The plan moved after the user's yes: nothing ran, and the user is asked again."""
+    return (
+        "Headwaters did NOT run this call: the plan changed after the user's yes, and now "
+        f"uses {info.model} ({info.tier}) for about {_usd(info.estimated_cost_usd)}. Nothing was "
+        "spent. Repeat the call and Headwaters will ask the user about this plan."
+    )
+
+
 def render_declined() -> str:
     return "The user said no, so nothing ran and nothing was spent."
 
@@ -45,5 +54,6 @@ def render_job_started(job_id: str, eta_s: float | None) -> str:
     return (
         f"Started in the background as job {job_id}.{when} "
         "There is no answer yet: poll headwaters_job_status with this job_id, then read "
-        "headwaters_job_result. If those tools are not listed, call headwaters_more first."
+        "headwaters_job_result (headwaters_job_cancel stops it). If those tools are not listed, "
+        "call headwaters_more first."
     )

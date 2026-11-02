@@ -208,7 +208,9 @@ class QuotaResult(BaseModel):
 class JobResult(BaseModel):
     ok: bool
     job_id: str | None = None
-    status: str | None = Field(default=None, description="queued, running, done or failed.")
+    status: str | None = Field(
+        default=None, description="queued, running, done, failed or cancelled."
+    )
     progress: float | None = Field(default=None, description="0 to 1; never goes down.")
     message: str | None = Field(default=None, description="What the job is doing now.")
     tool: str | None = Field(default=None, description="Which tool started the job.")

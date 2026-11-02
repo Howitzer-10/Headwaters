@@ -6,7 +6,7 @@ server (``headwaters.gateway.server``) mounts the app and owns authentication.
 
 The front-door tools are registered here when the daemon passes a ``ToolContext``:
 ``headwaters_do``, ``_ask``, ``_check`` (HDW-204), ``_think``, ``_status``, ``_scope``,
-``_handoff`` and ``_more`` (HDW-205), the ``headwaters://result/<id>`` resource, and eight
+``_handoff`` and ``_more`` (HDW-205), the ``headwaters://result/<id>`` resource, and nine
 advanced tools that ``tools/list`` shows only to a host that called ``headwaters_more``. The
 model tools (``do``, ``ask``, ``think``) plan, ask the user and run in the background (HDW-206).
 """

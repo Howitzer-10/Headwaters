@@ -70,8 +70,8 @@ HANDOFF: Final = (
 
 MORE: Final = (
     "List Headwaters' advanced tools and switch them on for this session. Call it when you "
-    "need to pick a model, check quotas or local models, pin a model, give feedback or poll a "
-    "job. The tool list then grows (list_changed).\n"
+    "need to pick a model, check quotas or local models, pin a model, give feedback or poll or "
+    "cancel a job. The tool list then grows (list_changed).\n"
     "Example: {}"
 )
 
@@ -92,12 +92,17 @@ ADVANCED: Final = {
         "Walls with reset times and each cloud model's request counters.\nExample: {}"
     ),
     "headwaters_job_status": (
-        "Progress of a background job (queued, running, done or failed) and what it is doing.\n"
+        "Progress of a background job (queued, running, done, failed or cancelled) and what it is "
+        "doing.\n"
         'Example: {"job_id": "abc"}'
     ),
     "headwaters_job_result": (
         "The finished background job's result, shaped like the tool's own result. Ask again "
         'while it is still running.\nExample: {"job_id": "abc"}'
+    ),
+    "headwaters_job_cancel": (
+        "Stop a background job that is queued or running; the model call under it is cancelled "
+        'and the job ends as cancelled.\nExample: {"job_id": "abc"}'
     ),
     "headwaters_pin_model": (
         "Pin one model for later calls, or clear the pin (omit `model`). The scope and locks "

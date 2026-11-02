@@ -416,6 +416,12 @@
           "title": "Async Threshold S",
           "type": "number"
         },
+        "job_retention_days": {
+          "default": 7,
+          "exclusiveMinimum": 0,
+          "title": "Job Retention Days",
+          "type": "number"
+        },
         "roots": {
           "default": "auto",
           "enum": [

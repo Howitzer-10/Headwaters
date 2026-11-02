@@ -95,8 +95,18 @@ class FakeUpstream:
         return types.ReadResourceResult(contents=[content])
 
 
-def make_link(upstreams: list[FakeUpstream], ensured: list[int] | None = None) -> DaemonLink:
-    """A link whose every (re)connection hands out the next fake upstream."""
+def make_link(
+    upstreams: list[FakeUpstream],
+    ensured: list[int] | None = None,
+    *,
+    elicitation: Any = None,
+    openings: list[Any] | None = None,
+) -> DaemonLink:
+    """A link whose every (re)connection hands out the next fake upstream.
+
+    ``openings`` records the elicitation callback each connection was opened with (None: the
+    connection declares no elicitation).
+    """
 
     async def ensure() -> DaemonClient:
         if ensured is not None:
@@ -104,7 +114,9 @@ def make_link(upstreams: list[FakeUpstream], ensured: list[int] | None = None) -
         return DaemonClient(INFO, "t")
 
     @asynccontextmanager
-    async def opener(daemon: DaemonClient) -> AsyncIterator[Any]:
+    async def opener(daemon: DaemonClient, callback: Any = None) -> AsyncIterator[Any]:
+        if openings is not None:
+            openings.append(callback)
         yield upstreams.pop(0)
 
-    return DaemonLink(ensure, opener)
+    return DaemonLink(ensure, opener, elicitation)

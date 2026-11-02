@@ -42,8 +42,8 @@ def test_advanced_tools_are_hidden_until_the_host_asks(tmp_path: Path) -> None:
     before, after_a, after_b = asyncio.run(go())
     assert len(before) == 8
     assert not set(ADVANCED) & set(before)
-    assert set(ADVANCED) <= set(after_a)  # host-a asked: it now sees all sixteen
-    assert len(after_a) == 16
+    assert set(ADVANCED) <= set(after_a)  # host-a asked: it now sees all seventeen
+    assert len(after_a) == 17
     assert after_b == before  # host-b did not: its list is unchanged
 
 
@@ -75,7 +75,7 @@ def test_asking_twice_is_harmless_and_does_not_announce_again(tmp_path: Path) ->
                 await c.call_tool("headwaters_more", {}, meta=_host("h"))
             return await _list(c, "h")
 
-    assert len(asyncio.run(go())) == 16
+    assert len(asyncio.run(go())) == 17
 
 
 def test_an_unlisted_advanced_tool_still_answers_but_cannot_widen_anything(

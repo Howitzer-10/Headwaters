@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from mcp import types
@@ -38,7 +38,12 @@ from headwaters.mcp.tools.failures import Failure
 from headwaters.mcp.tools.flow import Prepared, prepare_request, run_prepared
 from headwaters.mcp.tools.frontdoor import classify
 from headwaters.mcp.tools.progress import Progress, Update
-from headwaters.mcp.tools.render_run import render_confirmation, render_declined, render_job_started
+from headwaters.mcp.tools.render_run import (
+    render_confirmation,
+    render_declined,
+    render_job_started,
+    render_plan_changed,
+)
 from headwaters.mcp.tools.results import envelope
 from headwaters.mcp.tools.schemas import ConfirmInfo, ErrorInfo
 from headwaters.mcp.tools.scope_tool import loosens_scope
@@ -56,6 +61,7 @@ __all__ = [
     "confirm_info",
     "confirm_question",
     "execute",
+    "question_key",
     "verdict",
 ]
 
@@ -78,6 +84,9 @@ class Plan:
     estimate: Estimate | None = None
     failure: Failure | None = None
     confirm: ConfirmInfo | None = None
+    # HDW-146 (FU-206-8): True when this plan was made again after the question, and it is not the
+    # one the user was asked about (another model or cost), so their yes does not cover it.
+    changed: bool = False
 
 
 def confirm_info(rules: Rules, estimate: Estimate, requested: Scope | None) -> ConfirmInfo | None:
@@ -176,6 +185,17 @@ class Responder:
         fields = {"ok": False, "confirmation_required": True, "confirm": info, "error": error}
         return envelope(self.model.model_validate(fields), render_confirmation(info), is_error=True)
 
+    def plan_changed(self, info: ConfirmInfo) -> types.CallToolResult:
+        """The user said yes to one plan and the call would now run another: ask again."""
+        error = ErrorInfo(
+            code="plan_changed",
+            message="The plan changed after the user's yes (another model or cost), so nothing "
+            "ran and nothing was spent.",
+            fix="Repeat the call: Headwaters will ask the user again about the new plan.",
+        )
+        fields = {"ok": False, "confirmation_required": True, "confirm": info, "error": error}
+        return envelope(self.model.model_validate(fields), render_plan_changed(info), is_error=True)
+
     def declined(self) -> types.CallToolResult:
         error = ErrorInfo(
             code="declined",
@@ -198,24 +218,45 @@ class Responder:
         return envelope(self.model.model_validate(fields), text)
 
 
+def question_key(info: ConfirmInfo) -> str:
+    """What the user is asked to agree to: the model, the cost as the question words it (three
+    decimals) and the reasons. Two plans with the same key put the same question."""
+    cost = info.estimated_cost_usd or 0.0
+    return f"{info.model}|{info.tier}|{cost:.3f}|{','.join(sorted(info.reasons))}"
+
+
 class PlanCache:
     """Hands a plan from a tool's resolver to the tool body of the same request.
 
     Keyed by the request's own context object and checked by identity, so a reused ``id`` never
     matches. Bounded, because a request that stops after its question never reaches its body.
+    It also remembers, apart from the plan, what each request's question was (``question_key``),
+    so a plan made again after the plan itself is gone can be checked against it (HDW-146,
+    FU-206-8). That record is a short string and is kept longer than the plan.
     """
 
-    def __init__(self, limit: int = 32) -> None:
+    def __init__(self, limit: int = 32, asked_limit: int = 256) -> None:
         self._limit = limit
+        self._asked_limit = asked_limit
         self._items: OrderedDict[int, tuple[object, Plan]] = OrderedDict()
+        self._asked: OrderedDict[int, tuple[object, str]] = OrderedDict()
 
     def put(self, owner: object, plan: Plan) -> None:
         self._items[id(owner)] = (owner, plan)
         while len(self._items) > self._limit:
             self._items.popitem(last=False)
+        if plan.confirm is not None:
+            self._asked[id(owner)] = (owner, question_key(plan.confirm))
+            while len(self._asked) > self._asked_limit:
+                self._asked.popitem(last=False)
 
     def take(self, owner: object) -> Plan | None:
         entry = self._items.pop(id(owner), None)
+        return entry[1] if entry is not None and entry[0] is owner else None
+
+    def asked(self, owner: object) -> str | None:
+        """The question put for this request, or None when none was recorded."""
+        entry = self._asked.pop(id(owner), None)
         return entry[1] if entry is not None and entry[0] is owner else None
 
 
@@ -244,9 +285,21 @@ class Gate:
         return FORCED if force else NO_CHANNEL
 
     async def plan_for(self, ctx: Context, responder: Responder, **request: Any) -> Plan:
-        """The plan the resolver made for this request (or a new one if it is gone)."""
-        found = self._plans.take(ctx.request_context)
-        return found if found is not None else await build_plan(self._tc, responder, **request)
+        """The plan the resolver made for this request (or a new one if it is gone).
+
+        A plan made again may not be the one the user was asked about (the model or the cost moved
+        in between). It is then marked ``changed``, and ``execute`` asks again instead of running it
+        on the old yes (HDW-146, FU-206-8). A plan that needs no yes is never marked.
+        """
+        owner = ctx.request_context
+        found = self._plans.take(owner)
+        asked = self._plans.asked(owner)
+        if found is not None:
+            return found
+        plan = await build_plan(self._tc, responder, **request)
+        if plan.confirm is not None and asked != question_key(plan.confirm):
+            return replace(plan, changed=True)
+        return plan
 
 
 def _go_ahead(plan: Plan, answer: Verdict) -> bool:
@@ -271,6 +324,8 @@ async def execute(
         return responder.fail(plan.failure)
     if answer == "declined":
         return responder.declined()
+    if plan.changed and plan.confirm is not None and answer in ("agreed", "forced"):
+        return responder.plan_changed(plan.confirm)  # the yes was for another plan
     if plan.prepared is None:  # cannot happen without a failure
         raise ToolFailure("internal_error", "No request was prepared.", "Try again.")
     if not _go_ahead(plan, answer):

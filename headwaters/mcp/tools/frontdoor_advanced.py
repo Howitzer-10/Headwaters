@@ -1,4 +1,4 @@
-"""Register the eight advanced tools (HDW-205, v3.4 B1).
+"""Register the nine advanced tools (HDW-205, v3.4 B1; ``headwaters_job_cancel`` is HDW-146).
 
 They are registered like any tool, but ``Disclosure`` keeps them out of ``tools/list`` until the
 host calls ``headwaters_more``. Each is local: no model is called and nothing leaves the machine.
@@ -152,6 +152,27 @@ def register_advanced(server: MCPServer, tc: ToolContext) -> None:
             result = advanced.job_result(tc, job_id)
         except Exception as exc:
             return _fail(JobResult, "job_result", exc)
+        return _job_envelope(result)
+
+    @server.tool(
+        name="headwaters_job_cancel",
+        title="Cancel a job",
+        description=descriptions.ADVANCED["headwaters_job_cancel"],
+        annotations=types.ToolAnnotations(
+            title="Cancel a job",
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+    )
+    async def headwaters_job_cancel(
+        job_id: Annotated[str, Field(min_length=1, description="The job id.")],
+    ) -> Annotated[types.CallToolResult, JobResult]:
+        try:
+            result = await advanced.cancel_job(tc, job_id)
+        except Exception as exc:
+            return _fail(JobResult, "job_cancel", exc)
         return _job_envelope(result)
 
     @server.tool(

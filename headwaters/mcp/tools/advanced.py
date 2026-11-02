@@ -18,8 +18,17 @@ from headwaters.core.hardware.sysmem import expected_tps_for
 from headwaters.core.quotas import model_subject
 from headwaters.core.state_decisions import get_outcome, set_user_feedback
 from headwaters.core.state_limits import get_quota
-from headwaters.core.state_misc import JobRow, get_job, kv_delete, kv_get, kv_set
+from headwaters.core.state_misc import (
+    UNFINISHED_JOB_STATES,
+    JobRow,
+    cancel_unfinished_job,
+    get_job,
+    kv_delete,
+    kv_get,
+    kv_set,
+)
 from headwaters.core.state_models import list_models
+from headwaters.mcp.threads import run_blocking
 from headwaters.mcp.tools.context import ToolContext, ToolFailure
 from headwaters.mcp.tools.schemas import ErrorInfo
 from headwaters.mcp.tools.schemas_more import (
@@ -35,6 +44,7 @@ from headwaters.mcp.tools.status import PIN_KEY, gpu_info, walls_now
 
 __all__ = [
     "FEEDBACK_VALUES",
+    "cancel_job",
     "give_feedback",
     "job_result",
     "job_status",
@@ -163,6 +173,8 @@ def job_result(tc: ToolContext, job_id: str) -> JobResult:
     view = _view(row)
     if row.status == "failed":
         return view
+    if row.status == "cancelled":
+        return view.model_copy(update={"notes": ["The job was cancelled; there is no answer."]})
     if row.status != "done":
         return view.model_copy(update={"notes": ["The job has not finished; ask again later."]})
     kept = tc.jobs.result_of(job_id)
@@ -172,6 +184,33 @@ def job_result(tc: ToolContext, job_id: str) -> JobResult:
         update: dict[str, Any] = {"notes": [note], "result": link or None}
         return view.model_copy(update=update)
     return view.model_copy(update={"result": {**kept, **link}})
+
+
+async def cancel_job(tc: ToolContext, job_id: str) -> JobResult:
+    """Stop a queued or running background job (HDW-146).
+
+    The task is cancelled, which cancels the model call under it; the row then says ``cancelled``.
+    A job that already ended is left as it is and the result says so. Whatever the model call
+    already cost stays in the ledger: only the rest of the work is stopped.
+    """
+    db = tc.state()
+    row = await run_blocking(lambda: get_job(db, job_id))
+    if row is None:
+        return _no_job(job_id)
+    if row.status not in UNFINISHED_JOB_STATES:
+        note = f"The job had already ended ({row.status}); there was nothing to cancel."
+        return _view(row).model_copy(update={"notes": [note]})
+    stopped = tc.jobs.cancel(job_id)  # on the event loop: ``Task.cancel`` is not thread safe
+    await run_blocking(lambda: cancel_unfinished_job(db, job_id, "Cancelled by the user"))
+    fresh = await run_blocking(lambda: get_job(db, job_id))
+    view = _view(fresh if fresh is not None else row)
+    if fresh is not None and fresh.status != "cancelled":  # it finished a moment before
+        note = f"The job had already ended ({fresh.status}); there was nothing to cancel."
+        return view.model_copy(update={"notes": [note]})
+    notes = ["The job was asked to stop; the model call under it is cancelled."]
+    if not stopped:
+        notes = ["The job had no running task here (an earlier daemon left it); it is marked."]
+    return view.model_copy(update={"notes": notes})
 
 
 def pin_model(tc: ToolContext, model: str | None) -> PinResult:

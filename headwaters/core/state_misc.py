@@ -71,6 +71,7 @@ class JobRow:
 
 
 UNFINISHED_JOB_STATES = ("queued", "running")
+FINISHED_JOB_STATES = ("done", "failed", "cancelled")
 
 
 def create_job(
@@ -96,7 +97,8 @@ def update_job(
     message: str | None = None,
     error_json: str | None = None,
 ) -> bool:
-    """Update only the fields given."""
+    """Update only the fields given. A cancelled job stays cancelled (HDW-146): a progress write
+    that was already in flight when the user cancelled must not bring it back to life."""
     sets = ["updated = ?"]
     args: list[str | float] = [time.time()]
     for column, value in (
@@ -112,7 +114,8 @@ def update_job(
     with db.write() as c:
         return (
             c.execute(
-                f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ?", (*args, job_id)
+                f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ? AND status != 'cancelled'",
+                (*args, job_id),
             ).rowcount
             > 0
         )
@@ -126,6 +129,34 @@ def fail_unfinished_jobs(db: Database, error_json: str) -> int:
             f"UPDATE jobs SET status = 'failed', error_json = ?, updated = ?"
             f" WHERE status IN ({marks})",
             (error_json, time.time(), *UNFINISHED_JOB_STATES),
+        ).rowcount
+
+
+def cancel_unfinished_job(db: Database, job_id: str, message: str) -> bool:
+    """Mark a queued or running job ``cancelled``. False when it already ended or does not exist,
+    so a job that finished a moment before is never turned back into a cancelled one."""
+    marks = ",".join("?" for _ in UNFINISHED_JOB_STATES)
+    with db.write() as c:
+        return (
+            c.execute(
+                f"UPDATE jobs SET status = 'cancelled', message = ?, updated = ?"
+                f" WHERE job_id = ? AND status IN ({marks})",
+                (message, time.time(), job_id, *UNFINISHED_JOB_STATES),
+            ).rowcount
+            > 0
+        )
+
+
+def delete_finished_jobs_before(db: Database, cutoff: float) -> int:
+    """Delete every finished job last changed before ``cutoff`` (a Unix time). Returns how many.
+
+    A queued or running job is never deleted, however old its row is.
+    """
+    marks = ",".join("?" for _ in FINISHED_JOB_STATES)
+    with db.write() as c:
+        return c.execute(
+            f"DELETE FROM jobs WHERE status IN ({marks}) AND updated < ?",
+            (*FINISHED_JOB_STATES, cutoff),
         ).rowcount
 
 

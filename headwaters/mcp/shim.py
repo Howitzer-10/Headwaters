@@ -30,6 +30,13 @@ import headwaters
 from headwaters.core import paths
 from headwaters.core.logging import configure_logging
 from headwaters.core.stdio import configure_utf8, guard_stdout
+from headwaters.mcp.forward import (
+    asking_through,
+    call_tool_round,
+    forward_elicitation,
+    host_can_ask,
+    host_is_modern,
+)
 from headwaters.mcp.link import DaemonLink, DaemonUnavailable
 from headwaters.mcp.meta import META_CLIENT, META_CWD, MORE_TOOL
 
@@ -91,9 +98,12 @@ def build_shim_server(link: DaemonLink) -> Server[Any]:
 
     async def on_call_tool(
         ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
-    ) -> types.CallToolResult:
+    ) -> types.CallToolResult | types.InputRequiredResult:
         # The daemon is shared, so it cannot know this host's project folder: say it (D9).
         meta: Any = {META_CWD: workdir(), META_CLIENT: client_id}
+        # HDW-146: a host that declared elicitation is asked inside the host (D9). The daemon
+        # client declares it too, so the daemon puts its question instead of the ``force`` text.
+        can_ask = host_can_ask(ctx.session)
 
         async def pass_progress(progress: float, total: float | None, message: str | None) -> None:
             # HDW-206: the daemon's progress goes on to this shim's host. A host that did not ask
@@ -102,12 +112,30 @@ def build_shim_server(link: DaemonLink) -> Server[Any]:
                 await ctx.session.report_progress(progress, total, message)
 
         try:
-            result = await link.call(
-                lambda c: c.call_tool(
-                    params.name, params.arguments, meta=meta, progress_callback=pass_progress
-                )
-            )
-            if params.name == MORE_TOOL and not result.is_error:
+            # A host that cancels this call cancels the work below (HDW-146): the daemon client
+            # then sends its own cancellation, which stops the model call on the daemon.
+            with asking_through(ctx):
+                if can_ask and host_is_modern(ctx.session):
+                    # This host cannot be sent a request in the middle of a call: the daemon's
+                    # question goes back to it as an input-required result, and it retries.
+                    result: types.CallToolResult | types.InputRequiredResult = await link.call(
+                        lambda c: call_tool_round(c, params, meta, pass_progress), ask=True
+                    )
+                else:
+                    result = await link.call(
+                        lambda c: c.call_tool(
+                            params.name,
+                            params.arguments,
+                            meta=meta,
+                            progress_callback=pass_progress,
+                        ),
+                        ask=can_ask,
+                    )
+            if (
+                params.name == MORE_TOOL
+                and isinstance(result, types.CallToolResult)
+                and not result.is_error
+            ):
                 await _announce_new_tools(ctx, bus)
             return result
         except DaemonUnavailable as exc:
@@ -211,7 +239,7 @@ async def serve_stdio(
 
 
 async def _amain(emit: Callable[[str], None]) -> None:
-    link = DaemonLink()
+    link = DaemonLink(elicitation=forward_elicitation)
     server = build_shim_server(link)
     prewarm = asyncio.create_task(link.prewarm())
     try:

@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from headwaters.core.logging import get_logger
 from headwaters.core.state_misc import create_job, update_job
-from headwaters.mcp.jobs import RESTART_ERROR
+from headwaters.mcp.jobs import RESTART_ERROR, prune_finished_jobs
 from headwaters.mcp.threads import run_blocking
 from headwaters.mcp.tools.context import ToolContext, ToolFailure
 from headwaters.mcp.tools.estimate import Estimate
@@ -50,6 +50,9 @@ async def start_job(
             "Wait for one to finish (headwaters_job_status), then try again.",
         )
     db = tc.state()
+    retention = tc.rules().mcp.job_retention_days
+    # HDW-146: old finished rows go when a new job starts, so the table needs no timer of its own.
+    await run_blocking(lambda: prune_finished_jobs(db, retention))
     job_id = secrets.token_urlsafe(9)
     await run_blocking(lambda: create_job(db, job_id, "queued", tool=tool))
     tc.jobs.start(job_id, _run(tc, job_id, tool, prepared, estimate, shape))
@@ -81,8 +84,13 @@ async def _run(
                 db, job_id, status="done", progress=1.0, result_ref=outcome.uri, message="Done"
             )
         )
-    except asyncio.CancelledError:  # the daemon is stopping: leave no job "running"
-        update_job(db, job_id, status="failed", error_json=json.dumps(RESTART_ERROR))
+    except asyncio.CancelledError:
+        if tc.jobs.was_cancelled(
+            job_id
+        ):  # the user cancelled it: the model call is already stopped
+            update_job(db, job_id, status="cancelled", message="Cancelled")
+        else:  # the daemon is stopping: leave no job "running"
+            update_job(db, job_id, status="failed", error_json=json.dumps(RESTART_ERROR))
         raise
     except Exception as exc:
         failure = classify(exc, tool)

@@ -191,6 +191,9 @@ class McpRules(_Model):
     transport: Literal["stdio"] = "stdio"
     async_threshold_s: float = Field(default=20, ge=0)
     roots: Literal["auto", "off"] = "auto"
+    # HDW-146: a finished background job's row (done, failed or cancelled) is deleted this many
+    # days after it last changed. The answer itself is never in SQLite.
+    job_retention_days: float = Field(default=7, gt=0)
 
 
 class AttributionRules(_Model):

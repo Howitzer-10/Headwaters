@@ -146,7 +146,7 @@ def test_a_profile_that_asked_for_more_sees_the_advanced_tools(tmp_path: Path) -
             more = await backend.list_tools(HostProfile("q", "Q", True))
             return len(plain), len(more)
 
-    assert asyncio.run(go()) == (8, 16)
+    assert asyncio.run(go()) == (8, 17)
 
 
 def test_run_profile_works_against_a_stub_backend() -> None:
