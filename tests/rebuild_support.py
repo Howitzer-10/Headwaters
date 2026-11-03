@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
-from collections.abc import AsyncIterator, Callable
+from collections import deque
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,42 @@ class Backend:
         yield Delta(finish_reason="stop")
 
 
+Step = Delta | BaseException
+
+
+class ProgrammableProvider(Backend):
+    """``Backend`` for every model, programmed per model id (HDW-305).
+
+    ``on(model, *calls)`` queues the next calls to that model: each argument is one call's script,
+    the steps of which play in order, so an agent loop's two turns are two arguments. A step that
+    is an exception is raised where it sits, which is how a wall is played. A model with no queue
+    answers ``reply``, so a test only writes the turns it is about.
+    """
+
+    def __init__(self, reply: str = "answer from the mock") -> None:
+        super().__init__(reply)
+        self.calls: list[str] = []  # every model call, in order
+        self._queues: dict[str, deque[Sequence[Step]]] = {}
+
+    def on(self, model: str, *calls: Sequence[Step]) -> ProgrammableProvider:
+        """Queue the next calls to ``model``."""
+        self._queues.setdefault(model, deque()).extend(calls)
+        return self
+
+    async def stream(self, request: BackendRequest) -> AsyncIterator[Delta]:
+        self.requests.append(request)
+        self.calls.append(request.target.model_id)
+        queue = self._queues.get(request.target.model_id)
+        if not queue:
+            yield Delta(content=self.reply)
+            yield Delta(finish_reason="stop")
+            return
+        for step in queue.popleft():
+            if isinstance(step, BaseException):
+                raise step
+            yield step
+
+
 class DaemonRig:
     def __init__(
         self,
@@ -62,6 +99,7 @@ class DaemonRig:
         *,
         cloud: bool = False,
         home: Path | None = None,
+        provider: Backend | None = None,
     ) -> None:
         monkeypatch.setenv(paths.HOME_ENV_VAR, str(home or tmp_path / "home"))
         self.catalog = load_catalog(REPO_ROOT / SEED_RELATIVE_PATH)
@@ -76,7 +114,13 @@ class DaemonRig:
         real = build_engine
 
         def wired(*args: Any, **kwargs: Any) -> Engine:
-            backend = Backend(f"answer from engine {len(self.builds) + 1}")
+            # A programmed provider can serve every local and cloud call, so a test scripts one
+            # model per turn (HDW-305); otherwise each build answers a plain reply.
+            backend: Backend = (
+                provider
+                if provider is not None
+                else Backend(f"answer from engine {len(self.builds) + 1}")
+            )
             self.backends.append(backend)
 
             def cloud_factory() -> Backend:
