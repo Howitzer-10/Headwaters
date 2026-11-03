@@ -40,6 +40,7 @@ class Rig:
         clock: Callable[[], float] | None = None,
         rules_source: Callable[[], Rules] | None = None,
         gpu_profiles: Mapping[str, GpuProfile] | None = None,
+        analyzer: Any | None = None,
     ) -> None:
         self.rules = rules or Rules()
         live: Rules | Callable[[], Rules] = rules_source or self.rules  # HDW-131
@@ -47,7 +48,7 @@ class Rig:
         self.dispatch = Dispatch(scripts)
         self.cloud_clients = 0
         self.waits: list[float] = []
-        self.analyzer = FixedAnalyzer(reqs)
+        self.analyzer = analyzer if analyzer is not None else FixedAnalyzer(reqs)
         pool = list(candidates)
 
         def cloud_factory() -> Dispatch:

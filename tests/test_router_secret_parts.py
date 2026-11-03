@@ -12,8 +12,9 @@ from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
 from headwaters.core.router_prep import scan_texts
 from headwaters.core.router_types import RouteRequest
 from headwaters.core.secrets_detect import SecretDetector
+from headwaters.core.state import Database
 from tests.executor_support import REPO_ROOT
-from tests.net_spy import forbid_network
+from tests.net_spy import audit_egress, forbid_network
 from tests.router_rig import Rig
 from tests.router_support import OK
 from tests.test_router import LOCAL, pool
@@ -55,6 +56,22 @@ SHAPES: dict[str, list[dict[str, Any]]] = {
     "anthropic_tool_use_input": [ANTHROPIC_USE],
 }
 INNOCENT: dict[str, Any] = {"role": "user", "content": "write a function that adds two numbers"}
+READBACK: dict[str, dict[str, Any]] = {
+    "content_part": {"messages": [INNOCENT, USER]},
+    "tool_calls_arguments": {"messages": [INNOCENT, OPENAI_CALL]},
+    "tool_use_input": {"messages": [INNOCENT, ANTHROPIC_USE]},
+    "tool_result": {"messages": [INNOCENT, TOOL_RESULT]},
+    "system_block": {"messages": [INNOCENT], "system": [{"type": "text", "text": f"tk {SK}"}]},
+}
+
+
+def stored(db: Database) -> list[dict[str, Any]]:
+    """Every decision and outcome row, read straight back out of SQLite (FU-120-1)."""
+    with db.read() as c:
+        return [
+            *(dict(r) for r in c.execute("SELECT * FROM decisions")),
+            *(dict(r) for r in c.execute("SELECT * FROM outcomes")),
+        ]
 
 
 def detector() -> SecretDetector:
@@ -99,16 +116,35 @@ OPENAI_CALL_CLEAN: dict[str, Any] = {
 }
 
 
-@pytest.mark.parametrize("shape", sorted(SHAPES))
+@pytest.mark.parametrize("shape", sorted(READBACK))
 def test_a_secret_only_in_a_part_routes_local_without_network(
     shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig = Rig(tmp_path, {LOCAL: OK}, pool(), secrets=detector())
-    opened = forbid_network(monkeypatch, allow_loopback=True)
-    result = rig.run(messages=[INNOCENT, *SHAPES[shape]])
+    with audit_egress() as remote:
+        opened = forbid_network(monkeypatch, allow_loopback=True)
+        result = rig.run(**READBACK[shape])
     assert result.decision.model == LOCAL
     assert rig.cloud_clients == 0
     assert not opened
+    assert not remote
     assert SK not in repr(result.reasons)
     assert SK not in repr(result.decision)
     assert SK not in repr(result.attempts)
+
+
+@pytest.mark.parametrize("shape", sorted(READBACK))
+def test_the_stored_decision_and_outcome_rows_hold_no_secret(
+    shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FU-120-1: the SQLite rows, not just the return value, are clean for every shape."""
+    rig = Rig(tmp_path, {LOCAL: OK}, pool(), secrets=detector())
+    with audit_egress():
+        opened = forbid_network(monkeypatch, allow_loopback=True)
+        rig.run(**READBACK[shape])
+    rows = stored(rig.db)
+    assert len(rows) == 2  # one decision row, one outcome row
+    for row in rows:
+        for column, value in row.items():
+            assert SK not in str(value), f"secret leaked into column {column}"
+    assert not opened
