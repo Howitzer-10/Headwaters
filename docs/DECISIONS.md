@@ -17,9 +17,25 @@
 | D13 | Ollama cloud models are not routable in 0.1: **Headwaters never routes to Ollama `:cloud` / `-cloud` models, in any tier.** Discovery drops them (never `local`, never `free_cloud` or `paid`), and the executor refuses them as defence in depth. Owner answer to HDW-119 question 1 ("never"). Where HDW-121 says "`tier=free_cloud`/`paid` per catalog, or drops them", only "drops them" applies. | Decided (2026-10-31, owner, HDW-119) |
 | D14 | Daemon packages: **`headwaters.gateway` owns the HTTP server** (the only package allowed to import `fastapi`, `starlette` and `uvicorn`), **`headwaters.mcp` owns the MCP SDK** and hands its streamable-HTTP app out as a plain ASGI callable, and a new **`headwaters.daemon` is the composition root** that wires core, gateway and mcp into one process. Nothing imports `headwaters.daemon`; the CLI starts it as a child process. The internal API and health endpoint live in `gateway/server.py`, not under `headwaters/mcp/`. | Decided (2026-10-31, HDW-201) |
 | D15 | Beta tester promise: **everyone on the beta tester list gets Headwaters Pro free if a free/Pro split ships at 1.0.** HDW-407's packet offers free Pro or a discount for testers; the free option is chosen, the discount is not promised, and the list itself is a release-gate owner step. | Decided (2026-11-10, HDW-407) |
+| D16 | Two stages: **Stage 1 is the owner running the current build from source, dogfooding it and functionally testing it, with ticket work continuing through Phase 7; Stage 2 is distribution and sale and starts only when Phase 7 is complete.** No public beta, no closed alpha and no 0.x release in Stage 1, and the release gate stays red and unmodified until Stage 2 begins. | Decided (2026-11-03, owner) |
+| D17 | Retries inside one request: **a request never picks again a model that failed it, and the ladder emits tiers round-robin so every tier takes one attempt before any tier takes a second.** A failure lives on the run and never writes a wall, a cloud provider with no key fast-fails for the whole request, and the terminal error lists the attempts and names a healthy tier that was never tried. | Decided (2026-11-03, HDW-513) |
 | D18 | Provider identity: **every surface (CLI, dashboard page, tray menu) reads one registry of plain, lowercase provider names, and a person is never shown an underlying environment variable name.** The registry is `KeyStore.providers()`; it currently holds `anthropic`, `openai`, `openrouter`, `nvidia`, `huggingface`, `mistral`, `pollinations`, `opencode`, `opencode-go` and keyless `ollama` (whatever `providers()` returns is the list; this branch's registry also carries a `kilo` row from the catalog work, FU-503-2), and a provider added there appears on every surface without a second list. `HF_TOKEN` and `NVIDIA_API_KEY` are internal mappings, accepted as input at most, and never printed. No surface keeps its own provider list or label, and `keys set` rejects an unknown name. Why: a person thinks in products, not environment variables, and two surfaces drifting on naming is a support burden. Implemented by HDW-514 (registry owner), HDW-503 (dashboard) and HDW-504 (tray). | Decided (owner, HDW-503 / 504 / 514 packets) |
+| D19 | "Paid" vocabulary: **the word is never written bare, because this product uses it for two different things.** A **paid tier** is a provider whose use costs the person money, gated by the local `features.paid_scopes` flag; that is the sense HDW-503 / 504 / 514 already use. A **paid product** is a capability sold to the person as part of the app (for example intelligent paid routing); that is a different system, because `features.paid_scopes` is a local boolean in `rules.yaml`, not an entitlement check, and selling a capability needs a real entitlement or licence check, which does not exist yet. Code, docs, CLI output and UI text qualify which sense they mean (for example `paid tier` or `licensed feature`), so a grep can tell them apart. Why: the two senses will otherwise be conflated exactly the way environment-variable names and provider names were before D18, and an entitlement bug in this area spends real money. | Decided (2026-11-03, owner) |
 
-Numbering note: this table stops at D15 on this branch, while the detail sections run to D16. D17 is claimed independently by two unmerged branches (HDW-512's answer footer and HDW-513's tier interleaving); this entry skips it and keeps the D18 number its packets use, so whoever merges those branches renumbers one of them.
+Numbering note: decision numbers are permanent — never reused, renumbered or handed to another
+decision — and this file is the consolidated copy of D1-D19, so read and edit a decision here rather
+than hunting five branches for it. D17 here is HDW-513's per-request failure memory and tier
+turn-taking; HDW-512 also claimed D17 for the answer footer, and that collision is written up in
+`docs/reports/HDW-520.md`.
+
+## Decided, not yet built
+
+Forward-looking notes, not decisions to implement now. Nothing below is ticketed, designed or built.
+
+- **A credits wall stops; it does not downgrade.** When paid tiers do become routable and a credits wall is hit, the product stops and tells the person. It does not silently downgrade them to a free model. Any downgrade to free must be an explicit, visible, opt-in behaviour. Recorded as a user directive on 2026-11-03.
+- **Cost- and quality-aware routing is wanted, not designed.** A future capability: routing paid-tier models on cost and quality, from a per-model price ledger, benchmark data and other metadata-derived ratings. Nothing here is designed or ticketed.
+- **Provenance for that future work.** This machine already runs a separate MCP-only solution called VRAMWeave-MCP, registered as the MCP server `vramweave-mcp`. It has done related work on pricing and metric data and should be reviewed as a starting point when that capability is eventually ticketed. The pointer was identified by the MCP server name alone; its source has not been surveyed and nothing here is designed from it.
+- **Fuller reference.** A fuller reference of the VRAMWeave-MCP prior art, including what is worth borrowing and what would not survive our topology, is in `docs/REFERENCE_VRAMWEAVE.md`.
 
 ## Deferred tickets (do not build)
 
@@ -235,4 +251,43 @@ Phases 5-7; Stage 2 is the 11 owner steps.
 
 **Revisit** if the owner's evaluation concludes the product is not worth distributing. Nothing has
 been published at that point, so the plan simply stops.
+
+## D17: a request remembers its own failures, and tiers take turns
+
+**Decision.** Two rules govern every retry inside one gateway request, and they are implemented in
+`Router._recover`/`_redecide` (`headwaters/core/router.py`), `headwaters/core/router_failures.py` and
+`build_ladder`/`interleave_tiers` (`headwaters/core/policy/ladder.py`):
+
+1. **Per-request failure memory.** A model that fails in a request is not chosen again by that
+   request. The record lives on `RouteRun.failures` and is discarded with the run: this is not a
+   cooldown and it never writes a wall. Walls and backoff stay exactly as HDW-511 left them, so a
+   model excluded here is free to serve the next request (a context failure must not punish a model
+   that would work on a smaller payload). Retry-class walls (`rate_limit`, `overload`) keep their
+   model for the retry and are recorded as failed only if that retry fails too.
+2. **Tier fairness.** The ladder is emitted round-robin by tier: every tier in the ladder takes one
+   attempt before any tier takes a second. The first appearance of a tier keeps the rung and score
+   precedence the policy already decided, and the rotation starts just after the tier attempted last,
+   so re-deciding after a tier failed cannot hand that tier the next attempt while an untried tier
+   is still available. Deterministic: same pool plus same attempted tiers gives the same order. A
+   tier that is out of scope, locked or empty never appears, so fairness cannot widen the scope.
+3. **Fast-fail an unauthenticated cloud provider.** When the (cached) key store says a cloud provider
+   has no key, every model of that provider is excluded for the request instead of consuming an
+   attempt each. No network call is added to the hot path.
+4. **The terminal error is honest and bounded.** `Every allowed attempt failed.` is gone. The message
+   is a summary line, up to four attempt lines (`attempt N: model (tier, provider) - failure`), the
+   missing-key fix command when a credential is the cause, and a line naming a healthy tier that was
+   never tried. Credential-looking substrings are redacted; key material is never included.
+
+**Reason.** Live evidence (HDW-513, decisions 9-12): with no cloud key at all, four attempts all
+re-selected the same top free model, failed the same 401 four times and never reached the healthy
+local tier that had answered 90 s earlier. A trivial prompt therefore spent 21 minutes and ended in
+a message the user could not act on. Both defects are properties of the retry loop, not of the
+models.
+
+**Cost.** Fallback order between tiers changes (a second candidate of a tier now waits for the other
+tiers' first), which the policy golden tests pin explicitly. Attempt lines and reasons are longer by
+a few fixed strings.
+
+**Tickets.** HDW-513. **Revisit** if a provider grows per-model authentication (then the provider-level
+fast-fail must narrow to the models that share the credential).
 
