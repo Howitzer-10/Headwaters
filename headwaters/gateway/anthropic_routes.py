@@ -33,7 +33,8 @@ from headwaters.core.executor.types import ExecOptions, ExecResult, ToolCall
 from headwaters.core.logging import get_logger
 from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
 from headwaters.core.rules import Rules
-from headwaters.core.scope import ParsedModel, ScopeError, parse_model_name
+from headwaters.core.scope import ScopeError
+from headwaters.gateway.aliases import requested
 from headwaters.gateway.shared import (
     SERVING_ERRORS,
     RouterLike,
@@ -90,9 +91,9 @@ async def messages(
     model = body.get("model")
     if not isinstance(model, str) or not model.strip():
         return _error(400, "model: Field required")
+    live_rules = rules()
     try:
-        parsed = parse_model_name(model.strip())
-        wanted = _request_for(body, model.strip(), parsed, request.headers)
+        wanted = _request_for(body, model.strip(), request.headers, live_rules)
     except ScopeError as exc:
         return _failure(exc)
     except MessageError as exc:
@@ -100,7 +101,6 @@ async def messages(
     live = router()
     if live is None:
         return _error(NOT_READY_STATUS, "The daemon is still starting; retry.")
-    live_rules = rules()
     try:
         if wanted.stream:
             events = cast("AsyncIterator[RouteEvent]", live.handle(wanted))
@@ -120,8 +120,8 @@ async def messages(
 def _request_for(
     body: Mapping[str, Any],
     model: str,
-    parsed: ParsedModel | None,
     headers: Mapping[str, str],
+    live_rules: Rules,
 ) -> RouteRequest:
     # Both credentials are the daemon's own secret: neither is a routing hint or part of the
     # session key, so neither ever reaches the router.
@@ -130,6 +130,9 @@ def _request_for(
         for key, value in headers.items()
         if key.lower() not in ("authorization", "x-api-key")
     }
+    # HDW-304: the same alias table, picker syntax and ``x-headwaters-pin`` as the OpenAI face.
+    asked = requested(model, seen, live_rules)
+    parsed = asked.parsed
     max_tokens = _int_or_none(body.get("max_tokens"))
     temperature = _float_or_none(body.get("temperature"))
     options: ExecOptions | None = None
@@ -146,9 +149,12 @@ def _request_for(
         scope=parsed.scope if parsed is not None else None,
         strategy=parsed.strategy if parsed is not None else None,
         verify=parsed.verify if parsed is not None else None,
-        # A model the picker does not know (``claude-sonnet-4-5`` from Claude Code) is a request
-        # for that model: it is pinned, and the hard filter and walls still apply (FU-302-1).
-        pin=None if parsed is not None else model,
+        # A model the picker does not know and the alias table does not map
+        # (``claude-sonnet-4-5`` from Claude Code) is a request for that exact model: it passes
+        # through, with the hard filter and walls still applying. ``x-headwaters-pin: true``
+        # stops the failover when the call fails.
+        pin=asked.pin,
+        pin_strict=asked.strict,
         session_id=seen.get("x-session-id") or None,
         options=options,
     )

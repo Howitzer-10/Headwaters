@@ -33,7 +33,8 @@ from headwaters.core.policy.types import RouteDecision
 from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
 from headwaters.core.router_verify import schema_of
 from headwaters.core.rules import Rules
-from headwaters.core.scope import ParsedModel, ScopeError, parse_model_name
+from headwaters.core.scope import ScopeError
+from headwaters.gateway.aliases import requested
 from headwaters.gateway.anthropic_routes import MESSAGES_PATH, messages
 from headwaters.gateway.models import card, find, listed
 from headwaters.gateway.server import HEALTH_PATH, GuardedApp
@@ -132,15 +133,14 @@ async def _chat(
         )
     if any(not isinstance(message, Mapping) for message in messages):
         return error_response(400, "invalid_messages", "Every message must be a JSON object.")
+    live_rules = rules()
     try:
-        parsed = parse_model_name(model.strip())
+        wanted = _request_for(body, model.strip(), messages, request.headers, live_rules)
     except ScopeError as exc:
         return failure_response(exc)
     live = router()
     if live is None:
         return error_response(503, "gateway_not_ready", "The daemon is still starting; retry.")
-    wanted = _request_for(body, model.strip(), messages, parsed, request.headers)
-    live_rules = rules()
     try:
         if wanted.stream:
             events = cast("AsyncIterator[RouteEvent]", live.handle(wanted))
@@ -161,12 +161,15 @@ def _request_for(
     body: Mapping[str, Any],
     model: str,
     messages: Sequence[Mapping[str, Any]],
-    parsed: ParsedModel | None,
     headers: Mapping[str, str],
+    live_rules: Rules,
 ) -> RouteRequest:
     # The bearer token is the daemon's own secret: it is neither a routing hint nor part of the
     # session key, so it never reaches the router.
     seen = {key.lower(): value for key, value in headers.items() if key.lower() != "authorization"}
+    # HDW-304: the alias table, the picker syntax and ``x-headwaters-pin`` in one place.
+    asked = requested(model, seen, live_rules)
+    parsed = asked.parsed
     response_format = body.get("response_format")
     max_tokens = _int_or_none(body.get("max_completion_tokens") or body.get("max_tokens"))
     temperature = _float_or_none(body.get("temperature"))
@@ -190,10 +193,12 @@ def _request_for(
         scope=parsed.scope if parsed is not None else None,
         strategy=parsed.strategy if parsed is not None else None,
         verify=parsed.verify if parsed is not None else None,
-        # A model name the picker does not know (``gpt-4o`` from an IDE's own list) is a request
-        # for that model: it is pinned, and the hard filter and walls still apply. HDW-302 adds
-        # the alias table (and the ``x-headwaters-pin`` header).
-        pin=None if parsed is not None else model,
+        # An alias resolves before this point, so a model the picker does not know
+        # (``gpt-4o`` from an IDE's own list) is a request for that exact model: it passes
+        # through, and the hard filter and walls still apply. ``x-headwaters-pin: true`` stops
+        # the failover when the call fails.
+        pin=asked.pin,
+        pin_strict=asked.strict,
         session_id=seen.get("x-session-id") or None,
         options=options,
     )

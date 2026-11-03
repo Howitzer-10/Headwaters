@@ -119,3 +119,23 @@ def test_attempts_are_bounded(tmp_path: Path) -> None:
         rig.run()
     assert info.value.code == "attempts_exhausted"
     assert len(rig.dispatch.calls) == 2
+
+
+def test_an_explicit_model_that_fails_still_fails_over(tmp_path: Path) -> None:
+    """HDW-304: a pass-through model is a first choice, not a guarantee."""
+    rig = Rig(tmp_path, {FREE: [RATE_LIMITED], LOCAL: OK}, pool(local=84.0))
+    result = rig.run(pin=FREE)
+    assert result.decision.model == LOCAL
+    assert result.first_choice == FREE
+    assert [a.status for a in result.attempts] == ["rate_limit", "ok"]
+    assert rig.dispatch.calls == [FREE, LOCAL]
+
+
+def test_a_strict_pin_answers_from_that_model_or_not_at_all(tmp_path: Path) -> None:
+    """HDW-304: ``x-headwaters-pin: true`` turns the failover off."""
+    rig = Rig(tmp_path, {FREE: [RATE_LIMITED], LOCAL: OK}, pool(local=84.0))
+    with pytest.raises(RouteFailed) as info:
+        rig.run(pin=FREE, pin_strict=True)
+    assert info.value.code == "rate_limit"
+    assert rig.dispatch.calls == [FREE]
+    assert [r.chosen for r in recent_decisions(rig.db)] == [FREE]

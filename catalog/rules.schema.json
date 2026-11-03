@@ -619,6 +619,13 @@
     "ModelsRules": {
       "additionalProperties": false,
       "properties": {
+        "aliases": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "object"
+        },
         "openai_compatible": {
           "items": {
             "$ref": "#/$defs/OpenAICompatEndpoint"

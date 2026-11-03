@@ -73,6 +73,11 @@ class RouteRequest:
     strategy: Strategy | None = None
     verify: VerifyMode | None = None
     pin: str | None = None
+    # HDW-304: ``pin`` is an explicit model the user asked for by name; it passes through like
+    # any other pick and fails over when walls or a failed call stop it. ``pin_strict`` (the
+    # gateway's ``x-headwaters-pin: true``) turns that failover off: the answer comes from that
+    # model or the request fails.
+    pin_strict: bool = False
     force: str | None = None
     session_id: str | None = None
     project: ProjectConfig | None = None

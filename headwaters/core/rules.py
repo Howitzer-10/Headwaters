@@ -292,6 +292,20 @@ class ModelsRules(_Model):
     opencode_config: str | None = None  # explicit opencode.json path; None = standard places
     overrides: dict[str, ModelOverride] = Field(default_factory=dict)
     openai_compatible: list[OpenAICompatEndpoint] = Field(default_factory=list)
+    # HDW-304: the alias table. An IDE sends the model names its own picker lists; a key here
+    # maps one to what the user means, either a picker model (``headwaters/free+verify``) or a
+    # catalog model id. Keys match case-insensitively.
+    aliases: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("aliases")
+    @classmethod
+    def _aliases_usable(cls, value: dict[str, str]) -> dict[str, str]:
+        for name, target in value.items():
+            if not name.strip() or not target.strip():
+                raise ValueError("an alias needs a non-empty model name and target")
+            if any(ch.isspace() for ch in target.strip()):
+                raise ValueError(f"alias {name!r} has whitespace in its target {target!r}")
+        return value
 
 
 class HostsRules(_Model):

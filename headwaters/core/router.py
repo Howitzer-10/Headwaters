@@ -407,6 +407,14 @@ class Router:
             self._emit(run, "retrying", decision, exc.code)
             await self._sleep(wait)
             return decision
+        if run.request.pin_strict and run.request.pin is not None:
+            # HDW-304: a pinned model fails as itself. A retry of the same model is still the
+            # same model, so only the failover to another model is off.
+            run.notes.append(f"{decision.model}: {exc.code}, pinned (no failover)")
+            self._log_failure(run, decision, exc.code)
+            raise RouteFailed(
+                exc.code, exc.message, attempts=run.attempts, last_error=exc.as_dict()
+            ) from exc
         run.excluded.add(decision.model)
         run.notes.append(f"{decision.model}: {exc.code}, cascading")
         self._emit(run, "cascading", decision, exc.code)
@@ -442,9 +450,12 @@ class Router:
             if run.reqs.soft.agentic:
                 pool = self._keep_tool_strength(run, last, pool)
         fresh = self._with_live_availability(pool)
+        # HDW-304: the explicit model was tried and did not answer, so an ordinary pass-through
+        # request drops it here and fails over. A strict pin never reaches this point.
+        pin = run.request.pin if run.request.pin_strict else None
         try:
             return decide(
-                PolicyRequest(run.reqs, run.scope, run.request.pin, run.request.force),
+                PolicyRequest(run.reqs, run.scope, pin, run.request.force),
                 PolicyContext(fresh, self._rules_source(), run.hw, escalation),
             )
         except NoRouteError as err:
