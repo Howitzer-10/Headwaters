@@ -14,6 +14,7 @@ from headwaters.cli.output import emit_json, fail, fmt_eta, make_console, table
 from headwaters.core.daemon_client import find_running
 from headwaters.core.daemon_control import start_daemon
 from headwaters.core.quotas import wall_label
+from headwaters.core.rules import tier_order_label
 from headwaters.core.scope import ScopeDecision, ScopeError, paid_scopes_available, resolve_scope
 from headwaters.core.state_limits import WallRow, active_walls
 from headwaters.core.state_models import ModelRow, list_models
@@ -154,6 +155,8 @@ def register(app: typer.Typer) -> None:
                     "ok": True,
                     "default_scope": rt.rules.default_scope,
                     "strategy": rt.rules.strategy,
+                    "tier_order": rt.rules.router.tier_order,
+                    "tier_direction": rt.rules.router.tier_direction,
                     "effective": None
                     if decision is None
                     else {
@@ -177,6 +180,10 @@ def register(app: typer.Typer) -> None:
         console = make_console()
         top = table("Status", "Item", "Value", no_wrap=["Item"])
         top.add_row("Default scope", f"{rt.rules.default_scope}  (strategy: {rt.rules.strategy})")
+        top.add_row(
+            "Fallback order",
+            tier_order_label(rt.rules.router.tier_order, rt.rules.router.tier_direction),
+        )
         if decision is not None:
             tiers = ", ".join(sorted(decision.tiers))
             top.add_row("Effective scope", f"{decision.scope}  (tiers: {tiers})")

@@ -23,6 +23,8 @@ suggestion. Pure functions; never touches request text.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from headwaters.core.policy.filters import Candidate, Rejection, hard_filter
 from headwaters.core.policy.ladder import build_ladder, no_route, suggestions_for
 from headwaters.core.policy.scoring import floor_for, rank_candidates
@@ -34,6 +36,7 @@ from headwaters.core.policy.types import (
     RouteDecision,
     Rung,
 )
+from headwaters.core.rules import tier_order_label
 
 
 def _override(
@@ -82,6 +85,8 @@ def _decision(
         rung=rung,
         verify_required=below or rung == "optimistic",
         breakdown=b,
+        tier_order=req.tier_order,
+        tier_direction=req.tier_direction,
     )
 
 
@@ -104,6 +109,13 @@ def _session_leads(ladder: list[Entry], reasons: list[str]) -> list[Entry]:
 
 def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
     """Run the ladder. Raises ``NoRouteError`` when nothing can serve the request."""
+    # HDW-516: the live rules own the fallback order, like every other ranking setting, so an
+    # edit to rules.yaml reaches the next request without a restart.
+    req = replace(
+        req,
+        tier_order=ctx.rules.router.tier_order,
+        tier_direction=ctx.rules.router.tier_direction,
+    )
     reqs = req.requirements
     result = hard_filter(ctx.candidates, reqs.hard, req.scope, ctx.rules, ctx.hw)
     kept, rejected = list(result.kept), result.rejected
@@ -128,10 +140,19 @@ def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
     if ladder:
         tiers = tuple(dict.fromkeys(entry[0].tier for entry in ladder))
         if len(tiers) > 1:
-            # HDW-513 (D17): say why the fallbacks alternate between tiers.
-            reasons.append(
-                f"tier fairness: {', '.join(tiers)} interleaved, one attempt each before any repeat"
-            )
+            if req.tier_order == "descend":
+                # HDW-516: under ``descend`` the tiers do not alternate, so the fairness line
+                # would be false. Say what the order actually is.
+                reasons.append(
+                    f"tier order: {tier_order_label(req.tier_order, req.tier_direction)}, "
+                    f"one tier at a time: {', '.join(tiers)}"
+                )
+            else:
+                # HDW-513 (D17): say why the fallbacks alternate between tiers.
+                reasons.append(
+                    f"tier fairness: {', '.join(tiers)} interleaved, "
+                    "one attempt each before any repeat"
+                )
         ladder = _session_leads(ladder, reasons)
         return _decision(ladder[0], ladder[1:], req, ctx, reasons)
     # Local scope serves below-floor local models (HDW-123), so an empty ladder in a local-only

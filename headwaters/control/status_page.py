@@ -21,7 +21,7 @@ from pathlib import Path
 from headwaters.core.features import CORE_FEATURES, STAR_LEGEND, FeatureRegistry
 from headwaters.core.project_config import ProjectConfig
 from headwaters.core.quotas import wall_label
-from headwaters.core.rules import Rules
+from headwaters.core.rules import Rules, tier_order_label
 from headwaters.core.scope import ScopeError, paid_scopes_available, resolve_scope
 from headwaters.core.state import Database
 from headwaters.core.state_decisions import get_outcome, recent_decisions
@@ -85,6 +85,8 @@ class StatusPage:
     walls: Sequence[PageWall]
     warm: Sequence[tuple[str, float | None]]
     decisions: Sequence[PageDecision]
+    # HDW-516: "interleave" or "descend (cloud_first)", the fallback order the router uses.
+    tier_order: str = "interleave"
     core: Sequence[tuple[str, str]] = CORE_FEATURES
     stars: Sequence[tuple[str, str, bool]] = ()
     legend: str = STAR_LEGEND
@@ -190,6 +192,7 @@ def build_page(
         walls=_walls(db, moment),
         warm=[(m.id, m.size_vram_gb) for m in list_models(db) if m.warm],
         decisions=_decisions(db, limit),
+        tier_order=tier_order_label(rules.router.tier_order, rules.router.tier_direction),
         stars=_stars(registry),
         catalog=catalog,
     )
@@ -248,6 +251,7 @@ def _scope_section(page: StatusPage) -> str:
     )
     rows = [
         ["Default scope", f"{_e(page.default_scope)} (strategy: {_e(page.strategy)})"],
+        ["Fallback order", _e(page.tier_order)],
         ["Effective scope", effective],
         ["Locks in force", _e(", ".join(page.locks) or "none")],
         ["Private lock", "on" if page.private_lock else "off"],

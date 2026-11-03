@@ -9,12 +9,25 @@ Model slugs, limits and prices are NOT defaults here: they live in the catalog.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Scope = Literal["auto", "free", "local", "cloud"]
 Strategy = Literal["cost_saver", "quality_first", "primary_first"]
+TierOrder = Literal["interleave", "descend"]
+TierDirection = Literal["cloud_first", "local_first"]
+
+# One registry per closed set of names (D18): the schema, the CLI and the MCP descriptions read
+# these instead of retyping the names, so a new value cannot drift between them.
+STRATEGIES: tuple[Strategy, ...] = get_args(Strategy)
+TIER_ORDERS: tuple[TierOrder, ...] = get_args(TierOrder)
+TIER_DIRECTIONS: tuple[TierDirection, ...] = get_args(TierDirection)
+
+
+def tier_order_label(order: TierOrder, direction: TierDirection) -> str:
+    """How the surfaces print the order: ``interleave`` or ``descend (cloud_first)``."""
+    return order if order == "interleave" else f"{order} ({direction})"
 
 
 class _Model(BaseModel):
@@ -208,6 +221,11 @@ class ExecutorRules(_Model):
 class RouterRules(_Model):
     # Bounds every model call of one request (retries, cascades and escalations together).
     max_attempts: int = Field(default=4, ge=1)
+    # HDW-516: how the fallbacks are ordered. ``interleave`` round-robins the tiers (HDW-513,
+    # the default and unchanged); ``descend`` exhausts one tier before the next, walking the
+    # tiers in ``tier_direction`` order.
+    tier_order: TierOrder = "interleave"
+    tier_direction: TierDirection = "cloud_first"
 
 
 class GatewayRules(_Model):

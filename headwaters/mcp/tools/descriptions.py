@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from headwaters.core.rules import STRATEGIES
+
 __all__ = ["ADVANCED", "ASK", "CHECK", "DO", "HANDOFF", "MORE", "SCOPE", "STATUS", "THINK"]
 
 DO: Final = (
@@ -54,7 +56,7 @@ STATUS: Final = (
 
 SCOPE: Final = (
     "Set which models may serve requests: `scope` (auto, free, local, cloud), `private_lock` "
-    "(true = local models only) and `strategy` (cost_saver, quality_first, primary_first). "
+    f"(true = local models only) and `strategy` ({', '.join(STRATEGIES)}). "
     "Tightening applies at once. Loosening needs the USER: the host asks them, or the result "
     "gives a command for them to run. Never run that command yourself.\n"
     'Example: {"scope": "local"}'

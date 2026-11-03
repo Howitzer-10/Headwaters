@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 
 from headwaters.control.status_page import StatusPage, build_page, render_html
 from headwaters.core.features import FeatureRegistry, FeatureSpec
-from headwaters.core.rules import Rules
+from headwaters.core.rules import RouterRules, Rules
 from headwaters.core.state import Database, open_database
 from headwaters.core.state_decisions import DecisionRow, insert_decision
 from headwaters.core.state_limits import record_wall
@@ -59,6 +59,15 @@ def test_the_page_shows_readable_walls_from_the_real_state(db: Database) -> None
     assert "1m 30s" in html
     assert "unknown" in html  # a wall with no end time says so
     assert "after a balance check" not in html
+
+
+def test_the_page_shows_the_fallback_order(db: Database) -> None:
+    assert "interleave" in render_html(page(db))
+    descends = Rules(router=RouterRules(tier_order="descend", tier_direction="local_first"))
+    html = render_html(page(db, rules=descends))
+    assert "Fallback order" in html
+    assert "descend (local_first)" in html
+    assert "interleave" not in html
 
 
 def test_the_page_shows_the_decision_log_with_locks_and_the_offload_penalty(

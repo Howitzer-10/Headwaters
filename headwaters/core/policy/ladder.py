@@ -8,7 +8,8 @@ from headwaters.core.policy.errors import NoRouteError, Suggestion
 from headwaters.core.policy.filters import Candidate, Rejection
 from headwaters.core.policy.scoring import ScoreBreakdown, rank_candidates
 from headwaters.core.policy.types import Entry, PolicyContext, PolicyRequest, Rung
-from headwaters.core.scope import TierName
+from headwaters.core.rules import TierDirection
+from headwaters.core.scope import TierName, tier_walk
 
 _CHEAP_TIERS: frozenset[TierName] = frozenset({"local", "free_cloud"})
 
@@ -133,6 +134,18 @@ def interleave_tiers(entries: list[Entry], tried: Sequence[TierName] = ()) -> li
     return out
 
 
+def descend_tiers(entries: list[Entry], direction: TierDirection = "cloud_first") -> list[Entry]:
+    """Exhaust one tier before the next, walking the tiers in ``direction`` order (HDW-516).
+
+    ``entries`` is already ordered by rung and, inside a rung, by score, and the sort is stable,
+    so inside a tier the policy's own precedence is kept. A tier outside ``TIER_WALK`` (an id a
+    newer catalog grew) sorts last, also stably, instead of being dropped.
+    """
+    walk = tier_walk(direction)
+    rank = {tier: at for at, tier in enumerate(walk)}
+    return sorted(entries, key=lambda entry: rank.get(entry[0].tier, len(walk)))
+
+
 def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) -> list[Entry]:
     """Ordered candidates: first is the decision, the rest are fallbacks (no duplicates)."""
     rules, reqs = ctx.rules, req.requirements
@@ -177,4 +190,6 @@ def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) 
         if entry[0].id not in seen:
             seen.add(entry[0].id)
             unique.append(entry)
+    if req.tier_order == "descend":
+        return descend_tiers(unique, req.tier_direction)
     return interleave_tiers(unique, req.tier_attempts)

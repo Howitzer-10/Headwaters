@@ -15,7 +15,7 @@ from headwaters.core.engine import Engine
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.project_config import ProjectConfig
 from headwaters.core.quotas import parse_wall_subject, provider_name, wall_label
-from headwaters.core.rules import Rules
+from headwaters.core.rules import Rules, tier_order_label
 from headwaters.core.scope import ScopeError, paid_scopes_available, resolve_scope
 from headwaters.core.state_limits import WallRow, active_walls
 from headwaters.core.state_misc import kv_get
@@ -41,6 +41,8 @@ def scope_info(engine: Engine | None, rules: Rules, project: ProjectConfig | Non
     info = ScopeInfo(
         default_scope=rules.default_scope,
         strategy=rules.strategy,
+        tier_order=tier_order_label(rules.router.tier_order, rules.router.tier_direction),
+        tier_direction=rules.router.tier_direction,
         private_lock=rules.private_lock,
         airplane=rules.airplane,
         project_rule=(project.privacy if project is not None else None),

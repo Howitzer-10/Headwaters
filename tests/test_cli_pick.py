@@ -51,9 +51,23 @@ def test_pick_json_has_reasons_fallbacks_and_scope(cli_home: Path) -> None:
     assert [f["model"] for f in data["fallbacks"]][:1] == ["qwen:14b"]
     assert data["fallbacks"][0]["status"] == "ok"
     assert data["scope"]["tiers"] == ["free_cloud", "local"]
+    assert data["scope"]["tier_order"] == "interleave"
     assert data["requirements"]["task"] == "code"
     assert "vendor/big" in {r["model"] for r in data["rejected"]}  # paid tiers are out of scope
     assert {"model", "reason"} <= set(data["rejected"][0])
+
+
+def test_pick_reports_a_descending_order(cli_home: Path) -> None:
+    write_rules(cli_home, "router:\n  tier_order: descend\n  tier_direction: local_first\n")
+    result, data = invoke_json("pick", CODE_PROMPT)
+    assert result.exit_code == 0, result.output
+    assert data["model"] == "qwen:14b"  # the local tier comes first, not the better-ranked free one
+    assert [f["model"] for f in data["fallbacks"]] == ["vendor/free:free"]
+    assert data["scope"]["tier_order"] == "descend"
+    assert data["scope"]["tier_direction"] == "local_first"
+    out = invoke("pick", CODE_PROMPT).stdout
+    assert "Tier order" in out
+    assert "descend (local_first)" in out
 
 
 def test_pick_explains_why_a_model_is_not_eligible(cli_home: Path) -> None:
