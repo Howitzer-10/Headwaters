@@ -2,7 +2,7 @@
 
 Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only the design sections that ticket references** (from its `Refs` field). Work in order and follow each ticket's `Depends` field.
 
-- The full design (all documents) is about **21.4k tokens**. An average Sonnet packet is about **1.8k tokens** (largest 2.7k), including the Context Pack.
+- The full design (all documents) is about **21.4k tokens**. An average Sonnet packet is about **1.8k tokens**. Three are deliberately larger because they carry a normative contract instead of relying on a design excerpt: HDW-503 (**5.3k**, the keys section and its write API), HDW-504 (**4.6k**, the tray as front door) and HDW-514 (**6.9k**, seven provider slices).
 - Review-gate tickets (Opus) are the exception: attach the full design plus the phase's code diff.
 - If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
 - Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
@@ -92,13 +92,14 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-407 | Beta 0.1 docs and release gate | Sonnet + Opus | Full design + phase diff (attach) | 1.3 |
 | HDW-501 | Ledger and savings ★ | Sonnet | v3 §4.9, v3.2 §E3 | 1.5 |
 | HDW-502 | Paid scopes, budgets, handback advice ★ | Sonnet | v3 §6, v3.2 §E2, v3.3 §B | 2.1 |
-| HDW-503 | Dashboard ★ | Sonnet | v3 §5.3 | 1.4 |
-| HDW-504 | Tray app ★ | Sonnet | v3.1 §C7, v3.3 §C | 1.9 |
+| HDW-503 | Dashboard ★ (keys section + its write API) | Sonnet | v3 §5.3 | 5.3 |
+| HDW-504 | Tray app ★ (front door, keys) | Sonnet | v3.1 §C7, v3.3 §C | 4.6 |
 | HDW-505 | Setup wizard ★ | Sonnet | v3 §5.3 | 1.5 |
 | HDW-506 | VS Code extension: model provider ★ | Sonnet | v3.2 §E1 | 1.5 |
 | HDW-507 | VS Code extension: status bar, commands, publishing ★ | Sonnet | v3.2 §E1 | 1.5 |
 | HDW-508 | Opt-in usage report, feedback, survey ★ | Sonnet | v3.5 §D2, v3.5 §D4 | 1.7 |
 | HDW-509 | Beta 0.2 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-514 | Free cloud providers (registry as data, NVIDIA NIM, HuggingFace, Pollinations, Mistral, OpenCode key, Kilo) | Sonnet | v3 §4.2, v3 §6, v3 §14, v3.3 §A, v3.3 §B1, v3.3 §F1 | 6.9 |
 | HDW-601 | Repo context engine A: symbol index ★ | Sonnet | v3.4 §D | 1.4 |
 | HDW-602 | Context engine B: embeddings and packing ★ | Sonnet | v3.4 §D | 1.5 |
 | HDW-603 | Analyzer layer 2: embedding kNN ★ | Sonnet | v3.4 §C | 1.5 |
