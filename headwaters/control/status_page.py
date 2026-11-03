@@ -1,12 +1,29 @@
-"""The read-only status page (HDW-404): the same facts as ``headwaters status``, as HTML.
+"""The dashboard's status page (HDW-404, HDW-503): the facts of ``headwaters status``, as HTML.
 
 Core module: no web framework and no daemon import (D14). The daemon builds a page from its live
-rules, project rule, feature registry and the shared SQLite state; ``headwaters.gateway`` serves
-it on the loopback dashboard port. ``build_page`` is pure data (so a test can build one from real
-walls and real decision rows), ``render_html`` is pure text.
+rules, project rule, feature registry, the shared SQLite state and the credential store;
+``headwaters.gateway`` serves it on the loopback dashboard port. ``build_page`` is pure data (so a
+test can build one from real walls, real decision rows and a fake keyring), ``render_html`` is
+pure text.
 
-Read-only means no editing controls at all: buttons, forms and switches belong to the ★ dashboard
-(HDW-503). Nothing here has a secret in it: walls, decisions and quota rows are metadata.
+Who may change things, and how (HDW-503). This page has exactly three writes - save a key, remove
+a key, test a key - and they are the whole reason it is no longer read-only:
+
+- the dashboard has no bearer token, because a browser opens it from a bookmark with nothing but a
+  URL. So the page carries a CSRF token instead: random per daemon start, held in memory only
+  (never in ``daemon.json``), and rendered into every form here;
+- the write routes refuse a request whose ``Host`` is not loopback *and* on this dashboard's own
+  port, whose ``Origin`` (or ``Referer``, when there is one) is not this dashboard's origin, that
+  is not a small form-encoded body, or that does not carry that token. A cross-site form can send
+  the request but cannot read the token, which is what makes the browser's own same-origin rules
+  enough;
+- nothing else is routed for a write, and everything else on the page is still metadata.
+
+Nothing here has a secret in it. A key is shown as saved plus at most its last four characters
+(``core.keys.tail_mask``): no prefix, because a prefix identifies the vendor and a screenshot of
+this page should not. The environment variable behind a provider is a machine detail and does not
+appear here at all (D18) - a key that comes from the environment says so in words, and says that
+removing it here cannot unset it.
 """
 
 from __future__ import annotations
@@ -19,17 +36,22 @@ from datetime import datetime
 from pathlib import Path
 
 from headwaters.core.features import CORE_FEATURES, STAR_LEGEND, FeatureRegistry
+from headwaters.core.keys import KeyStore, tail_mask
 from headwaters.core.project_config import ProjectConfig
 from headwaters.core.quotas import wall_label
 from headwaters.core.rules import Rules
 from headwaters.core.scope import ScopeError, paid_scopes_available, resolve_scope
 from headwaters.core.state import Database
 from headwaters.core.state_decisions import get_outcome, recent_decisions
+from headwaters.core.state_key_tests import KeyTestRow, key_tests
 from headwaters.core.state_limits import active_walls
 from headwaters.core.state_models import list_models
 
 __all__ = [
+    "KEYS_SECTION",
     "PageDecision",
+    "PageKey",
+    "PageProvider",
     "PageWall",
     "StatusPage",
     "build_page",
@@ -37,6 +59,9 @@ __all__ = [
 ]
 
 DECISIONS_SHOWN = 10
+# ``?section=keys``: the server-side reordering, so the write the person came for is at the top
+# without a line of script.
+KEYS_SECTION = "keys"
 
 
 @dataclass(frozen=True)
@@ -66,6 +91,29 @@ class PageDecision:
 
 
 @dataclass(frozen=True)
+class PageKey:
+    """One alias in the Keys section: the key's source and the provider's last answer."""
+
+    alias: str
+    provider: str
+    source: str  # "credential store" | "environment" | "not set"
+    masked: str  # at most the last four characters: never a prefix (tail_mask)
+    status: str | None  # the last recorded test, or None when it was never tested
+    tested_at: float | None
+    detail: str
+
+
+@dataclass(frozen=True)
+class PageProvider:
+    """One provider's group in the Keys section, in the registry's order (D18)."""
+
+    name: str
+    key_required: bool
+    tier: str  # "paid" | "free_cloud" | "local" | "other" (an alias whose provider left)
+    keys: Sequence[PageKey]
+
+
+@dataclass(frozen=True)
 class StatusPage:
     """Everything the page shows, already decided. Rendering it makes no query and no call."""
 
@@ -89,6 +137,9 @@ class StatusPage:
     stars: Sequence[tuple[str, str, bool]] = ()
     legend: str = STAR_LEGEND
     catalog: str | None = None
+    keys: Sequence[PageProvider] = ()
+    csrf: str = ""  # the dashboard's per-start token; empty when the page has no key store
+    paid_scope_ready: bool = True
 
 
 def _walls(db: Database, now: float) -> list[PageWall]:
@@ -137,6 +188,35 @@ def _stars(registry: FeatureRegistry) -> list[tuple[str, str, bool]]:
     ]
 
 
+def _key_groups(store: KeyStore, tested: dict[str, KeyTestRow]) -> list[PageProvider]:
+    """One group per provider the registry names (D18), with the aliases that belong to it.
+
+    A provider with no alias yet still gets its group: that is how a person sees that a provider
+    exists and needs a key. An alias whose provider is no longer in the registry keeps its group
+    too, so a stored key is never invisible and can still be removed.
+    """
+    found: dict[str, list[PageKey]] = {}
+    for row in store.entries():
+        result = tested.get(row.alias)
+        found.setdefault(row.provider, []).append(
+            PageKey(
+                alias=row.alias,
+                provider=row.provider,
+                source=row.source,
+                masked=tail_mask(store.secret(row.alias)),
+                status=None if result is None else result.status,
+                tested_at=None if result is None else result.ts,
+                detail="" if result is None else result.detail,
+            )
+        )
+    groups = [
+        PageProvider(info.name, info.key_required, info.tier, tuple(found.pop(info.name, ())))
+        for info in store.providers()
+    ]
+    groups += [PageProvider(name, True, "other", tuple(rows)) for name, rows in found.items()]
+    return groups
+
+
 def build_page(
     *,
     rules: Rules,
@@ -144,6 +224,8 @@ def build_page(
     project_path: Path | None = None,
     db: Database,
     registry: FeatureRegistry,
+    keys: KeyStore | None = None,
+    csrf: str = "",
     version: str = "",
     catalog: str | None = None,
     now: float | None = None,
@@ -173,6 +255,7 @@ def build_page(
         locks = ["private_lock"] if rules.private_lock else []
         if rules.airplane:
             locks.append("airplane")
+    groups = () if keys is None else _key_groups(keys, key_tests(db))
     return StatusPage(
         version=version,
         now=moment,
@@ -192,6 +275,12 @@ def build_page(
         decisions=_decisions(db, limit),
         stars=_stars(registry),
         catalog=catalog,
+        keys=groups,
+        csrf=csrf,
+        paid_scope_ready=any(
+            group.tier == "paid" and any(key.source != "not set" for key in group.keys)
+            for group in groups
+        ),
     )
 
 
@@ -210,6 +299,10 @@ th { font-weight: 600; }
 td.reasons, span.reasons { font-size: .8rem; color: var(--muted); }
 code { font-size: .85rem; }
 .on::before { content: "on"; } .off::before { content: "off"; }
+p.error { color: #b00020; font-weight: 600; }
+form { margin: .35rem 0; }
+td form, td input { display: inline-block; margin-right: .3rem; }
+summary { cursor: pointer; }
 """
 
 
@@ -323,10 +416,157 @@ def _features_section(page: StatusPage) -> str:
     )
 
 
-def render_html(page: StatusPage) -> str:
-    """One self-contained page: no scripts, no external assets, nothing to click."""
+def _tier_words(tier: str) -> str:
+    return {"paid": "paid", "free_cloud": "free cloud", "local": "local"}.get(tier, "other")
+
+
+def _provider_state(group: PageProvider) -> str:
+    if not group.key_required:
+        return "no key needed"
+    sources = {key.source for key in group.keys}
+    if "credential store" in sources:
+        return "key saved"
+    if "environment" in sources:
+        return "key from the environment"
+    return "no key saved"
+
+
+def _provider_test(group: PageProvider) -> str:
+    tested = [key for key in group.keys if key.status is not None]
+    if not tested:
+        return "never tested"
+    latest = max(tested, key=lambda key: key.tested_at or 0.0)
+    return f"last test {latest.status}"
+
+
+def _csrf_field(page: StatusPage) -> str:
+    return f'<input type="hidden" name="csrf" value="{_e(page.csrf)}">'
+
+
+def _tested(key: PageKey) -> str:
+    if key.status is None:
+        return "never tested"
+    detail = f' <span class="reasons">{_e(key.detail)}</span>' if key.detail else ""
+    return f"{_e(key.status)} · {_e(_stamp(key.tested_at))}{detail}"
+
+
+def _key_actions(page: StatusPage, key: PageKey) -> str:
+    hidden = _csrf_field(page) + f'<input type="hidden" name="alias" value="{_e(key.alias)}">'
+    replace = (
+        '<form method="post" action="/keys/set">'
+        + hidden
+        + f'<input type="hidden" name="provider" value="{_e(key.provider)}">'
+        + '<input type="password" name="secret" size="12" autocomplete="off" '
+        + f'aria-label="New key for {_e(key.alias)}">'
+        + '<button type="submit">Replace</button></form>'
+    )
+    test = (
+        '<form method="post" action="/keys/test">'
+        + hidden
+        + '<button type="submit">Test</button></form>'
+    )
+    remove = (
+        '<form method="post" action="/keys/remove">'
+        + hidden
+        + '<button type="submit">Remove</button></form>'
+    )
+    return replace + test + remove
+
+
+def _provider_note(group: PageProvider) -> str:
+    notes: list[str] = []
+    if not group.key_required:
+        notes.append(f"{group.name} needs no key: a request to it carries none.")
+    elif not any(key.source != "not set" for key in group.keys):
+        notes.append(
+            f"No key is saved for {group.name}, so Headwaters does not send requests to it: they "
+            "go to free cloud or local models instead."
+        )
+    if any(key.source == "environment" for key in group.keys):
+        notes.append(
+            "A key that comes from the system environment cannot be removed here: it comes back "
+            "from the environment until it is removed there."
+        )
+    return "".join(f'<p class="muted">{_e(note)}</p>' for note in notes)
+
+
+def _provider_block(page: StatusPage, group: PageProvider) -> str:
+    summary = (
+        f"<strong>{_e(group.name)}</strong> · {_e(_tier_words(group.tier))} · "
+        f"{_e(_provider_state(group))} · {_e(_provider_test(group))}"
+    )
+    head = f'<details id="keys-{_e(group.name)}"><summary>{summary}</summary>'
+    body = ""
+    if group.keys:
+        rows = [
+            [
+                f"<code>{_e(key.alias)}</code>",
+                _e(key.source),
+                _e(key.masked or "—"),
+                _tested(key),
+                _key_actions(page, key),
+            ]
+            for key in group.keys
+        ]
+        body = _table(["Alias", "Where the key is", "Shown as", "Last test", "Actions"], rows)
+    return head + body + _provider_note(group) + "</details>"
+
+
+def _add_key_form(page: StatusPage) -> str:
+    options = "".join(
+        f'<option value="{_e(group.name)}">{_e(group.name)}'
+        + ("" if group.key_required else " (needs no key)")
+        + "</option>"
+        for group in page.keys
+    )
+    return (
+        '<form method="post" action="/keys/set">'
+        + _csrf_field(page)
+        + '<label>Alias <input name="alias" size="14" autocomplete="off" '
+        'placeholder="the provider name"></label> '
+        + f'<label>Provider <select name="provider">{options}</select></label> '
+        + '<label>Key <input type="password" name="secret" size="30" autocomplete="off"></label> '
+        + '<button type="submit">Save key</button></form>'
+    )
+
+
+def _keys_section(page: StatusPage) -> str:
+    if not page.keys:
+        return ""
+    out = [
+        '<h2 id="keys">Keys</h2>',
+        '<p class="muted">Headwaters sends these keys to the providers they belong to. A saved '
+        "key goes to the system credential store, and this page only ever shows its last four "
+        "characters.</p>",
+    ]
+    if not page.paid_scope_ready:
+        out.append(
+            '<p class="muted">No paid provider has a key, so paid scope cannot be used on this '
+            "install: requests go to free cloud and local models. One paid key is enough to "
+            "enable it.</p>"
+        )
+    out.append(_add_key_form(page))
+    out.extend(_provider_block(page, group) for group in page.keys)
+    return "".join(out)
+
+
+def render_html(page: StatusPage, *, section: str | None = None, error: str | None = None) -> str:
+    """One self-contained page: no scripts, no external assets, and only the keys' three writes.
+
+    ``section`` reorders the page (``keys`` puts the Keys section first) and ``error`` is the
+    sentence the daemon shows when a write was refused. Both are decided by the caller: this
+    function only lays the page out.
+    """
     generated = datetime.fromtimestamp(page.now).strftime("%Y-%m-%d %H:%M:%S")
     catalog = f" · catalog: {_e(page.catalog)}" if page.catalog else ""
+    keys = _keys_section(page)
+    rest = (
+        _scope_section(page)
+        + _walls_section(page)
+        + _warm_section(page)
+        + _decisions_section(page)
+        + _features_section(page)
+    )
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -335,15 +575,20 @@ def render_html(page: StatusPage) -> str:
         "<title>Headwaters status</title>"
         f"<style>{_CSS}</style></head><body>"
         f"<h1>Headwaters status</h1>"
-        f'<p class="muted">Read-only · version {_e(page.version or "unknown")}'
+        f'<p class="muted">Local dashboard · version {_e(page.version or "unknown")}'
         f" · {_e(generated)}{catalog}</p>"
-        '<p class="muted">This page shows local state and changes nothing. '
-        "Editing controls live in the ★ dashboard.</p>"
-        + _scope_section(page)
-        + _walls_section(page)
-        + _warm_section(page)
-        + _decisions_section(page)
-        + _features_section(page)
+        + _editing_note(page)
+        + ("" if error is None else f'<p class="error">{_e(error)}</p>')
+        + (keys + rest if section == KEYS_SECTION else rest + keys)
         + "<footer>Local only: this server refuses every address but 127.0.0.1.</footer>"
         "</body></html>\n"
+    )
+
+
+def _editing_note(page: StatusPage) -> str:
+    if not page.keys:
+        return '<p class="muted">This page shows local state and changes nothing.</p>'
+    return (
+        '<p class="muted">This page shows local state. The Keys section can save, replace, remove '
+        "and test a key; nothing else here changes anything.</p>"
     )

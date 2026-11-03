@@ -13,8 +13,11 @@ provider nor an existing alias is refused instead of storing a key the router ca
 
 ``test`` asks the provider whether it accepts the key: one metadata request, no prompt content,
 and no request at all while the network is blocked (airplane mode, Private lock, local scope).
+The result is written to the shared state (``state_key_tests``) so the dashboard shows the same
+last-test line (HDW-503) instead of a second opinion.
 """
 
+import sqlite3
 import sys
 from typing import Annotated, Any
 
@@ -22,15 +25,24 @@ import typer
 
 from headwaters.cli import runtime
 from headwaters.cli.output import EXIT_CONFIG, EXIT_FAILED, emit_json, fail, make_console, table
-from headwaters.control.keys import check_keys
+from headwaters.control.keys import check_and_record
 from headwaters.core.catalog import updater
 from headwaters.core.keys import KeyInfo, KeyStore, KeyStoreError
 from headwaters.core.rules import Rules
+from headwaters.core.state import Database, open_database
 
 
 def key_store(rules: Rules) -> KeyStore:
     """The store the commands use. Tests replace this with one over a fake backend."""
     return KeyStore(rules)
+
+
+def _state_db() -> Database | None:
+    """The shared state, or ``None`` when it cannot be opened: a key test must still report."""
+    try:
+        return open_database()
+    except (OSError, sqlite3.Error):  # the result is a convenience, the test is the answer
+        return None
 
 
 def _row(row: KeyInfo) -> dict[str, Any]:
@@ -186,9 +198,10 @@ def register(keys_app: typer.Typer) -> None:
                 as_json=as_json,
             )
         catalog, _source = updater.load_active()
-        results = check_keys(
+        results = check_and_record(
             store,
             rules,
+            _state_db(),
             openrouter_base=catalog.endpoints.openrouter_base_url,
             aliases=None if alias is None else [alias],
         )

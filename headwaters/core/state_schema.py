@@ -106,5 +106,15 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         ALTER TABLE decisions ADD COLUMN offload_penalty REAL;
         """,
     ),
+    (
+        6,
+        "key test results",
+        """
+        CREATE TABLE key_tests (
+            alias TEXT PRIMARY KEY, ts REAL NOT NULL,
+            status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
+        );
+        """,
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]

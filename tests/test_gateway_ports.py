@@ -174,7 +174,8 @@ def test_the_status_page_is_served_on_the_bound_dashboard_port() -> None:
     assert dashboard_sock is not None
     assert ports.dashboard is not None
     server = HttpServer(
-        build_status_page_app(render=lambda: "<h1>Headwaters status</h1>"), dashboard_sock
+        build_status_page_app(render=lambda section, error: "<h1>Headwaters status</h1>"),
+        dashboard_sock,
     )
     thread = threading.Thread(target=lambda: asyncio.run(server.serve()), daemon=True)
     thread.start()

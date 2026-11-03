@@ -18,7 +18,8 @@ uv run headwaters start
 ```
 
 `headwaters start` runs the daemon: the OpenAI- and Anthropic-compatible gateway on
-`127.0.0.1:4000`, and the read-only status page on `127.0.0.1:4001`. `headwaters stop` stops it,
+`127.0.0.1:4000`, and the status page on `127.0.0.1:4001`, where you can also save, test and
+remove the keys Headwaters spends. `headwaters stop` stops it,
 `headwaters stop --force` clears a stale one, `headwaters status` prints what it is doing,
 `headwaters status --open` opens the dashboard, and `headwaters status --json` is the same data for a
 script. The packaged payloads are built by `scripts/build_windows.py` (Inno Setup, per-user) and

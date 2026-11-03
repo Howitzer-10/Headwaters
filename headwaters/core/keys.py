@@ -41,6 +41,7 @@ __all__ = [
     "ProviderInfo",
     "default_backend",
     "mask",
+    "tail_mask",
 ]
 
 SERVICE = "headwaters"
@@ -104,6 +105,21 @@ def mask(secret: str | None) -> str:
     if len(secret) < 12:
         return "*" * min(len(secret), 6)
     return f"{secret[:4]}...{secret[-4:]}"
+
+
+def tail_mask(secret: str | None, keep: int = 4) -> str:
+    """How a key is shown on the dashboard: the last few characters, and never a prefix.
+
+    ``mask`` keeps a prefix because ``headwaters keys list`` prints into the user's own terminal.
+    The dashboard renders into a browser, where a prefix is enough to tell which vendor a key
+    belongs to if a screenshot travels, so only the tail survives here. Four trailing characters
+    are enough for a person to recognise which of their keys it is.
+    """
+    if not secret:
+        return ""
+    if len(secret) <= keep:
+        return "*" * len(secret)
+    return "*" * 4 + secret[-keep:]
 
 
 @dataclass(frozen=True, slots=True)
