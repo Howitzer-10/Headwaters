@@ -11,18 +11,27 @@ the gateway is configured. The user runs every command; nothing is executed here
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from headwaters.core.catalog.loader import CatalogIndex
 from headwaters.core.engine import Engine
 from headwaters.core.executor.types import Message, ToolSpec
 from headwaters.core.policy.errors import NoRouteError
 from headwaters.core.policy.filters import Candidate
+from headwaters.core.quotas import model_subject
 from headwaters.core.router_plan import RoutePlan
 from headwaters.core.router_types import RouteRequest
 from headwaters.core.rules import Scope
 from headwaters.core.scope import ScopeError
 from headwaters.core.state_limits import active_walls
-from headwaters.mcp.tools.context import ToolContext
+from headwaters.mcp.threads import run_blocking
+from headwaters.mcp.tools import prompts
+from headwaters.mcp.tools.attach import pack_paths
+from headwaters.mcp.tools.context import ToolContext, ToolFailure
 from headwaters.mcp.tools.schemas import ErrorInfo, SuggestionOut
 from headwaters.mcp.tools.schemas_more import HostSwitch, RecommendResult, SwitchHostResult
+from headwaters.mcp.tools.workspace import open_workspace
 
 __all__ = ["OLLAMA_PROVIDER_ID", "recommend", "should_switch", "switch_commands"]
 
@@ -75,17 +84,25 @@ def switch_commands(candidate: Candidate, scope: str) -> list[HostSwitch]:
     return out
 
 
-def _messages(task: str, vision: bool) -> list[Message]:
+def _messages(task: str, vision: bool, packed: str = "") -> list[Message]:
+    body = f"{task}\n\n{prompts.FILES_HEADER}\n{packed}" if packed else task
     if not vision:
-        return [{"role": "user", "content": task}]
-    return [{"role": "user", "content": [{"type": "text", "text": task}, _IMAGE_PART]}]
+        return [{"role": "user", "content": body}]
+    return [{"role": "user", "content": [{"type": "text", "text": body}, _IMAGE_PART]}]
 
 
 async def plan_for(
-    engine: Engine, tc: ToolContext, task: str, scope: Scope | None, *, vision: bool, tools: bool
+    engine: Engine,
+    tc: ToolContext,
+    task: str,
+    scope: Scope | None,
+    *,
+    vision: bool,
+    tools: bool,
+    packed: str = "",
 ) -> RoutePlan:
     request = RouteRequest(
-        messages=_messages(task, vision),
+        messages=_messages(task, vision, packed),
         surface="mcp",
         scope=scope,
         tools=[_PROBE_TOOL] if tools else None,
@@ -113,9 +130,28 @@ async def recommend(
     *,
     vision: bool = False,
     tools: bool = False,
+    paths: Sequence[str] = (),
+    meta: Mapping[str, Any] | None = None,
 ) -> RecommendResult:
+    """Dry-run pick. ``paths`` are packed only to size the request; their text is never returned.
+
+    A path problem raises ``ToolFailure`` for the tool wrapper to report.
+    """
+    packed = ""
+    sized = ""
+    if paths:
+        workspace = open_workspace(meta, tc.rules(), tc.configured_roots())
+        pack = await run_blocking(lambda: pack_paths(tc, engine.catalog, workspace, list(paths)))
+        if not pack.files:
+            raise ToolFailure(
+                "no_readable_files",
+                "None of the named paths could be read.",
+                "Check each path is inside the project folder and is a text file.",
+            )
+        packed = pack.render()
+        sized = f"Sized with {len(pack.files)} file(s), about {pack.used_tokens} tokens."
     try:
-        plan = await plan_for(engine, tc, task, scope, vision=vision, tools=tools)
+        plan = await plan_for(engine, tc, task, scope, vision=vision, tools=tools, packed=packed)
     except (ScopeError, NoRouteError) as exc:
         failed = _failure(exc)
         assert failed is not None
@@ -123,6 +159,8 @@ async def recommend(
     d = plan.decision
     chosen = plan.candidate(d.model)
     notes = ["Nothing was called or changed: this is a dry run."]
+    if sized:
+        notes.append(sized)
     if d.below_floor:
         notes.append("No model in scope reaches the quality floor; this is the best available.")
     return RecommendResult(
@@ -148,7 +186,8 @@ async def should_switch(
 ) -> SwitchHostResult:
     """Warn when the host's model is not the one Headwaters would pick (or cannot be used).
 
-    ``current_model`` is compared by its last path segment, so ``openrouter/vendor/x:free`` and
+    ``current_model`` is matched on its whole name (host prefixes ``opencode/`` and ``openrouter/``
+    dropped), or through the catalog id and aliases, so ``openrouter/vendor/x:free`` and
     ``vendor/x:free`` are the same model. Without a task, a generic coding request is assumed.
     """
     summary = task.strip() if task and task.strip() else "general coding help"
@@ -160,7 +199,7 @@ async def should_switch(
         return SwitchHostResult(
             ok=True, reason="The host is already on the model Headwaters would pick."
         )
-    walled = _blocked(tc, current_model)
+    walled = _blocked(tc, engine, current_model)
     severity = "warn" if walled else "info"
     reason = (
         f"{current_model} has a wall (out of credit or rate limited); "
@@ -184,8 +223,14 @@ def _same_model(current: str, picked: str) -> bool:
     return tail(current) == tail(picked)
 
 
-def _blocked(tc: ToolContext, current_model: str) -> bool:
-    needle = current_model.strip().lower()
-    return any(
-        needle.endswith(w.subject.split(":", 1)[-1].lower()) for w in active_walls(tc.state())
-    )
+def _blocked(tc: ToolContext, engine: Engine, current_model: str) -> bool:
+    """True when a ``model:`` wall names the host's model (exact id, host prefix or alias)."""
+    raw = current_model.strip().lower()
+    names = {raw, raw.removeprefix("opencode/").removeprefix("openrouter/")}
+    index = CatalogIndex(engine.catalog)
+    for name in list(names):
+        entry = index.find(name)
+        if entry is not None:
+            names.update(n.lower() for n in (entry.id, *entry.aliases))
+    subjects = {model_subject(n).lower() for n in names}
+    return any(w.subject.lower() in subjects for w in active_walls(tc.state()))

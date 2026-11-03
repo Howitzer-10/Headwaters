@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 import sys
@@ -171,3 +172,43 @@ def test_real_litellm_failing_stream_is_silent_and_only_reaches_the_provider() -
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == ""
     assert KEY not in result.stderr
+
+
+def test_real_litellm_loggers_have_no_stdout_handler() -> None:
+    """Every litellm logger, not only the three we quiet, keeps its handlers off stdout."""
+    code = textwrap.dedent(
+        """
+        import json, logging, sys
+        from headwaters.core.executor.cloud import LITELLM_LOGGERS, _load_litellm
+
+        _load_litellm()
+        manager = logging.root.manager.loggerDict
+        names = sorted(
+            n for n, lg in manager.items()
+            if isinstance(lg, logging.Logger) and "litellm" in n.lower()
+        )
+        on_stdout = []
+        for name in names:
+            logger = logging.getLogger(name)
+            logger.warning("probe from %s", name)
+            for handler in logger.handlers:
+                if isinstance(handler, logging.StreamHandler) and handler.stream is sys.stdout:
+                    on_stdout.append(name)
+        known = [n for n in names if n in LITELLM_LOGGERS]
+        print(json.dumps({"names": names, "on_stdout": on_stdout, "known": known}), file=sys.stderr)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    report = json.loads(result.stderr.strip().splitlines()[-1])
+    assert set(report["known"]) == set(LITELLM_LOGGERS)  # the three loggers exist after import
+    assert report["on_stdout"] == []

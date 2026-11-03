@@ -37,14 +37,14 @@ def _fake_repo(tmp_path: Path, module: str, source: str) -> subprocess.Completed
     """Build `hwfake` with one extra module and lint it with the real contract text."""
     pkg = tmp_path / "hwfake"
     (pkg).mkdir()
-    (pkg / "__init__.py").write_text("")
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
     for sub in SUBPACKAGES:
         (pkg / sub).mkdir()
-        (pkg / sub / "__init__.py").write_text("")
+        (pkg / sub / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "core" / "executor").mkdir()
-    (pkg / "core" / "executor" / "__init__.py").write_text("")
+    (pkg / "core" / "executor" / "__init__.py").write_text("", encoding="utf-8")
     target = pkg.joinpath(*module.split(".")).with_suffix(".py")
-    target.write_text(source)
+    target.write_text(source, encoding="utf-8")
 
     config = tmp_path / ".importlinter"
     text = CONFIG.read_text(encoding="utf-8").replace("headwaters", "hwfake")

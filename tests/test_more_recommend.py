@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from headwaters.core.quotas import model_subject
 from headwaters.core.rules import Rules
 from headwaters.core.state_limits import record_wall
 from tests.cli_support import add_model
-from tests.frontdoor_support import Rig, structured, text_of
+from tests.frontdoor_support import Rig, make_repo, structured, text_of
 
 
 def _call(rig: Rig, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -113,3 +116,66 @@ def test_quota_status_lists_walls_and_counters(tmp_path: Path) -> None:
     data = _call(rig, "headwaters_quota_status")
     assert data["walls"][0]["kind"] == "rate_limit"
     assert 0 < data["walls"][0]["eta_s"] <= 60
+
+
+def _switch(rig: Rig, current: str) -> dict[str, Any]:
+    return _call(rig, "headwaters_should_switch_host", {"current_model": current, "scope": "local"})
+
+
+def test_should_switch_matches_a_wall_through_a_catalog_alias(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, cloud=True)
+    record_wall(rig.db, model_subject("claude-sonnet-4-5"), "exhausted", until=time.time() + 600)
+    data = _switch(rig, "openrouter/claude-sonnet-4-5-20250929")
+    assert data["severity"] == "warn"
+    assert "has a wall" in data["reason"]
+
+
+def test_should_switch_does_not_match_a_wall_by_suffix(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, cloud=True)
+    until = time.time() + 600
+    record_wall(rig.db, model_subject("vendor/x"), "exhausted", until=until)
+    record_wall(rig.db, "provider:x", "rate_limit", until=until)
+    record_wall(rig.db, "key:x", "rate_limit", until=until)
+    data = _switch(rig, "other/x")
+    assert data["severity"] == "info"
+    assert "has a wall" not in data["reason"]
+
+
+@pytest.mark.skipif(
+    subprocess.run(["git", "--version"], capture_output=True, check=False).returncode != 0,
+    reason="git is not installed",
+)
+def test_recommend_sizes_the_request_by_paths_without_returning_their_text(
+    tmp_path: Path,
+) -> None:
+    marker = "zq-recommend-marker-9"
+    repo = make_repo(
+        tmp_path / "p", {"big.py": f"# {marker}\n" + "x = 1\n" * 4000, "tiny.py": "y = 2\n"}
+    )
+    rig = Rig(tmp_path)
+    args = {"task": "refactor the parser", "scope": "local"}
+    small = structured(asyncio.run(rig.call("headwaters_recommend_model", args, repo)))
+    result = asyncio.run(
+        rig.call("headwaters_recommend_model", {**args, "paths": ["big.py"]}, repo)
+    )
+    big = structured(result)
+    assert big["ok"] is True
+    assert not any("Sized with" in n for n in small["notes"])
+    (sized,) = (n for n in big["notes"] if "Sized with" in n)
+    assert int(sized.split("about ")[1].split(" ")[0]) > 1000
+    assert marker not in json.dumps(big)
+    assert marker not in text_of(result)
+    assert rig.backend.requests == []
+
+
+def test_recommend_with_unreadable_paths_is_a_structured_error(tmp_path: Path) -> None:
+    repo = tmp_path / "p"
+    repo.mkdir()
+    rig = Rig(tmp_path)
+    data = structured(
+        asyncio.run(
+            rig.call("headwaters_recommend_model", {"task": "x", "paths": ["missing.py"]}, repo)
+        )
+    )
+    assert data["ok"] is False
+    assert data["error"]["code"] == "no_readable_files"

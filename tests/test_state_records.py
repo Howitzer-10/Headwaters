@@ -1,4 +1,6 @@
+import itertools
 import os
+import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -153,3 +155,48 @@ def test_two_processes_write_concurrently(tmp_path: Path) -> None:
     quota = get_quota(d, "shared", "day")
     assert quota is not None
     assert quota.count == 2 * n  # atomic increments: none lost
+
+
+def _locked_pair(path: Path) -> tuple[sqlite3.Connection, sqlite3.Connection]:
+    """A holds an exclusive lock on a non-WAL database; B is a fresh no-wait connection."""
+    holder = sqlite3.connect(str(path), isolation_level=None)
+    holder.execute("CREATE TABLE t (x)")
+    holder.execute("BEGIN EXCLUSIVE")
+    waiter = sqlite3.connect(str(path), timeout=0, isolation_level=None)
+    return holder, waiter
+
+
+def test_enable_wal_retries_until_the_lock_is_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    holder, waiter = _locked_pair(tmp_path / "wal.db")
+    sleeps: list[float] = []
+
+    def release_on_first_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            holder.execute("COMMIT")
+
+    monkeypatch.setattr("headwaters.core.state.time.sleep", release_on_first_sleep)
+    try:
+        Database._enable_wal(waiter)
+        assert sleeps  # the first attempt really hit "database is locked"
+        assert waiter.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    finally:
+        waiter.close()
+        holder.close()
+
+
+def test_enable_wal_gives_up_at_the_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    holder, waiter = _locked_pair(tmp_path / "wal.db")
+    ticks = itertools.chain([0.0, 0.0], itertools.repeat(1000.0))  # past the deadline
+    monkeypatch.setattr("headwaters.core.state.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("headwaters.core.state.time.sleep", lambda _: None)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            Database._enable_wal(waiter)
+    finally:
+        waiter.close()
+        holder.close()

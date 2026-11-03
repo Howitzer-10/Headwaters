@@ -60,6 +60,7 @@ def _row_payload(row: ModelRow, fit: FitResult | None) -> dict[str, Any]:
         "tools": row.tools_ok,
         "json": row.json_ok,
         "vision": "image" in row.modalities,
+        "reasoning_ok": row.reasoning_ok,
         "size_gb": row.size_gb,
         "warm": row.warm,
         "unscored": row.unscored,

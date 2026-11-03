@@ -77,9 +77,9 @@ def test_discover_skips_packages_without_register(
 ) -> None:
     pkg = tmp_path / "fakefeatures"
     (pkg / "plain").mkdir(parents=True)
-    (pkg / "__init__.py").write_text("")
-    (pkg / "plain" / "__init__.py").write_text("")
-    (pkg / "module_only.py").write_text("")
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "plain" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "module_only.py").write_text("", encoding="utf-8")
     monkeypatch.syspath_prepend(str(tmp_path))
     assert discover_features(FeatureRegistry(), "fakefeatures") == []
 

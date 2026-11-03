@@ -22,14 +22,21 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv run ruff check headwaters tests scripts bench
+      - run: uv run ruff format --check headwaters tests scripts bench
       - run: uv run mypy
       - run: uv run lint-imports
       - run: uv run pytest tests/test_litellm_guard.py --no-cov -q
       - run: uv run python -m headwaters.core.rules_io --check catalog/rules.schema.json
       - run: uv run python -m headwaters.core.catalog.loader --check catalog/catalog.schema.json
-      - run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+      - run: uv run pytest --cov --cov-report=term-missing --cov-report=xml -rs
+      - name: Symlink tests must run on Linux, not skip
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          out=$(uv run pytest tests/test_workspace_pack.py tests/test_workspace_roots.py --no-cov -q -rs)
+          echo "$out"
+          if echo "$out" | grep -qi skipped; then echo 'symlink tests were skipped'; exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.os }}-py${{ matrix.python }}
@@ -46,6 +53,6 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run ruff check .
+      - run: uv run ruff check headwaters tests scripts bench
       - run: uv run mypy
       - run: uv run pytest --no-cov -q

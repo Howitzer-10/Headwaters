@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from headwaters.core import router_log
@@ -40,7 +40,6 @@ from headwaters.core.executor.errors import ExecutorError, ScopeViolation
 from headwaters.core.executor.executor import Executor
 from headwaters.core.executor.types import ExecResult
 from headwaters.core.features import FeatureRegistry, get_registry
-from headwaters.core.hardware.residency import ResidencyConfig
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.plugins import EscalationPlugin, LedgerPlugin, VerifierPlugin
 from headwaters.core.policy.decide import decide
@@ -104,7 +103,6 @@ class RouterConfig:
     escalations together). ``None`` reads ``router.max_attempts`` from the live rules."""
 
     max_attempts: int | None = None
-    residency: ResidencyConfig = field(default_factory=ResidencyConfig)
 
     def __post_init__(self) -> None:
         if self.max_attempts is not None and self.max_attempts < 1:

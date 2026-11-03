@@ -29,3 +29,10 @@ that name it.
 | Regenerate the rules schema with `uv run python -m headwaters.core.rules_io --write` | ran it in HDW-146 |
 | Tests that count tools (`test_more_disclosure.py`, `test_host_eval.py`) need updating when an advanced tool is added | hit it in HDW-146 |
 | A foreground command over 30 s times out; start long pytest runs with `Start-Process` and poll the log | hit it in HDW-146 |
+
+## litellm and sqlite3
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| After `_load_litellm()` every logger whose name contains `litellm` (the three in `LITELLM_LOGGERS` exist) has no `StreamHandler` on `sys.stdout`, and importing writes nothing to stdout | `tests/test_litellm_quiet.py::test_real_litellm_loggers_have_no_stdout_handler` (subprocess) | litellm 1.106.6 | HDW-152 |
+| `PRAGMA journal_mode = WAL` on a non-WAL database raises `sqlite3.OperationalError: database is locked` at once while another connection holds `BEGIN EXCLUSIVE`, even with `timeout=0`; it succeeds after the holder commits | `tests/test_state_records.py::test_enable_wal_retries_until_the_lock_is_released` | Python sqlite3 (stdlib) | HDW-152 |

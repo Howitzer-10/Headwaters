@@ -95,3 +95,11 @@ def test_empty_list_points_to_refresh(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "headwaters models refresh" in invoke("models", "list").stdout
     _, data = invoke_json("models", "list")
     assert data["models"] == []
+
+
+def test_json_reports_reasoning_ok(cli_home: Path) -> None:
+    add_model(open_database(), "vendor/think:free", "free_cloud", 90.0, reasoning_ok=True)
+    _, data = invoke_json("models", "list")
+    by_id = {m["id"]: m for m in data["models"]}
+    assert by_id["vendor/think:free"]["reasoning_ok"] is True
+    assert by_id["vendor/free:free"]["reasoning_ok"] is None

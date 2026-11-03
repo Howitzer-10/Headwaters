@@ -78,8 +78,9 @@ MORE: Final = (
 ADVANCED: Final = {
     "headwaters_recommend_model": (
         "Which model would Headwaters use for this task, and the exact command that switches the "
-        "host to it (OpenCode free models included). Dry run.\n"
-        'Example: {"task": "refactor the parser"}'
+        "host to it (OpenCode free models included). Dry run. Pass paths to size the pick "
+        "by the files the task will use; their text is never returned.\n"
+        'Example: {"task": "refactor the parser", "paths": ["src/parser.py"]}'
     ),
     "headwaters_should_switch_host": (
         "Say whether the host's current model should change, and why. Dry run.\n"

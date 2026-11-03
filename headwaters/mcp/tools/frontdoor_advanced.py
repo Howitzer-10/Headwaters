@@ -11,6 +11,7 @@ from typing import Annotated
 
 from mcp import types
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from headwaters.core.rules import Scope
@@ -18,7 +19,7 @@ from headwaters.mcp.threads import run_blocking
 from headwaters.mcp.tools import advanced, descriptions, recommend
 from headwaters.mcp.tools.context import ToolContext
 from headwaters.mcp.tools.flow import current_engine
-from headwaters.mcp.tools.frontdoor import classify, tool_annotations
+from headwaters.mcp.tools.frontdoor import classify, meta_of, tool_annotations
 from headwaters.mcp.tools.render import render_error
 from headwaters.mcp.tools.render_more import (
     render_local_models,
@@ -66,15 +67,27 @@ def register_advanced(server: MCPServer, tc: ToolContext) -> None:
         annotations=ann("Recommend a model", read_only=True),
     )
     async def headwaters_recommend_model(
+        ctx: Context,
         task: Annotated[str, Field(min_length=1, description="A short summary of the task.")],
         scope: Annotated[Scope | None, Field(description="auto, free, local or cloud.")] = None,
         needs_vision: Annotated[bool, Field(description="The task includes an image.")] = False,
         needs_tools: Annotated[bool, Field(description="The host sends tool calls.")] = False,
+        paths: Annotated[
+            list[str] | None,
+            Field(description="Project files the task will use; read only to size the request."),
+        ] = None,
     ) -> Annotated[types.CallToolResult, RecommendResult]:
         try:
             engine = current_engine(tc)
             result = await recommend.recommend(
-                engine, tc, task, scope, vision=needs_vision, tools=needs_tools
+                engine,
+                tc,
+                task,
+                scope,
+                vision=needs_vision,
+                tools=needs_tools,
+                paths=paths or (),
+                meta=meta_of(ctx),
             )
         except Exception as exc:
             return _fail(RecommendResult, "recommend_model", exc)

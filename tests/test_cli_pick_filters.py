@@ -53,6 +53,16 @@ def test_tokens_flag_sizes_the_request(cli_home: Path) -> None:
     assert big["fallbacks"] == []
 
 
+def test_reasoning_flag_requires_a_reasoning_capable_model(cli_home: Path) -> None:
+    result, data = invoke_json("pick", CODE_PROMPT, "--reasoning")
+    assert result.exit_code == 4
+    assert "no_reasoning" in {r["reason"] for r in data["error"]["rejected"]}
+    add_model(open_database(), "vendor/think:free", "free_cloud", 90.0, reasoning_ok=True)
+    _, found = invoke_json("pick", CODE_PROMPT, "--reasoning")
+    assert found["model"] == "vendor/think:free"
+    assert {"model": "vendor/free:free", "reason": "no_reasoning"} in found["rejected"]
+
+
 def test_tokens_must_be_positive(cli_home: Path) -> None:
     assert invoke("pick", "hi", "--tokens", "0").exit_code == 2
 

@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 import headwaters
-from headwaters.core.features import STAR_LEGEND
+from headwaters.core.features import STAR_LEGEND, FeatureRegistry, FeatureSpec
+from headwaters.core.features import discover_features as real_discover
 from tests.cli_support import home, invoke, invoke_json, write_rules
 
 
@@ -40,13 +41,47 @@ def test_features_json_separates_core_from_star(cli_home: Path) -> None:
 
 
 def test_features_respects_user_flags(cli_home: Path) -> None:
-    # The internal example feature is hidden, so check the flag through the JSON of a real run:
-    # switching a feature off in rules.yaml must be reflected, never crash the command.
     write_rules(cli_home, "features:\n  _example: false\n  something_else: false\n")
     result, data = invoke_json("features")
     assert result.exit_code == 0
     assert data["star"] == []
     assert all(f["enabled"] for f in data["core"])
+
+
+@pytest.fixture
+def fixture_features(monkeypatch: pytest.MonkeyPatch) -> list[FeatureRegistry]:
+    """Discovery that finds the hidden `_example` fixture feature plus one visible star feature."""
+    seen: list[FeatureRegistry] = []
+
+    def discover(registry: FeatureRegistry) -> list[str]:
+        seen.append(registry)
+        found = real_discover(registry, "tests.fixtures.features")
+        registry.register(FeatureSpec(id="demo_star", star=True, title="Demo star feature"))
+        return [*found, "demo_star"]
+
+    monkeypatch.setattr("headwaters.cli.cmd_features.discover_features", discover)
+    return seen
+
+
+def test_features_hides_underscore_ids_but_lists_the_others(
+    cli_home: Path, fixture_features: list[FeatureRegistry]
+) -> None:
+    _, data = invoke_json("features")
+    assert fixture_features[0].get("_example") is not None  # registered, so the rule is real
+    assert [s["id"] for s in data["star"]] == ["demo_star"]
+    out = invoke("features").stdout
+    assert "_example" not in out
+    assert "Example feature" not in out
+    assert "Demo star feature" in out
+
+
+def test_features_flag_turns_a_listed_feature_off(
+    cli_home: Path, fixture_features: list[FeatureRegistry]
+) -> None:
+    write_rules(cli_home, "features:\n  _example: false\n  demo_star: false\n")
+    _, data = invoke_json("features")
+    assert data["star"] == [{"id": "demo_star", "title": "Demo star feature", "enabled": False}]
+    assert "off" in invoke("features").stdout
 
 
 def test_catalog_status_plain_and_json(cli_home: Path) -> None:

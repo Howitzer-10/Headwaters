@@ -34,7 +34,9 @@ VerifyStatus = Literal["pass", "fail", "unchecked"]
 
 
 class SuggestionOut(BaseModel):
-    code: str = Field(description="Stable code such as pull_model, split_task, use_cloud.")
+    code: str = Field(
+        description="Stable code such as pull_model, split_task, use_cloud, set_context."
+    )
     text: str
 
 

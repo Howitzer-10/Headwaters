@@ -47,6 +47,9 @@ def register(app: typer.Typer) -> None:
         tools: Annotated[
             bool, typer.Option("--tools", help="Pretend the host sends tools.")
         ] = False,
+        reasoning: Annotated[
+            bool, typer.Option("--reasoning", help="Require a reasoning-capable model.")
+        ] = False,
         tokens: Annotated[
             int | None,
             typer.Option("--tokens", min=1, help="Pretend the request has this many tokens."),
@@ -67,6 +70,7 @@ def register(app: typer.Typer) -> None:
             messages=_messages(prompt, image),
             surface="cli",
             tools=[_PROBE_TOOL] if tools else None,
+            reasoning=True if reasoning else None,
             scope=scope,
             project=rt.project,
         )
