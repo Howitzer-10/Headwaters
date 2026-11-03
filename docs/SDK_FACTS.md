@@ -81,3 +81,14 @@ that name it.
 | `.itch.toml` holds `[[actions]]` entries with `name`, `path`, `args`, `platform` and `scope`; `path` is resolved relative to the manifest's own folder, which is why every action here names `runtime/uv.exe` rather than an absolute path | official itch app docs, `.itch.toml` manifest | docs as of 2026-11 | HDW-405 |
 | The working directory an action is launched in is **not** documented, so the actions pass relative paths only and the CLI is given an explicit `--project runtime`; verifying it needs `butler validate` plus one real install (FU-405-4) | official itch app docs (no cwd statement) | docs as of 2026-11 | HDW-405 |
 | Inno Setup 6 installs per user with `PrivilegesRequired=lowest` and `DefaultDirName={localappdata}\...`; `[UninstallRun]` can call `schtasks`, and `CurUninstallStepChanged(usUninstall)` can run an `Exec` before the files go, which is where the optional state/key removal runs | official Inno Setup 6 documentation (setup directives, UninstallRun, Code events) | Inno Setup 6 | HDW-405 |
+
+## Linux packaging (HDW-406)
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| A per-user unit lives in `$XDG_CONFIG_HOME/systemd/user/`, i.e. `~/.config/systemd/user/` when the variable is unset, and is driven by `systemctl --user ...`; its manager runs as the user, so no unit and no step needs root | official systemd docs: systemd.unit, "Unit load path" | docs as of 2026-11 | HDW-406 |
+| `RestartPreventExitStatus=` takes exit-status definitions (`2 3`) and holds a `Restart=on-failure` unit back from restarting on those codes, which is how a refused configuration or a held lock is kept from looping | official systemd.service docs, `RestartPreventExitStatus=` | docs as of 2026-11 | HDW-406 |
+| `ExecStart=` takes exactly one command (`Type=oneshot` is the exception), so `headwaters start` — which detaches and exits — is the wrong entry point and `python -m headwaters.daemon` in the foreground is the right one | official systemd.service docs, `ExecStart=` | docs as of 2026-11 | HDW-406 |
+| Unit-file quoting follows the XDG desktop-entry rules: a whole word may be wrapped in double quotes, quotes are removed, C-style escapes are supported and backslashes must be doubled (`\\`, `\"`), so a path with a space or a backslash has to be escaped, not just wrapped | official systemd docs: systemd.syntax, "Quoting" | docs as of 2026-11 | HDW-406 |
+| `systemctl enable --now <unit>` enables the unit and starts it in one command, while `enable` alone only writes the `WantedBy=` symlink and leaves starting to a second call | official systemctl docs, `enable` | docs as of 2026-11 | HDW-406 |
+| `loginctl enable-linger <user>` starts that user's manager at boot and keeps it after the last session closes; without linger a user unit stops at logout, and the manager only exists while a session does | official loginctl docs, `enable-linger` | docs as of 2026-11 | HDW-406 |

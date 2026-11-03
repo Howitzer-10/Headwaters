@@ -4,6 +4,8 @@ Use this for every Windows release. It covers the Inno Setup installer, the itch
 `windows-beta` channel, code signing and the uninstall path. Everything here is per-user: no step
 needs an administrator, and nothing writes to `HKEY_LOCAL_MACHINE` (HDW-405).
 
+The Linux target has its own document: `docs/RELEASE_CHECKLIST_LINUX.md` (HDW-406).
+
 Two facts this document depends on and that a test asserts:
 
 - the installer never ships Python or model weights; the runtime is created on the target machine

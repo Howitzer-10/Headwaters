@@ -9,6 +9,7 @@ always safe, because all user data lives outside it in the install root.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -122,10 +123,12 @@ def apply(command: Command, *, runner: Any = None) -> int:
     return int(getattr(completed, "returncode", 0))
 
 
-def missing_entries(runtime_dir: Path | str) -> tuple[str, ...]:
+def missing_entries(
+    runtime_dir: Path | str, entries: Sequence[str] = PAYLOAD_ENTRIES
+) -> tuple[str, ...]:
     """Payload entries absent from ``runtime_dir``; the build refuses to sign an incomplete set."""
     base = Path(runtime_dir)
-    return tuple(name for name in PAYLOAD_ENTRIES if not (base / name).exists())
+    return tuple(name for name in entries if not (base / name).exists())
 
 
 def command_line(command: Command) -> str:
