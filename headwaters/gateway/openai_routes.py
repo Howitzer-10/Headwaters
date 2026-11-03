@@ -5,6 +5,10 @@ request goes through ``Router.handle``, so an IDE client gets the same scope, lo
 verification as the MCP tools. Only this package imports the web framework (D7, D14); the router
 and the rules arrive as plain callables, so each request reads the live ones (HDW-148).
 
+The same guarded app also mounts the Anthropic face (HDW-303, ``anthropic_routes``), so both
+protocols sit on one port and one token; the routing headers and the meaning of a refusal come
+from ``shared`` for both.
+
 Errors use the OpenAI envelope and an OpenAI client's own exception text, so a refusal with advice
 (the FU-135-3 remote image case) is readable in the editor that made the call.
 """
@@ -15,7 +19,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -23,54 +27,50 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
-from headwaters.core.advice import (
-    BELOW_FLOOR_WARNING,
-    REMOTE_IMAGE_ADVICE,
-    STREAMED_VERIFY_NOTE,
-    UNCHECKED_NOTE,
-)
-from headwaters.core.executor.errors import ExecutorError
 from headwaters.core.executor.types import ExecOptions, ExecResult, ToolCall
 from headwaters.core.logging import get_logger
-from headwaters.core.policy.errors import NoRouteError, Suggestion
 from headwaters.core.policy.types import RouteDecision
-from headwaters.core.router_types import RouteEvent, RouteFailed, RouteRequest, RouteResult
+from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
 from headwaters.core.router_verify import schema_of
 from headwaters.core.rules import Rules
 from headwaters.core.scope import ParsedModel, ScopeError, parse_model_name
+from headwaters.gateway.anthropic_routes import MESSAGES_PATH, messages
 from headwaters.gateway.models import card, find, listed
 from headwaters.gateway.server import HEALTH_PATH, GuardedApp
+from headwaters.gateway.shared import (
+    ADVICE_HEADER,
+    BELOW_FLOOR_HEADER,
+    IMAGE_URL_NOT_LOCAL,
+    SERVING_ERRORS,
+    SUGGESTION_HEADER,
+    VERIFY_HEADER,
+    RouterLike,
+    advice_note,
+    error_details,
+    meta_headers,
+    suggestion_code,
+    verify_status,
+)
 
-__all__ = ["CHAT_PATH", "MODELS_PATH", "RouterLike", "build_gateway_app"]
+__all__ = [
+    "ADVICE_HEADER",
+    "BELOW_FLOOR_HEADER",
+    "CHAT_PATH",
+    "IMAGE_URL_NOT_LOCAL",
+    "MESSAGES_PATH",
+    "MODELS_PATH",
+    "SERVING_ERRORS",
+    "SUGGESTION_HEADER",
+    "VERIFY_HEADER",
+    "RouterLike",
+    "build_gateway_app",
+]
 
 MODELS_PATH = "/v1/models"
 CHAT_PATH = "/v1/chat/completions"
 COMPLETION_OBJECT = "chat.completion"
 CHUNK_OBJECT = "chat.completion.chunk"
-IMAGE_URL_NOT_LOCAL = "image_url_not_local"
-BELOW_FLOOR_HEADER = "x-headwaters-below-floor"
-SUGGESTION_HEADER = "x-headwaters-suggestion"
-VERIFY_HEADER = "x-headwaters-verify"
-ADVICE_HEADER = "x-headwaters-advice"
-VERIFY_PENDING = "pending"
 _log = get_logger("gateway")
-
-# What ``Router.handle`` can raise before or instead of an answer: a policy refusal, an upstream
-# failure or an executor error. A streaming call raises these at the first event, not on the call.
-SERVING_ERRORS: tuple[type[Exception], ...] = (
-    ScopeError,
-    NoRouteError,
-    RouteFailed,
-    ExecutorError,
-)
-
-
-class RouterLike(Protocol):
-    """The one method this app needs of ``core.router.Router``."""
-
-    def handle(
-        self, request: RouteRequest
-    ) -> Coroutine[Any, Any, RouteResult] | AsyncIterator[RouteEvent]: ...
 
 
 def build_gateway_app(
@@ -100,11 +100,15 @@ def build_gateway_app(
     async def post_chat(request: Request) -> Response:
         return await _chat(request, router, rules)
 
+    async def post_messages(request: Request) -> Response:
+        return await messages(request, router, rules)
+
     routes = [
         Route(HEALTH_PATH, get_health, methods=["GET"]),
         Route(MODELS_PATH, get_models, methods=["GET"]),
         Route(f"{MODELS_PATH}/{{model_id:path}}", get_model, methods=["GET"]),
         Route(CHAT_PATH, post_chat, methods=["POST"]),
+        Route(MESSAGES_PATH, post_messages, methods=["POST"]),
     ]
     return GuardedApp(Starlette(routes=routes), token)
 
@@ -149,7 +153,7 @@ async def _chat(
         return error_response(500, "internal_error", "The gateway could not serve the request.")
     return JSONResponse(
         _completion(result),
-        headers=_meta_headers(result.decision, live_rules, result=result),
+        headers=meta_headers(result.decision, live_rules, result=result),
     )
 
 
@@ -205,7 +209,7 @@ async def _stream(
         return failure_response(exc)
     except StopAsyncIteration:
         return error_response(502, "empty_stream", "The gateway produced no answer.")
-    headers = _meta_headers(first.decision, rules, pending=True)
+    headers = meta_headers(first.decision, rules, pending=True)
     headers["Cache-Control"] = "no-cache"
     chunks = _chunks(first, events, include_usage=_wants_usage(body), rules=rules)
     return StreamingResponse(chunks, media_type="text/event-stream", headers=headers)
@@ -241,7 +245,7 @@ async def _chunks(
             result, failure = event.result, event.error
     if failure is not None:
         # OpenAI has no mid-stream error frame; the client sees an error frame and [DONE].
-        status, code, message, advice = _details(failure)
+        status, code, message, advice = error_details(failure)
         yield _sse({"error": _error_body(status, code, message, advice)})
     else:
         done = _chunk(completion_id, created, model, None)
@@ -302,36 +306,6 @@ async def _chain(first: RouteEvent, rest: AsyncIterator[RouteEvent]) -> AsyncIte
         yield event
 
 
-def _meta_headers(
-    decision: RouteDecision | None,
-    rules: Rules,
-    *,
-    result: RouteResult | None = None,
-    pending: bool = False,
-) -> dict[str, str]:
-    """The routing headers (v3.3 §5.1); absent when nothing was decided."""
-    if decision is None:
-        return {}
-    headers = {
-        "x-headwaters-model": decision.model,
-        "x-headwaters-tier": decision.tier,
-        "x-headwaters-scope": str(decision.scope.scope),
-        "x-headwaters-reason": decision.rung,
-    }
-    if decision.below_floor:
-        headers[BELOW_FLOOR_HEADER] = "true"
-        code = _suggestion(decision)
-        if code is not None:
-            headers[SUGGESTION_HEADER] = code
-    status = _verify_status(decision, result, pending=pending)
-    if status is not None:
-        headers[VERIFY_HEADER] = status
-    note = _advice(decision, result, rules, pending=pending)
-    if note:
-        headers[ADVICE_HEADER] = note
-    return headers
-
-
 def _headwaters_meta(
     decision: RouteDecision, result: RouteResult | None, rules: Rules
 ) -> dict[str, Any]:
@@ -342,46 +316,12 @@ def _headwaters_meta(
         "scope": str(decision.scope.scope),
         "reason": decision.rung,
         "below_floor": decision.below_floor,
-        "suggestion": _suggestion(decision),
-        "verify_status": _verify_status(decision, result, pending=False),
-        "advice": _advice(decision, result, rules, pending=False)
+        "suggestion": suggestion_code(decision),
+        "verify_status": verify_status(decision, result, pending=False),
+        "advice": advice_note(decision, result, rules, pending=False)
         if rules.advice == "inline"
         else None,
     }
-
-
-def _suggestion(decision: RouteDecision) -> str | None:
-    return decision.suggestions[0].code if decision.suggestions else None
-
-
-def _verify_status(
-    decision: RouteDecision | None, result: RouteResult | None, *, pending: bool
-) -> str | None:
-    """``pending`` while the check has not run yet (a stream), else the gate's own outcome.
-
-    ``None`` means no check was due at all; an outcome is never invented, so an answer no gate
-    looked at is reported ``unchecked`` by the router and never as verified.
-    """
-    if pending:
-        return VERIFY_PENDING if decision is not None and decision.verify_required else None
-    return None if result is None else result.verify_status
-
-
-def _advice(
-    decision: RouteDecision | None, result: RouteResult | None, rules: Rules, *, pending: bool
-) -> str | None:
-    """The note that explains a refusal-shaped answer; only when advice is on at all."""
-    if decision is None or rules.advice == "off":
-        return None
-    parts: list[str] = []
-    if decision.below_floor:
-        parts.append(BELOW_FLOOR_WARNING)
-    if pending:
-        if decision.verify_required:
-            parts.append(STREAMED_VERIFY_NOTE)
-    elif result is not None and result.verify_status == "unchecked":
-        parts.append(UNCHECKED_NOTE)
-    return " ".join(parts) if parts else None
 
 
 def _usage(result: ExecResult) -> dict[str, int]:
@@ -476,34 +416,5 @@ def _error_type(status: int) -> str:
 
 
 def failure_response(exc: Exception) -> JSONResponse:
-    status, code, message, advice = _details(exc)
+    status, code, message, advice = error_details(exc)
     return error_response(status, code, message, advice=advice)
-
-
-def _details(exc: Exception) -> tuple[int, str, str, str | None]:
-    """Status, code, message and advice for anything ``Router.handle`` can refuse with."""
-    if isinstance(exc, ScopeError):
-        return 400, exc.code, exc.message, exc.fix_hint
-    if isinstance(exc, NoRouteError):
-        reasons = [rejection.reason for rejection in exc.rejected]
-        message = _with_suggestions(exc.message, exc.suggestions)
-        return 400, exc.code, message, _image_advice(reasons)
-    if isinstance(exc, RouteFailed):
-        reasons = [rejection.reason for rejection in exc.no_route.rejected] if exc.no_route else []
-        if exc.last_error.get("code") == IMAGE_URL_NOT_LOCAL:
-            reasons.append(IMAGE_URL_NOT_LOCAL)
-        return 502, exc.code, exc.message, _image_advice(reasons)
-    if isinstance(exc, ExecutorError):
-        advice = REMOTE_IMAGE_ADVICE if exc.code == IMAGE_URL_NOT_LOCAL else None
-        return 502, exc.code, exc.message, advice
-    return 500, "internal_error", "The gateway could not serve the request.", None
-
-
-def _with_suggestions(message: str, suggestions: Sequence[Suggestion]) -> str:
-    texts = [suggestion.text for suggestion in suggestions if suggestion.text]
-    return message if not texts else f"{message} Next: {' '.join(texts)}"
-
-
-def _image_advice(reasons: Sequence[str]) -> str | None:
-    """FU-135-3: a refusal caused by a remote image URL says to send a ``data:`` URL instead."""
-    return REMOTE_IMAGE_ADVICE if IMAGE_URL_NOT_LOCAL in reasons else None

@@ -6,7 +6,8 @@ app so this package never imports the MCP SDK.
 
 Every request is checked in one place (``GuardedApp``):
 - the ``Host`` header must be a loopback name (stops DNS rebinding) and any ``Origin`` must be too;
-- everything except ``GET /health`` needs ``Authorization: Bearer <per-user token>``.
+- everything except ``GET /health`` needs ``Authorization: Bearer <per-user token>``;
+- the Anthropic face (``POST /v1/messages``) accepts ``x-api-key`` with the same token instead.
 """
 
 from __future__ import annotations
@@ -56,8 +57,24 @@ def _origin_ok(origin: str) -> bool:
         return False
 
 
+def _credentials(headers: Mapping[str, str]) -> list[str]:
+    """The token a client presented: ``Authorization: Bearer``, ``x-api-key`` or both."""
+    found: list[str] = []
+    scheme, _, value = headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer":
+        found.append(value)
+    api_key = headers.get("x-api-key")
+    if api_key is not None:
+        found.append(api_key)
+    return found
+
+
 class GuardedApp:
-    """ASGI wrapper: loopback ``Host``/``Origin`` and bearer-token checks before anything runs."""
+    """ASGI wrapper: loopback ``Host``/``Origin``, then the token, before anything runs.
+
+    The token arrives as ``Authorization: Bearer`` (MCP, OpenAI clients) or as ``x-api-key``,
+    which is the only credential an Anthropic client sends (HDW-303).
+    """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         self._app = app
@@ -88,13 +105,12 @@ class GuardedApp:
             return 403, "bad_origin"
         if scope["type"] == "http" and scope["method"] == "GET" and scope["path"] == HEALTH_PATH:
             return None
-        supplied = headers.get("authorization", "")
-        scheme, _, value = supplied.partition(" ")
-        if scheme.lower() != "bearer" or not hmac.compare_digest(
-            value.strip().encode("utf-8"), self._token
-        ):
-            return 401, "unauthorized"
-        return None
+        if any(self._matches(value) for value in _credentials(headers)):
+            return None
+        return 401, "unauthorized"
+
+    def _matches(self, value: str) -> bool:
+        return hmac.compare_digest(value.strip().encode("utf-8"), self._token)
 
 
 def build_app(

@@ -43,3 +43,13 @@ that name it.
 | --- | --- | --- | --- |
 | `AsyncOpenAI(base_url="http://127.0.0.1:4000/v1", http_client=httpx.AsyncClient(transport=httpx.ASGITransport(app=app)))` drives an ASGI app in-process: `chat.completions.create(..., stream=True)` parses our SSE frames (role/content/finish/usage chunks and `data: [DONE]`), and a JSON error body surfaces as `BadRequestError` (400), `NotFoundError` (404) or `InternalServerError` (502) with the body `message` in `str(exc)` | `tests/test_gateway_openai.py` | openai 2.54.0 | HDW-301 |
 | An SSE chunk carrying an unknown top-level key (ours: `headwaters`) still parses: the streaming `ChatCompletionChunk` keeps the known fields and tolerates the extra one, so additive per-chunk metadata does not break the client | `tests/test_gateway_openai.py` (the SDK stream tests run against the chunks HDW-302 adds to) | openai 2.54.0 | HDW-302 |
+
+## anthropic SDK
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| `anthropic` 2.4 speaks `httpx2`; `AsyncAnthropic(http_client=...)` raises on an `httpx` client (`_reject_httpx_object`). An in-process test passes `http_client=httpx2.AsyncClient(transport=httpx2.ASGITransport(app=...))`, and `max_retries=0` keeps the 5xx checks from backing off | `tests/test_gateway_anthropic.py` | anthropic 2.4.0 | HDW-303 |
+| The stream parser skips any SSE frame with no `event` field (`_streaming.Stream.__stream__`), so every frame must be `event: <name>`; an `event: error` frame raises the status error built from the frame's JSON (`{"type": "error", "error": {...}}`), which is how a mid-stream failure reaches the client | read `anthropic/_streaming.py`; `tests/test_gateway_anthropic.py` | anthropic 2.4.0 | HDW-303 |
+| Required response fields: `Message` needs `id`, `content`, `model`, `role`, `type`, `usage`; `Usage` needs both `input_tokens` and `output_tokens` (in `message_start` and in the final `message.usage`); `MessageDeltaUsage.output_tokens` is required and `input_tokens` optional; `ToolUseBlock` needs `id`, `input`, `name` | scratch probe; `tests/test_gateway_anthropic.py` | anthropic 2.4.0 | HDW-303 |
+| `client.messages.stream(...)` is an async context manager, and the *entered* value carries `text_stream` and `get_final_message()`; the assembled message parses an `input_json_delta` into the tool block's `input` dict. `with_raw_response.create(...)` is awaitable and its `.parse()` is a coroutine | `tests/test_gateway_anthropic.py` | anthropic 2.4.0 | HDW-303 |
+| `DEPRECATED_MODELS` in `anthropic/_data/deprecated_models.py` warns on every call that names a deprecated model (`claude-sonnet-4-5` does), so a test should pin a current name | saw the `DeprecationWarning`; read the table | anthropic 2.4.0 | HDW-303 |

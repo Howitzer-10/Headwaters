@@ -37,6 +37,7 @@ packages = ["headwaters"]
 
 [dependency-groups]
 dev = [
+    "anthropic>=2.4.0",
     "freezegun",
     "import-linter>=2.15",
     "mypy>=2.4.1",
