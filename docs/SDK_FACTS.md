@@ -20,6 +20,11 @@ that name it.
 | `NoBackChannelError` is a subclass of `MCPError` | ran it | mcp 2.3 | 146 |
 | `Client.call_tool(name, arguments, meta=...)` takes a per-call `RequestParamsMeta` (keyword-only), which is how a probe sends the client identity block the daemon reads | read `client/client.py` | mcp 2.3 | HDW-402 |
 
+## Ollama HTTP API
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| `GET/POST /api/show` reports `capabilities: ["completion","tools","insert"]` for a model that does **not** return structured calls: `qwen2.5-coder:14b` answers "call this tool" with `tool_calls: null` and the call as JSON text in `content` (the same probe on `qwen3:8b`, `gpt-oss:20b`, `qwen3-coder:30b`, `devstral-small-2:24b` returns an empty-content `tool_calls` entry). An advertised capability is not evidence of behaviour, so `tools_ok` needs a probe | coordinator probe of `POST /api/chat` with a tools array | ollama 0.40.13 | HDW-512 |
 ## Windows and repo tooling
 
 | Fact | Verified by |

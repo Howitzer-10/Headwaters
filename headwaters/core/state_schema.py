@@ -106,5 +106,16 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         ALTER TABLE decisions ADD COLUMN offload_penalty REAL;
         """,
     ),
+    (
+        6,
+        "behavioural capability probes",
+        """
+        CREATE TABLE capability_probes (
+            model_id TEXT NOT NULL, capability TEXT NOT NULL,
+            ok INTEGER NOT NULL, detail TEXT NOT NULL, checked_at REAL NOT NULL,
+            PRIMARY KEY (model_id, capability)
+        );
+        """,
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]

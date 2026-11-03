@@ -417,6 +417,43 @@ sources answered. It uses the network and can take a few minutes, so let it fini
 shows rows, and `pick` returns a model with its fallbacks. [needs a key or Ollama]: with no source
 reachable it reports zero models and `pick` keeps answering `no_candidates`.
 
+### 33. Tool capability is measured, not taken on trust
+
+```
+uv run headwaters models verify-tools --model qwen2.5-coder:14b --model qwen3:8b --force
+uv run headwaters models list --tier local
+```
+
+Expected: `verify-tools` asks each named model to call a synthetic tool, then prints one row per model
+with the verdict and the detail code. A model that returns the call in `content` as JSON text (the
+HDW-512 defect) is reported `no` with `call_as_text` and is stored as `tools_ok = 0`, so the router
+stops offering it tool requests even after a refresh re-advertises the capability. A model that returns
+a structured `tool_calls` entry naming the offered tool is `yes` with `structured`. A model that cannot
+be reached, or whose answer was cut off at the token cap, is `-` with `skipped:…` or `error:…` and
+keeps whatever it had: nothing becomes `tools_ok` without an observation. `models list` shows the same
+verdict in its Tools column. The probe never runs inside a request, and a cloud model under the
+private lock or airplane mode is refused by the executor and recorded as an error, not as a verdict.
+
+### 34. A footer that says which model answered
+
+```
+# in rules.yaml
+gateway:
+  footer:
+    enabled: true
+    fields: [model, tier, tokens, cost, latency]
+uv run headwaters
+curl -s http://127.0.0.1:8080/v1/chat/completions -H "content-type: application/json" \
+  -d '{"model":"headwaters","messages":[{"role":"user","content":"hello"}]}'
+```
+
+Expected: with `footer.enabled: false` (the default) the assistant `content` is exactly what the model
+wrote, byte for byte. With it `true`, the content ends with one blank line and then one plain-text line
+such as `Headwaters: model=qwen3:8b tier=local tokens=1204+88 cost=free latency=812 ms`, in the order
+the `fields` list gives, showing only the fields you enabled. A streamed response sends that line as a
+final content delta before the finish chunk. A `finish_reason: tool_calls` answer and every error
+response carry no footer, and the numbers in `usage` never include it.
+
 ## What is not covered here, on purpose
 
 - The Windows installer, code signing, the clean Windows VM run, the Linux payload and the clean Linux

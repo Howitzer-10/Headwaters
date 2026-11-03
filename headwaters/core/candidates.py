@@ -39,6 +39,7 @@ from headwaters.core.policy.filters import Candidate
 from headwaters.core.rules import Rules
 from headwaters.core.state import Database
 from headwaters.core.state_models import ModelRow, effective_scores, list_models
+from headwaters.core.state_probes import CAPABILITY_TOOLS, probes
 
 __all__ = ["CandidateBuilder", "fit_for_row"]
 
@@ -107,6 +108,9 @@ class CandidateBuilder:
     def __call__(self, reqs: Requirements) -> list[Candidate]:
         rows = list_models(self._db)
         scores = effective_scores(self._db)
+        # HDW-512: an observed capability beats the provider's advertisement, and survives a
+        # refresh that re-advertises it.
+        observed = probes(self._db, CAPABILITY_TOOLS)
         hw = self._hardware()
         lookup = CatalogLookup(self._catalog)
         patterns = remote_patterns_from(self._catalog)
@@ -131,6 +135,9 @@ class CandidateBuilder:
             # F18: a model that reports no context gets the catalog default, flagged as assumed.
             assumed = row.ctx is None or row.ctx <= 0
             shown = replace(row, ctx=self._catalog.unknown_model_defaults.ctx) if assumed else row
+            seen = observed.get(row.id)
+            if seen is not None:
+                shown = replace(shown, tools_ok=seen.ok)
             out.append(
                 Candidate(
                     shown,

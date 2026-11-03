@@ -84,6 +84,19 @@ def upsert_model(db: Database, m: ModelRow) -> None:
         )
 
 
+def set_model_tools_ok(db: Database, model_id: str, ok: bool) -> bool:
+    """Record an observed tool capability (HDW-512). Returns False when the model is unknown.
+
+    The column is what ``models list`` shows and what discovery re-advertises on refresh; the
+    behavioural observation that decides routing lives in ``capability_probes``.
+    """
+    with db.write() as c:
+        return (
+            c.execute("UPDATE models SET tools_ok = ? WHERE id = ?", (int(ok), model_id)).rowcount
+            > 0
+        )
+
+
 def delete_models(db: Database, model_ids: list[str]) -> int:
     """Remove models (and their scores). Returns how many model rows were removed."""
     if not model_ids:

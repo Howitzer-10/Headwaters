@@ -35,6 +35,7 @@ __all__ = [
     "RouterLike",
     "advice_note",
     "error_details",
+    "headwaters_meta",
     "meta_headers",
     "suggestion_code",
     "verify_status",
@@ -93,6 +94,33 @@ def meta_headers(
     if note:
         headers[ADVICE_HEADER] = note
     return headers
+
+
+def headwaters_meta(
+    decision: RouteDecision, result: RouteResult | None, rules: Rules
+) -> dict[str, Any]:
+    """The routing facts of an answer, plus usage, cost and latency (HDW-512).
+
+    The stream's ``headwaters`` chunk carries this, and so does the optional answer footer, so
+    cost is priced once (in the router) and read from here rather than re-derived per face.
+    """
+    usage = None if result is None else result.result.usage
+    return {
+        "model": decision.model,
+        "tier": decision.tier,
+        "scope": str(decision.scope.scope),
+        "reason": decision.rung,
+        "below_floor": decision.below_floor,
+        "suggestion": suggestion_code(decision),
+        "verify_status": verify_status(decision, result, pending=False),
+        "advice": advice_note(decision, result, rules, pending=False)
+        if rules.advice == "inline"
+        else None,
+        "prompt_tokens": 0 if usage is None else usage.prompt_tokens or 0,
+        "completion_tokens": 0 if usage is None else usage.completion_tokens or 0,
+        "latency_ms": None if result is None else result.latency_ms,
+        "cost_usd": None if result is None else result.cost_usd,
+    }
 
 
 def suggestion_code(decision: RouteDecision) -> str | None:

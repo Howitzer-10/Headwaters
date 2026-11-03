@@ -41,6 +41,7 @@ from headwaters.core.executor.executor import Executor
 from headwaters.core.executor.types import ExecResult
 from headwaters.core.features import FeatureRegistry, get_registry
 from headwaters.core.hardware.state import HardwareState
+from headwaters.core.model_overrides import apply_overrides
 from headwaters.core.plugins import EscalationPlugin, LedgerPlugin, VerifierPlugin
 from headwaters.core.policy.decide import decide
 from headwaters.core.policy.errors import NoRouteError
@@ -294,11 +295,21 @@ class Router:
         candidates = self._with_live_availability(self._candidates(reqs))
         if rules.airplane:
             candidates = only_local(candidates)
+        # HDW-512: the user's last word, applied after the catalog, the scores and the probes, so
+        # a rules edit lands on the next request without a refresh or a restart.
+        candidates = apply_overrides(candidates, rules)
         session = self._get_session(key)
         last_good = session.pinned_model if session is not None else None
         candidates = with_session_model(candidates, last_good)
         hw = self._hardware() if self._hardware is not None else None
-        hint = pull_hint(reqs, hw, self._gpu_profiles)
+        hint = pull_hint(
+            reqs,
+            hw,
+            self._gpu_profiles,
+            installed=[
+                c.id for c in candidates if c.row.tier == "local" or c.row.provider == "ollama"
+            ],
+        )
         self._progress(request, "scope")
         scope = resolve_scope(
             rules,
@@ -592,6 +603,8 @@ class Router:
             verify=verify,
             first_choice=run.first.model if run.first.model != decision.model else None,
             reasons=(*decision.reasons, *run.notes),
+            latency_ms=int((time.monotonic() - run.started) * 1000),
+            cost_usd=cost,
         )
 
     def _entry(

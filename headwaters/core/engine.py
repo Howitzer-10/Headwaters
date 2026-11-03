@@ -12,7 +12,7 @@ sees the decision, so the candidate source records the request's candidates in a
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -37,7 +37,7 @@ from headwaters.core.secrets_detect import SecretDetector
 from headwaters.core.state import Database
 from headwaters.core.walls import WallClassifier
 
-__all__ = ["Engine", "TargetBuilder", "build_engine"]
+__all__ = ["Engine", "TargetBuilder", "build_engine", "remember_candidates"]
 
 OLLAMA = "ollama"
 OPENROUTER = "openrouter"
@@ -47,6 +47,16 @@ _OPENAI_ROUTE = "openai"
 _REQUEST_CANDIDATES: ContextVar[Mapping[str, Candidate] | None] = ContextVar(
     "headwaters_request_candidates", default=None
 )
+
+
+def remember_candidates(candidates: Iterable[Candidate]) -> None:
+    """Make these candidates visible to ``TargetBuilder`` (``num_ctx``, warm flags).
+
+    The router's candidate source does this per request. A caller that runs the executor
+    without a router — the capability probe (HDW-512) — sets them directly, so a local call
+    still gets a computed ``num_ctx`` instead of being refused with ``missing_num_ctx``.
+    """
+    _REQUEST_CANDIDATES.set({c.id: c for c in candidates})
 
 
 class TargetBuilder:
@@ -122,7 +132,7 @@ class _RememberingSource:
 
     def __call__(self, reqs: Requirements) -> list[Candidate]:
         found = list(self._inner(reqs))
-        _REQUEST_CANDIDATES.set({c.id: c for c in found})
+        remember_candidates(found)
         return found
 
 

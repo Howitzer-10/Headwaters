@@ -42,6 +42,7 @@ from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
 from headwaters.core.rules import Rules
 from headwaters.core.scope import ScopeError
 from headwaters.gateway.aliases import requested
+from headwaters.gateway.footer import footer_text, with_footer
 from headwaters.gateway.shared import (
     SERVING_ERRORS,
     RouterLike,
@@ -120,7 +121,7 @@ async def messages(
         _log.exception("gateway messages failed")
         return _error(500, "The gateway could not serve the request.")
     return JSONResponse(
-        _message(result),
+        _message(result, live_rules),
         headers=meta_headers(result.decision, live_rules, result=result),
     )
 
@@ -379,10 +380,11 @@ def _tools(raw: Any) -> list[dict[str, Any]] | None:
 # ------------------------------------------------------------------------------ response side
 
 
-def _message(result: RouteResult) -> dict[str, Any]:
+def _message(result: RouteResult, rules: Rules) -> dict[str, Any]:
     content: list[dict[str, Any]] = []
     if result.result.content or not result.result.tool_calls:
-        content.append({"type": "text", "text": result.result.content or ""})
+        text = with_footer(result.result.content or "", result, rules)
+        content.append({"type": "text", "text": text})
     for call in result.result.tool_calls:
         content.append(_tool_block(call))
     return {
@@ -441,10 +443,14 @@ async def _start_stream(events: AsyncIterator[RouteEvent], rules: Rules) -> Resp
         return _error(500, "The gateway produced no answer.")
     headers = meta_headers(first.decision, rules, pending=True)
     headers["Cache-Control"] = "no-cache"
-    return StreamingResponse(_stream(first, events), media_type=EVENT_STREAM, headers=headers)
+    return StreamingResponse(
+        _stream(first, events, rules), media_type=EVENT_STREAM, headers=headers
+    )
 
 
-async def _stream(first: RouteEvent, events: AsyncIterator[RouteEvent]) -> AsyncIterator[str]:
+async def _stream(
+    first: RouteEvent, events: AsyncIterator[RouteEvent], rules: Rules
+) -> AsyncIterator[str]:
     """The Messages event sequence: one text block, one block per tool call, then the stop."""
     decision = first.decision
     model = decision.model if decision is not None else ""
@@ -489,11 +495,17 @@ async def _stream(first: RouteEvent, events: AsyncIterator[RouteEvent]) -> Async
         status, _code, message, advice = error_details(failure)
         yield _frame("error", _error_body(status, message, advice))
         return
+    # HDW-512: the footer rides inside the open text block, so the block structure is untouched.
+    line = footer_text(result, rules)
     if text_open:
+        if line:
+            yield _frame("content_block_delta", _text_delta(index, f"\n\n{line}"))
         yield _frame("content_block_stop", _block_stop(index))
     elif index == 0:
         # An empty answer still needs one block, or the client accumulates a block-less message.
-        yield _frame("content_block_start", _block_start(index, {"type": "text", "text": ""}))
+        yield _frame(
+            "content_block_start", _block_start(index, {"type": "text", "text": line or ""})
+        )
         yield _frame("content_block_stop", _block_stop(index))
     answer = result.result if result is not None else done
     yield _frame("message_delta", _delta(answer))

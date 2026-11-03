@@ -53,6 +53,10 @@ class _Req:
         local_only = False
         active_locks = ()
 
+    class requirements:
+        class hard:
+            tools = False
+
 
 def test_no_vision_in_local_scope_suggests_the_catalog_vision_model() -> None:
     err = no_route(

@@ -17,6 +17,7 @@ from headwaters.core.analyzer.requirements import Analyzer, AnalyzerInput, Requi
 from headwaters.core.candidates import CandidateBuilder
 from headwaters.core.catalog import updater as catalog_updater
 from headwaters.core.catalog.schema import Catalog
+from headwaters.core.engine import TargetBuilder
 from headwaters.core.executor.executor import Executor
 from headwaters.core.executor.types import ExecTarget
 from headwaters.core.features import FeatureRegistry, discover_features
@@ -33,7 +34,14 @@ from headwaters.core.secrets_detect import SecretDetector
 from headwaters.core.state import Database, open_database
 from headwaters.core.walls import WallClassifier
 
-__all__ = ["Runtime", "build_router", "hardware_state", "load_rules_or_exit", "load_runtime"]
+__all__ = [
+    "Runtime",
+    "build_executor",
+    "build_router",
+    "hardware_state",
+    "load_rules_or_exit",
+    "load_runtime",
+]
 
 
 def load_rules_or_exit() -> Rules:
@@ -126,6 +134,23 @@ class SizedAnalyzer:
 
 def _never_runs(decision: RouteDecision) -> ExecTarget:
     raise RuntimeError("the CLI dry run never executes a model")
+
+
+def build_executor(rules: Rules, catalog: Catalog) -> Executor:
+    """A real executor for CLI commands that must call a model (``models verify-tools``).
+
+    Same wiring the daemon uses (key store, loopback guard, catalog cloud-proxy patterns), so a
+    probe is bounded and refused exactly where a normal call would be.
+    """
+    keys = KeyStore(rules)
+    return Executor(
+        rules,
+        WallClassifier(catalog.wall_patterns),
+        TargetBuilder(rules, key_store=keys),
+        api_key_for=keys.api_key_for,
+        key_alias_for=keys.key_alias_for,
+        remote_patterns=remote_patterns_from(catalog),
+    )
 
 
 def build_router(rt: Runtime, hw: HardwareState | None, tokens: int | None = None) -> Router:

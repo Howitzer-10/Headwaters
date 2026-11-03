@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 Scope = Literal["auto", "free", "local", "cloud"]
 Strategy = Literal["cost_saver", "quality_first", "primary_first"]
@@ -19,6 +19,21 @@ Strategy = Literal["cost_saver", "quality_first", "primary_first"]
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+FooterField = Literal["model", "tier", "tokens", "cost", "latency"]
+FOOTER_FIELDS: tuple[FooterField, ...] = ("model", "tier", "tokens", "cost", "latency")
+
+
+class FooterRules(_Model):
+    """HDW-512: the optional answer footer. Off by default, so no host sees extra body text.
+
+    ``fields`` names the facts to print, in order; the gateway renders only these, so adding a
+    fact is one formatter and one name here. The footer is never part of ``usage``.
+    """
+
+    enabled: bool = False
+    fields: list[FooterField] = Field(default_factory=lambda: list(FOOTER_FIELDS))
 
 
 class SecretsRules(_Model):
@@ -213,6 +228,7 @@ class RouterRules(_Model):
 class GatewayRules(_Model):
     enabled: bool = True
     port: int = Field(default=4000, ge=1, le=65535)
+    footer: FooterRules = Field(default_factory=lambda: FooterRules())
 
 
 class DashboardRules(_Model):
@@ -263,8 +279,8 @@ class ModelOverride(_Model):
 
     tier: Literal["local", "free_cloud", "paid"] | None = None
     scores: dict[str, int] = Field(default_factory=dict)
-    tools_ok: bool | None = None
-    json_ok: bool | None = None
+    tools_ok: StrictBool | None = None  # HDW-512: a typo must not silently claim a capability
+    json_ok: StrictBool | None = None
     ctx: int | None = Field(default=None, gt=0)
 
     @field_validator("scores")
@@ -287,10 +303,26 @@ class OpenAICompatEndpoint(_Model):
     models: list[str] = Field(default_factory=list)  # empty = ask GET {base_url}/models
 
 
+class ToolProbeRules(_Model):
+    """HDW-512: behavioural tool-capability verification (``headwaters models verify-tools``).
+
+    Off the request path by design: a probe loads the model, so it is an explicit command and
+    never a per-request check. ``on_refresh`` is opt-in and off by default, even for
+    ``models refresh``, which is why the observation is stored and overlaid at routing time.
+    """
+
+    enabled: bool = True
+    on_refresh: bool = False
+    retry_after_s: float = Field(default=86400, ge=0)
+    max_models: int = Field(default=25, ge=1)
+    max_tokens: int = Field(default=256, ge=1)
+
+
 class ModelsRules(_Model):
     refresh_ttl_s: float = Field(default=3600, ge=60)
     opencode_config: str | None = None  # explicit opencode.json path; None = standard places
     overrides: dict[str, ModelOverride] = Field(default_factory=dict)
+    tool_probe: ToolProbeRules = Field(default_factory=ToolProbeRules)
     openai_compatible: list[OpenAICompatEndpoint] = Field(default_factory=list)
     # HDW-304: the alias table. An IDE sends the model names its own picker lists; a key here
     # maps one to what the user means, either a picker model (``headwaters/free+verify``) or a
