@@ -25,6 +25,8 @@ class HostAdapter(ABC):
     scope: str = "project"
     #: some hosts take no command files at all
     has_commands: bool = True
+    #: the names in ``installer/templates`` this host's install is built from (HDW-407 docs)
+    template_names: tuple[str, ...] = ()
 
     def detect(self, ctx: Context) -> bool:
         """Whether this host looks present on the machine or in the project."""

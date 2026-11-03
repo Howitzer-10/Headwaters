@@ -46,6 +46,8 @@ class Context:
     state: Path
     launch: McpLaunch
     port: int
+    #: HDW-407: set only by the docs renderer, so a generated page never reads a real profile
+    appdata_override: Path | None = None
 
     @property
     def base_url(self) -> str:
@@ -58,6 +60,8 @@ class Context:
     @property
     def appdata(self) -> Path:
         """The per-user application-data root hosts keep their config in."""
+        if self.appdata_override is not None:
+            return self.appdata_override
         if os.name == "nt":
             raw = os.environ.get("APPDATA", "").strip()
             return Path(raw) if raw else self.home / "AppData" / "Roaming"

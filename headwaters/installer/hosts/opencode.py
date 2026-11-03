@@ -38,6 +38,7 @@ class OpenCode(HostAdapter):
     id = "opencode"
     title = "OpenCode (terminal)"
     scope = "project"
+    template_names = ("opencode",)
 
     def detect(self, ctx: Context) -> bool:
         return any((ctx.project / name).is_file() for name in CONFIG_NAMES)

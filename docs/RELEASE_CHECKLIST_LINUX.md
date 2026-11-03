@@ -105,3 +105,20 @@ so in the same words, or a user will look for a launcher that is not there.
 - [ ] `git log --oneline -1` matches the build you uploaded.
 - [ ] Keep the staged payload hash; the build host's `uv` version is part of what shipped.
 - [ ] If the clean-Linux run found a problem, file it before the next release and note it here.
+## 5. The gate
+
+A release is not ready until the gate says so. Record what you actually did in
+`docs/release/evidence.json` first (`docs/RELEASE_EVIDENCE.md` names every key and the proof it
+takes), then run:
+
+```
+headwaters release-gate
+```
+
+It prints one line per machine check and one per owner step. Exit `0` is ready, `1` is not ready,
+and `2` means the evidence file or the checkout could not be read. Machine checks are proved by the
+repository itself: the docs are present and not stubs, the host pages match the installer, the
+privacy notice matches the code, the packaging payload exists and the catalog feed validates. Owner
+steps are the manual runs above; the gate cannot do them, so an unrecorded step stays `BLOCKED` and
+the release stays unreleased. Paste the report into the release pull request. Do not edit a document
+to turn a red line green: fix the thing the line names.

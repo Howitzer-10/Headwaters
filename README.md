@@ -2,6 +2,52 @@
 
 Windows-first, local-first LLM router that keeps developers coding when paid credits or rate limits run out.
 
+**Beta 0.1: nothing is published yet.** There is no installer download, no store build and no
+signed binary that a person has verified on a clean machine. `headwaters release-gate` says exactly
+which runs are missing and refuses to pass until they are recorded — see
+[docs/BETA.md](docs/BETA.md) and [docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md). Install from
+source until then.
+
+## Install
+
+```
+uv sync
+uv run headwaters start
+```
+
+`headwaters start` runs the daemon: the OpenAI- and Anthropic-compatible gateway on
+`127.0.0.1:4000`, and the read-only status page on `127.0.0.1:4001`. `headwaters stop` stops it,
+`headwaters stop --force` clears a stale one, `headwaters status` prints what it is doing,
+`headwaters status --open` opens the dashboard, and `headwaters status --json` is the same data for a
+script. The packaged payloads are built by `scripts/build_windows.py` (Inno Setup, per-user) and
+`scripts/build_linux.py` (payload script plus a systemd user unit).
+
+## Point a host at Headwaters
+
+```
+uv run headwaters install --host all --dry-run   # the diff, no writes
+uv run headwaters install --host vscode          # per file: yes/no, backup, read back
+```
+
+Host ids are `vscode` (GitHub Copilot BYOK), `cline`, `opencode` and `claude-desktop`, or `all`;
+`headwaters uninstall --host <id>` reverses the same plan. The pages below are generated from the
+installer itself, so they list the files and BYOK fields the current build really writes:
+
+| Host | Page |
+| --- | --- |
+| VS Code Copilot BYOK | [docs/hosts/vscode.md](docs/hosts/vscode.md) |
+| Cline | [docs/hosts/cline.md](docs/hosts/cline.md) |
+| OpenCode | [docs/hosts/opencode.md](docs/hosts/opencode.md) |
+| Claude Desktop | [docs/hosts/claude-desktop.md](docs/hosts/claude-desktop.md) |
+
+## What is free
+
+The gateway, automatic failover, the free and local scopes with Private mode, the hardware guard,
+basic verification, the installer, the doctor and the catalog updates are core: free in every
+build, at beta and after. Features marked ★ are free during beta and may join a paid tier at 1.0.
+
+★ = free during beta; may become part of Headwaters Pro at 1.0
+
 ## Development
 
 ```
@@ -54,3 +100,14 @@ calling the cloud, but Ollama can still run a cloud model on its own. Set `OLLAM
 On Windows `daemon.token` relies on the ACL of your per-user profile folder: the file has no
 explicit ACL of its own, so another process of the same user can read it. Treat the token like a
 password, and do not share or copy the profile folder.
+
+## Docs
+
+- [docs/BETA.md](docs/BETA.md): what beta promises, the free list and the closed-alpha exit criteria.
+- [docs/hosts/index.md](docs/hosts/index.md): every host, generated from the installer.
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): the six common failures and the fix for each.
+- [docs/PRIVACY.md](docs/PRIVACY.md): what is stored, what is logged and what leaves the machine.
+- [docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md): the gate, the evidence file and the exit codes.
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) and [docs/RELEASE_CHECKLIST_LINUX.md](docs/RELEASE_CHECKLIST_LINUX.md): the runs a person has to do.
+- [docs/ITCH_STORE.md](docs/ITCH_STORE.md): the store copy, kept in the repo so it is reviewed.
+- [docs/DECISIONS.md](docs/DECISIONS.md): binding decisions, D1 onwards.

@@ -30,6 +30,7 @@ class ClaudeDesktop(HostAdapter):
     title = "Claude Desktop"
     scope = "user"
     has_commands = False
+    template_names = ("claude_desktop",)
 
     def detect(self, ctx: Context) -> bool:
         return config_path(ctx).parent.is_dir() or config_path(ctx).is_file()

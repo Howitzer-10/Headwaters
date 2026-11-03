@@ -38,6 +38,7 @@ class VsCode(HostAdapter):
     id = "vscode"
     title = "VS Code (Copilot Chat)"
     scope = "project"
+    template_names = ("vscode_mcp", "vscode_settings", "vscode_byok")
 
     # -- detection ---------------------------------------------------------------------------
     def detect(self, ctx: Context) -> bool:

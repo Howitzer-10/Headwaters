@@ -16,6 +16,7 @@
 | D12 | `headwaters_think` in 0.1: **ship it in core as single-model reasoning** (best reasoning-capable model in scope, reasoning on, reasoning text never returned or stored). Fusion `deliberate` and duck are ★ 1.x modes of the same tool. | Decided (2026-10-31, HDW-119) |
 | D13 | Ollama cloud models are not routable in 0.1: **Headwaters never routes to Ollama `:cloud` / `-cloud` models, in any tier.** Discovery drops them (never `local`, never `free_cloud` or `paid`), and the executor refuses them as defence in depth. Owner answer to HDW-119 question 1 ("never"). Where HDW-121 says "`tier=free_cloud`/`paid` per catalog, or drops them", only "drops them" applies. | Decided (2026-10-31, owner, HDW-119) |
 | D14 | Daemon packages: **`headwaters.gateway` owns the HTTP server** (the only package allowed to import `fastapi`, `starlette` and `uvicorn`), **`headwaters.mcp` owns the MCP SDK** and hands its streamable-HTTP app out as a plain ASGI callable, and a new **`headwaters.daemon` is the composition root** that wires core, gateway and mcp into one process. Nothing imports `headwaters.daemon`; the CLI starts it as a child process. The internal API and health endpoint live in `gateway/server.py`, not under `headwaters/mcp/`. | Decided (2026-10-31, HDW-201) |
+| D15 | Beta tester promise: **everyone on the beta tester list gets Headwaters Pro free if a free/Pro split ships at 1.0.** HDW-407's packet offers free Pro or a discount for testers; the free option is chosen, the discount is not promised, and the list itself is a release-gate owner step. | Decided (2026-11-10, HDW-407) |
 
 ## Deferred tickets (do not build)
 
@@ -177,3 +178,22 @@ two external-package contracts.
 `headwaters/gateway/`.
 
 **Refinement (2026-11-01, FU-201-9; the owner accepted the triage recommendation):** `headwaters.control` (`doctor`, the status page) and the CLI read daemon state only through `headwaters.core.daemon_client` and `core.daemon_info`, never by importing `headwaters.daemon`. The `daemon-is-a-root` contract already enforces it. HDW-402 adds a `sys.modules` test that importing the doctor loads neither the web framework nor the MCP SDK.
+
+## D15 detail: the beta tester promise
+
+HDW-407's packet leaves one thing to the owner: what a beta tester is promised, either free Pro or
+a discount. The choice is **free Pro**, recorded as `promise: testers-pro` in `docs/BETA.md` and
+repeated, in the same words, on the itch store page.
+
+- What is promised: everyone on the beta tester list gets Headwaters Pro free if a free/Pro split
+  ships at 1.0. Nothing is promised about the price of Pro for anyone else, and nothing is promised
+  about a discount tier.
+- What the promise depends on: the tester list has to exist. `tester-registration` in the release
+  gate is that step, and it stays `BLOCKED` until a person records the system and a count.
+- What the gate enforces: exactly one of `promise: testers-pro` or `promise: testers-discount` in
+  `docs/BETA.md`, that block repeated in `docs/ITCH_STORE.md`, and no leftover
+  "[Pro free / 50% off]" placeholder on the store page. Two tester promises, or none, fail the
+  gate; the packet accepts one.
+- What does not change: D6 (free beta, every feature included) and D3 (superseded). The free core
+  list in `docs/BETA.md` is checked against `headwaters.core.features.CORE_FEATURES`, so the tester
+  promise cannot silently pull a core feature behind the paywall it describes.

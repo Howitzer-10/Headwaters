@@ -44,6 +44,7 @@ class Cline(HostAdapter):
     id = "cline"
     title = "Cline (VS Code extension, Desktop and CLI)"
     scope = "user"
+    template_names = ("cline_mcp",)
 
     def detect(self, ctx: Context) -> bool:
         return cline_dir(ctx).is_dir() or (ctx.project / ".clinerules").is_dir()

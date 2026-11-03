@@ -19,6 +19,7 @@ from headwaters.cli import (
     cmd_mcp,
     cmd_models,
     cmd_pick,
+    cmd_release,
     cmd_scope,
     cmd_status,
 )
@@ -73,6 +74,7 @@ cmd_daemon.register(app)
 cmd_doctor.register(app)
 cmd_mcp.register(app)
 cmd_install.register(app)
+cmd_release.register(app)
 cmd_scope.register(app)
 cmd_features.register(app)
 cmd_models.register(models_app)
