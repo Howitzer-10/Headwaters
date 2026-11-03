@@ -3,7 +3,8 @@
 ``headwaters keys test`` asks a provider whether it accepts a stored key. The request carries the
 key and nothing else: ``GET {openrouter}/key`` (its balance endpoint), ``GET /v1/models`` on
 Anthropic and OpenAI, ``GET {base_url}/models`` on a user-configured endpoint. A provider with no
-known metadata endpoint is reported ``unsupported`` instead of being called blindly.
+known metadata endpoint is reported ``unsupported`` instead of being called blindly. A provider
+registered in ``catalog.providers`` (HDW-514) names its own ``metadata_url``, or none.
 
 Results carry a status word and a detail that are safe to show and to log: the key appears in
 neither, and a failed request keeps only the host and the HTTP code from ``SourceError``.
@@ -21,6 +22,7 @@ from headwaters.core.catalog.discovery import network_block
 from headwaters.core.catalog.http import HttpClient, SourceError, UrllibHttp
 from headwaters.core.catalog.schema import Endpoints
 from headwaters.core.keys import KeyStore
+from headwaters.core.providers import Registry, default_registry
 from headwaters.core.rules import Rules
 
 __all__ = ["PingResult", "check_keys", "ping", "target_for"]
@@ -53,7 +55,10 @@ class PingResult:
 
 
 def target_for(
-    provider: str, rules: Rules, openrouter_base: str | None = None
+    provider: str,
+    rules: Rules,
+    openrouter_base: str | None = None,
+    registry: Registry | None = None,
 ) -> tuple[str, str] | None:
     """``(url, header style)`` for a provider, or ``None`` when no safe ping endpoint is known."""
     if provider == "openrouter":
@@ -66,6 +71,9 @@ def target_for(
     for endpoint in rules.models.openai_compatible:
         if endpoint.name == provider:
             return f"{endpoint.base_url.rstrip('/')}/models", "bearer"
+    entry = registry.get(provider) if registry is not None else None
+    if entry is not None and entry.metadata_url is not None:
+        return entry.metadata_url, entry.auth_style
     return None
 
 
@@ -107,6 +115,7 @@ def check_keys(
     http: HttpClient | None = None,
     openrouter_base: str | None = None,
     aliases: Sequence[str] | None = None,
+    registry: Registry | None = None,
 ) -> list[PingResult]:
     """Test every key with a value (or just ``aliases``). Blocked means nothing was sent."""
     client = http if http is not None else UrllibHttp()
@@ -119,12 +128,13 @@ def check_keys(
     blocked = network_block(rules)
     if blocked is not None:
         return [PingResult(alias, provider, BLOCKED, blocked) for alias, provider in chosen]
+    providers = registry if registry is not None else default_registry()
     results: list[PingResult] = []
     for alias, provider in chosen:
         secret = store.secret(alias)
         if not secret:
             continue
-        target = target_for(provider, rules, openrouter_base)
+        target = target_for(provider, rules, openrouter_base, providers)
         if target is None:
             results.append(
                 PingResult(alias, provider, UNSUPPORTED, "no validation endpoint is known")

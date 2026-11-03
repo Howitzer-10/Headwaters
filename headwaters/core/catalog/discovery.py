@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from headwaters.core.catalog import updater
 from headwaters.core.catalog.http import HttpClient, SourceError, UrllibHttp
 from headwaters.core.catalog.merge import ModelRecord, merge_models
-from headwaters.core.catalog.schema import Catalog
+from headwaters.core.catalog.schema import Catalog, ProviderEntry
 from headwaters.core.catalog.sources import (
     LiveModel,
     ollama_models,
@@ -26,8 +26,11 @@ from headwaters.core.catalog.sources import (
     opencode_config_paths,
     opencode_models,
     openrouter_models,
+    registry_models,
 )
+from headwaters.core.keys import KeyStore
 from headwaters.core.ollama_remote import RemotePatterns, remote_patterns_from
+from headwaters.core.providers import Registry
 from headwaters.core.rules import Rules
 from headwaters.core.state import Database
 from headwaters.core.state_misc import kv_get, kv_set
@@ -70,6 +73,8 @@ def _gather(
     result: RefreshResult,
     remote_patterns: RemotePatterns = (),
     openrouter_base_url: str | None = None,
+    providers: Iterable[ProviderEntry] = (),
+    key_for: Callable[[str], str | None] | None = None,
 ) -> dict[str, list[LiveModel]]:
     """Live models by source name. Only sources that answered appear in the result."""
     found: dict[str, list[LiveModel]] = {}
@@ -111,6 +116,14 @@ def _gather(
             found[key] = openai_compatible_models(http, endpoint, env)
         except SourceError as exc:
             result.warnings.append(f"{endpoint.name}: {exc}")
+    for entry in providers:
+        key = key_for(entry.name) if key_for is not None else env.get(entry.env_var)
+        if not key and entry.key_required:
+            continue  # nothing a keyless call could use; stay quiet until a key is set
+        try:
+            found[f"provider:{entry.name}"] = registry_models(http, entry, key or None)
+        except SourceError as exc:
+            result.warnings.append(f"{entry.name}: {exc}")
     return found
 
 
@@ -136,18 +149,26 @@ def refresh_models(
     env: Mapping[str, str] | None = None,
     home: Path | None = None,
     now: float | None = None,
+    providers: Iterable[ProviderEntry] = (),
+    key_for: Callable[[str], str | None] | None = None,
 ) -> RefreshResult:
     """Discover, merge and persist. Never raises because a source is down."""
     result = RefreshResult()
     stamp = time.time() if now is None else now
+    environment = os.environ if env is None else env
+    registered = list(providers) or list(catalog.providers)
+    if key_for is None and registered and env is None:
+        key_for = KeyStore(rules, env=environment, registry=Registry(registered)).api_key_for
     live = _gather(
         rules,
         http or UrllibHttp(),
-        os.environ if env is None else env,
+        environment,
         home or Path.home(),
         result,
         remote_patterns_from(catalog),
         catalog.endpoints.openrouter_base_url,
+        registered,
+        key_for,
     )
     result.sources_ok = sorted(live)
     flat = [m for models in live.values() for m in models]

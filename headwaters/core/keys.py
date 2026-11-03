@@ -9,8 +9,11 @@ Only aliases and provider names are stored in the index entry; never a secret. N
 module logs a value: messages carry the alias.
 
 The environment fallback reads the standard variables (``OPENROUTER_API_KEY``,
-``ANTHROPIC_API_KEY``, ``OPENAI_API_KEY``) and each ``models.openai_compatible`` endpoint's
-``api_key_env``, so an install that only exports variables keeps working. A key saved in the
+``ANTHROPIC_API_KEY``, ``OPENAI_API_KEY``), the variable of each ``catalog.providers`` entry
+(HDW-514, so a new provider needs no ``rules.yaml`` edit) and each ``models.openai_compatible``
+endpoint's ``api_key_env``, so an install that only exports variables keeps working. Those
+variable names are a machine contract: ``providers()`` is what the CLI and the dashboard show,
+and it carries plain provider names only. A key saved in the
 credential store wins over the variable of the same alias, because ``headwaters keys set`` is the
 explicit answer.
 """
@@ -25,14 +28,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from headwaters.core.providers import Registry, default_registry
 from headwaters.core.rules import Rules
 
 __all__ = [
     "CACHE_TTL_S",
+    "SHORT_FORMS",
     "STANDARD_ENV",
     "KeyInfo",
     "KeyStore",
     "KeyStoreError",
+    "ProviderInfo",
     "default_backend",
     "mask",
 ]
@@ -47,6 +53,15 @@ STANDARD_ENV: dict[str, str] = {
     "openrouter": "OPENROUTER_API_KEY",
 }
 _ALIAS = re.compile(r"^[A-Za-z0-9_.-]+$")
+# Short spellings a person may type for a provider; they resolve to the canonical name.
+SHORT_FORMS: dict[str, str] = {
+    "hf": "huggingface",
+    "or": "openrouter",
+    "nim": "nvidia",
+    "poll": "pollinations",
+}
+# Providers the router knows without a key: they have no key to save, but they are real names.
+_KEYLESS = (("opencode", "free_cloud"), ("ollama", "local"))
 # A credential-store read is not free on Windows (the timer, the router and the CLI all read it),
 # so metadata and resolved values are cached briefly. Saving or removing a key clears its own
 # entry at once; another process's change is picked up within this window.
@@ -107,6 +122,18 @@ class KeyInfo:
     masked: str
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderInfo:
+    """One provider as a person sees it: the plain name, whether it needs a key, its tier.
+
+    The environment variable behind a provider is deliberately not here: it is a machine detail.
+    """
+
+    name: str
+    key_required: bool
+    tier: str  # "paid" | "free_cloud" | "local"
+
+
 class KeyStore:
     """Aliases -> secrets, backed by the OS credential store with an environment fallback."""
 
@@ -117,8 +144,10 @@ class KeyStore:
         env: Mapping[str, str] | None = None,
         backend: KeyringBackendLike | None = None,
         ttl: float = CACHE_TTL_S,
+        registry: Registry | None = None,
     ) -> None:
         self._rules = rules or Rules()
+        self._registry = registry
         self._env = os.environ if env is None else env
         self._backend = backend
         self._ttl = ttl
@@ -130,6 +159,54 @@ class KeyStore:
         return f"KeyStore(aliases={len(self._records())})"
 
     # ------------------------------------------------------------------ lookups
+
+    def providers(self) -> list[ProviderInfo]:
+        """Every provider name a person can use, in one place.
+
+        This is the single source of provider names for the CLI (``keys set|list|test``) and the
+        dashboard and tray, so the two surfaces cannot drift: the built-in providers, then each
+        ``catalog.providers`` entry (HDW-514), then each ``models.openai_compatible`` endpoint,
+        then the providers that need no key. Names are plain lower-case words; the environment
+        variable a provider falls back to is never part of the answer.
+        """
+        found: dict[str, ProviderInfo] = {}
+        for name in STANDARD_ENV:
+            found[name] = ProviderInfo(name, True, "paid")
+        for entry in self._providers():
+            found[entry.name] = ProviderInfo(entry.name, entry.key_required, entry.tier)
+        for endpoint in self._rules.models.openai_compatible:
+            needs_key = bool(endpoint.api_key_env)
+            found[endpoint.name] = ProviderInfo(endpoint.name, needs_key, "free_cloud")
+        for name, tier in _KEYLESS:
+            found.setdefault(name, ProviderInfo(name, False, tier))
+        return list(found.values())
+
+    def provider_name(self, text: str) -> str | None:
+        """The canonical provider for what a person typed, or ``None`` when it is not one.
+
+        Accepts the plain name, a short form (``hf``) and the environment-variable spelling
+        (``NVIDIA_API_KEY``), so a second alias is never stored for the same provider.
+        """
+        typed = text.strip()
+        names = {p.name for p in self.providers()}
+        if typed in names:
+            return typed
+        lowered = typed.lower()
+        if lowered in names:
+            return lowered
+        short = SHORT_FORMS.get(lowered)
+        if short in names:
+            return short
+        spellings = {var.lower(): name for name, var in STANDARD_ENV.items()}
+        spellings.update({e.env_var.lower(): e.name for e in self._providers()})
+        spellings.update(
+            {
+                e.api_key_env.lower(): e.name
+                for e in self._rules.models.openai_compatible
+                if e.api_key_env
+            }
+        )
+        return spellings.get(lowered)
 
     def api_key_for(self, provider: str) -> str | None:
         """The secret a call to ``provider`` uses, from the store or its env variable."""
@@ -259,8 +336,15 @@ class KeyStore:
         found.update(self._read_index())
         return found
 
+    def _providers(self) -> Registry:
+        if self._registry is None:
+            self._registry = default_registry()
+        return self._registry
+
     def _default_records(self) -> dict[str, _Record]:
         found = {name: _Record(name, name, var) for name, var in STANDARD_ENV.items()}
+        for entry in self._providers():
+            found[entry.name] = _Record(entry.name, entry.name, entry.env_var)
         for endpoint in self._rules.models.openai_compatible:
             found[endpoint.name] = _Record(endpoint.name, endpoint.name, endpoint.api_key_env)
         return found
@@ -272,7 +356,7 @@ class KeyStore:
         for endpoint in self._rules.models.openai_compatible:
             if endpoint.name == provider:
                 return endpoint.api_key_env
-        return None
+        return self._providers().env_var(provider)
 
     def _info(self, record: _Record) -> KeyInfo:
         value = self.secret(record.alias)
@@ -340,7 +424,7 @@ class KeyStore:
             if not isinstance(alias, str) or not _ALIAS.fullmatch(alias):
                 continue
             provider = alias
-            env_var = STANDARD_ENV.get(alias)
+            env_var = STANDARD_ENV.get(alias) or self._providers().env_var(alias)
             if isinstance(spec, dict):
                 given_provider = spec.get("provider")
                 if isinstance(given_provider, str) and given_provider:
@@ -349,7 +433,7 @@ class KeyStore:
                 if isinstance(given_env, str):
                     env_var = given_env or None
                 elif given_env is None:
-                    env_var = STANDARD_ENV.get(provider)
+                    env_var = STANDARD_ENV.get(provider) or self._providers().env_var(provider)
             records[alias] = _Record(alias, provider, env_var)
         return records
 

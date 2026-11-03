@@ -5,6 +5,12 @@ never written to ``rules.yaml``, a log, a database row or a diagnostic bundle. `
 ``set`` only ever print the masked value; the secret itself is read from a hidden prompt or from
 stdin (``--stdin``), never from the command line, so it stays out of the shell history.
 
+Provider names are one canonical set (``KeyStore.providers()``, shared with the dashboard): a
+person types ``nvidia``, never an environment-variable name, and no text here prints one. The
+``--json`` payload keeps ``env_var`` as a machine contract. A short form (``hf``) or an
+environment-variable spelling is normalised to the provider, and a name that is neither a
+provider nor an existing alias is refused instead of storing a key the router can never spend.
+
 ``test`` asks the provider whether it accepts the key: one metadata request, no prompt content,
 and no request at all while the network is blocked (airplane mode, Private lock, local scope).
 """
@@ -37,6 +43,33 @@ def _row(row: KeyInfo) -> dict[str, Any]:
     }
 
 
+def _resolve_names(
+    store: KeyStore, alias: str, provider: str | None, as_json: bool
+) -> tuple[str, str | None]:
+    """``(alias, provider)`` to save under, from what a person typed.
+
+    A provider name, a short form (``hf``) or an environment-variable spelling all become the one
+    canonical provider, so no second alias is stored. A name that is neither a provider nor an
+    existing alias, with no ``--provider``, would store a key the router can never spend: refuse.
+    """
+    typed = alias.strip()
+    if provider is not None:
+        return typed, store.provider_name(provider) or provider.strip()
+    if typed in store.aliases():
+        return typed, None
+    canonical = store.provider_name(typed)
+    if canonical is not None:
+        return canonical, None
+    known = ", ".join(info.name for info in store.providers())
+    fail(
+        "unknown_provider",
+        f"{typed} is not a provider Headwaters can call. Known providers: {known}.",
+        fix="for your own alias add --provider, e.g. headwaters keys set work --provider nvidia",
+        exit_code=EXIT_CONFIG,
+        as_json=as_json,
+    )
+
+
 def _read_secret(from_stdin: bool) -> str:
     if from_stdin:
         return sys.stdin.readline().rstrip("\r\n")
@@ -47,34 +80,49 @@ def register(keys_app: typer.Typer) -> None:
     @keys_app.command("set")
     def keys_set(
         alias: Annotated[
-            str, typer.Argument(help="Name for the key: a provider (openrouter) or your own.")
+            str,
+            typer.Argument(
+                help="Provider to save a key for (nvidia, openrouter, ...) or your own alias."
+            ),
         ],
         provider: Annotated[
             str | None,
-            typer.Option("--provider", "-p", help="Provider the key is for (default: the alias)."),
+            typer.Option(
+                "--provider",
+                "-p",
+                help="Provider a custom alias is for, to keep several keys for one provider.",
+            ),
         ] = None,
         env_var: Annotated[
             str | None,
-            typer.Option("--env", help="Environment variable this key falls back to."),
+            typer.Option("--env", help="Environment variable this key falls back to (advanced)."),
         ] = None,
         stdin: Annotated[
             bool, typer.Option("--stdin", help="Read the key from stdin (for scripts).")
         ] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
     ) -> None:
-        """Save a key in the OS credential store (it wins over the environment variable)."""
+        """Save a key in the OS credential store (it wins over the environment).
+
+        Example: headwaters keys set nvidia
+        """
         rules = runtime.load_rules_or_exit()
+        store = key_store(rules)
+        name, chosen = _resolve_names(store, alias, provider, as_json)
         secret = _read_secret(stdin)
         try:
-            saved = key_store(rules).save(alias, secret, provider=provider, env_var=env_var)
+            saved = store.save(name, secret, provider=chosen, env_var=env_var)
         except KeyStoreError as exc:
             fail("key_not_saved", str(exc), exit_code=EXIT_CONFIG, as_json=as_json)
         if as_json:
             emit_json({"ok": True, **_row(saved)})
             return
-        typer.echo(f"Saved {saved.alias} for {saved.provider} ({saved.masked}).")
+        if saved.alias == saved.provider:
+            typer.echo(f"Saved {saved.provider} ({saved.masked}).")
+        else:
+            typer.echo(f"Saved {saved.alias} for {saved.provider} ({saved.masked}).")
         if saved.env_var:
-            typer.echo(f"Falls back to ${saved.env_var} when the store is unavailable.")
+            typer.echo("If no key is saved, the provider's environment variable is used instead.")
 
     @keys_app.command("list")
     def keys_list(
@@ -87,7 +135,7 @@ def register(keys_app: typer.Typer) -> None:
             emit_json({"ok": True, "keys": [_row(row) for row in rows]})
             return
         if not rows:
-            typer.echo("No keys. Save one with: headwaters keys set openrouter")
+            typer.echo("No keys. Save one with: headwaters keys set nvidia")
             return
         console = make_console()
         grid = table(None, "Alias", "Provider", "Source", "Key", no_wrap=["Alias", "Provider"])
@@ -102,7 +150,10 @@ def register(keys_app: typer.Typer) -> None:
     ) -> None:
         """Delete a stored key. The environment variable, if set, is used again."""
         rules = runtime.load_rules_or_exit()
-        removed = key_store(rules).remove(alias)
+        store = key_store(rules)
+        if alias not in store.aliases():
+            alias = store.provider_name(alias) or alias
+        removed = store.remove(alias)
         if not removed:
             fail(
                 "key_not_found",
@@ -125,6 +176,8 @@ def register(keys_app: typer.Typer) -> None:
         """Ask each provider whether it accepts the stored key. Sends no prompt content."""
         rules = runtime.load_rules_or_exit()
         store = key_store(rules)
+        if alias is not None and alias not in store.aliases():
+            alias = store.provider_name(alias) or alias
         if alias is not None and alias not in store.aliases():
             fail(
                 "key_not_found",
@@ -156,7 +209,7 @@ def register(keys_app: typer.Typer) -> None:
             )
         else:
             if not results:
-                typer.echo("No keys to test. Save one with: headwaters keys set openrouter")
+                typer.echo("No keys to test. Save one with: headwaters keys set nvidia")
                 return
             console = make_console()
             grid = table(None, "Alias", "Provider", "Status", "Detail", no_wrap=["Alias", "Status"])

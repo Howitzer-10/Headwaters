@@ -150,6 +150,47 @@ class Endpoints(_Model):
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", min_length=1)
 
 
+ProviderTier = Literal["free_cloud", "paid"]
+# Names the router already uses for providers that are wired in code (or never routed).
+RESERVED_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "ollama", "opencode"})
+
+
+class ProviderEntry(_Model):
+    """One OpenAI-compatible cloud provider, registered as data (HDW-514).
+
+    Adding a provider is a catalog entry plus a test: the key store, ``keys test``, discovery and
+    the executor all read this row. ``tier`` is what an unmarked model of the provider costs:
+    ``paid`` keeps every model out of the free scope unless the provider's own listing marks it
+    free and ``honor_free_markers`` is on. Every row names its docs page and the day it was read.
+    """
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    title: str = Field(min_length=1)
+    env_var: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    base_url: str = Field(pattern=r"^https://\S+$")
+    auth_style: Literal["bearer"] = "bearer"
+    metadata_url: str | None = Field(default=None, pattern=r"^https://\S+$")
+    models_path: str = Field(default="/models", pattern=r"^/\S*$")
+    tier: ProviderTier
+    honor_free_markers: bool = False
+    key_required: bool = True
+    skip_id_pattern: str | None = None
+    retains_data: bool | None = None
+    free_notes: str | None = None
+    source_url: str = Field(pattern=r"^https://\S+$")
+    checked: str = Field(pattern=_DATE)
+    verify: bool = False
+
+    @field_validator("skip_id_pattern")
+    @classmethod
+    def _skip_is_regex(cls, value: str | None) -> str | None:
+        return value if value is None else _check_regex(value)
+
+    @property
+    def models_url(self) -> str:
+        return self.base_url.rstrip("/") + self.models_path
+
+
 class SubscriptionRate(_Model):
     plan: str = Field(min_length=1)
     usd_per_month: float = Field(ge=0)
@@ -243,11 +284,26 @@ class Catalog(_Model):
     subscription_rates: list[SubscriptionRate] = Field(default_factory=list)
     analyzer_hints: AnalyzerHints = Field(default_factory=AnalyzerHints)
     endpoints: Endpoints = Field(default_factory=Endpoints)
+    providers: list[ProviderEntry] = Field(default_factory=list)
     prompt_bank_ref: str | None = None
 
     @model_validator(mode="after")
     def _cross_references(self) -> Self:
         problems: list[str] = []
+        seen_names: set[str] = set()
+        seen_env: dict[str, str] = {}
+        for provider in self.providers:
+            if provider.name in seen_names:
+                problems.append(f"providers: name {provider.name!r} is listed twice")
+            seen_names.add(provider.name)
+            if provider.name in RESERVED_PROVIDER_NAMES:
+                problems.append(f"providers: {provider.name!r} is a reserved provider name")
+            if provider.env_var in seen_env:
+                problems.append(
+                    f"providers: {provider.env_var} is used by {seen_env[provider.env_var]!r} "
+                    f"and {provider.name!r}"
+                )
+            seen_env.setdefault(provider.env_var, provider.name)
         names: dict[str, int] = {}
         for index, entry in enumerate(self.models):
             for name in {entry.id.lower(), *(a.lower() for a in entry.aliases)}:

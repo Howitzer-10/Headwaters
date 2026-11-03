@@ -530,6 +530,137 @@
       "title": "NamedPattern",
       "type": "object"
     },
+    "ProviderEntry": {
+      "additionalProperties": false,
+      "description": "One OpenAI-compatible cloud provider, registered as data (HDW-514).\n\nAdding a provider is a catalog entry plus a test: the key store, ``keys test``, discovery and\nthe executor all read this row. ``tier`` is what an unmarked model of the provider costs:\n``paid`` keeps every model out of the free scope unless the provider's own listing marks it\nfree and ``honor_free_markers`` is on. Every row names its docs page and the day it was read.",
+      "properties": {
+        "auth_style": {
+          "const": "bearer",
+          "default": "bearer",
+          "title": "Auth Style",
+          "type": "string"
+        },
+        "base_url": {
+          "pattern": "^https://\\S+$",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "checked": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Checked",
+          "type": "string"
+        },
+        "env_var": {
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "title": "Env Var",
+          "type": "string"
+        },
+        "free_notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Notes"
+        },
+        "honor_free_markers": {
+          "default": false,
+          "title": "Honor Free Markers",
+          "type": "boolean"
+        },
+        "key_required": {
+          "default": true,
+          "title": "Key Required",
+          "type": "boolean"
+        },
+        "metadata_url": {
+          "anyOf": [
+            {
+              "pattern": "^https://\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata Url"
+        },
+        "models_path": {
+          "default": "/models",
+          "pattern": "^/\\S*$",
+          "title": "Models Path",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "retains_data": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retains Data"
+        },
+        "skip_id_pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Id Pattern"
+        },
+        "source_url": {
+          "pattern": "^https://\\S+$",
+          "title": "Source Url",
+          "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "free_cloud",
+            "paid"
+          ],
+          "title": "Tier",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "env_var",
+        "base_url",
+        "tier",
+        "source_url",
+        "checked"
+      ],
+      "title": "ProviderEntry",
+      "type": "object"
+    },
     "Scores": {
       "additionalProperties": false,
       "properties": {
@@ -879,6 +1010,13 @@
       ],
       "default": null,
       "title": "Prompt Bank Ref"
+    },
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/ProviderEntry"
+      },
+      "title": "Providers",
+      "type": "array"
     },
     "schema_version": {
       "minimum": 1,

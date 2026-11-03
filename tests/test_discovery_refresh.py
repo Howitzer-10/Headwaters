@@ -121,7 +121,9 @@ def test_source_errors_never_escape(db: Database, catalog: Catalog) -> None:
             ("GET", f"{OR}/models"): SourceError("HTTP 500"),
         }
     )
-    assert len(refresh(db, catalog, broken).warnings) == 2
+    # The seed's keyless Kilo source (HDW-514) has no route here, so it adds its own warning.
+    warnings = refresh(db, catalog, broken).warnings
+    assert len([w for w in warnings if not w.startswith("kilo:")]) == 2
 
 
 def test_airplane_and_local_lock_skip_cloud_but_keep_local(db: Database, catalog: Catalog) -> None:

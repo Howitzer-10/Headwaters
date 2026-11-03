@@ -92,3 +92,26 @@ that name it.
 | Unit-file quoting follows the XDG desktop-entry rules: a whole word may be wrapped in double quotes, quotes are removed, C-style escapes are supported and backslashes must be doubled (`\\`, `\"`), so a path with a space or a backslash has to be escaped, not just wrapped | official systemd docs: systemd.syntax, "Quoting" | docs as of 2026-11 | HDW-406 |
 | `systemctl enable --now <unit>` enables the unit and starts it in one command, while `enable` alone only writes the `WantedBy=` symlink and leaves starting to a second call | official systemctl docs, `enable` | docs as of 2026-11 | HDW-406 |
 | `loginctl enable-linger <user>` starts that user's manager at boot and keeps it after the last session closes; without linger a user unit stops at logout, and the manager only exists while a session does | official loginctl docs, `enable-linger` | docs as of 2026-11 | HDW-406 |
+
+## Cloud provider APIs (HDW-514)
+
+All rows read from each provider's own public docs or public endpoints on 2026-11-03. A row here is the only place a base URL, env var or free-tier claim in `catalog.providers` is allowed to come from.
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| NVIDIA NIM: base `https://integrate.api.nvidia.com/v1`, `POST /chat/completions`, bearer auth, key env `NVIDIA_API_KEY` | NVIDIA API reference and its examples (docs.api.nvidia.com) | docs as of 2026-11 | HDW-514 |
+| NVIDIA `GET /v1/models` answers without a key and returns only `id`, `object`, `created`, `owned_by` (85 models), so it carries no capability or tier data and cannot check a key | anonymous GET, read the body | 2026-11-03 | HDW-514 |
+| NVIDIA: every model on build.nvidia.com is free to prototype with, up to 40 requests per minute on most models, no per-token billing; the free endpoints are trial-only and logged | help-center FAQ `https://build.nvidia.com/api/runtime/content/help-center-faq.yaml`; Kilo docs for the trial terms | docs as of 2026-11 | HDW-514 |
+| Hugging Face: base `https://router.huggingface.co/v1`, bearer `HF_TOKEN` with the "Make calls to Inference Providers" permission | Inference Providers docs and security-tokens docs | docs as of 2026-11 | HDW-514 |
+| Hugging Face `GET /v1/models` answers without a key: per model `providers[]` with `status`, `context_length`, `pricing.input/output` (USD per million tokens), `is_free`, `supports_tools`, `supports_structured_output`, plus `architecture.input_modalities/output_modalities`; no model had `is_free: true` (127 models) | anonymous GET, read the body | 2026-11-03 | HDW-514 |
+| Hugging Face `GET https://huggingface.co/api/whoami-v2` is in the Hub OpenAPI spec and answers 401 without a token, so it is a safe key check | Hub OpenAPI spec; anonymous GET | 2026-11-03 | HDW-514 |
+| Hugging Face free accounts have no included Inference Providers credits | pricing page of the Inference Providers docs | docs as of 2026-11 | HDW-514 |
+| Mistral: base `https://api.mistral.ai/v1`, bearer `MISTRAL_API_KEY`; `GET /v1/models` answers 401 without a key and lists models with `capabilities` (`completion_chat`, `function_calling`, `vision`) and no context field | Mistral API docs; anonymous GET | docs as of 2026-11 | HDW-514 |
+| Mistral documents a free mode with usage and rate limits, but nothing in the API distinguishes a free key from a paid one | Mistral quickstart | docs as of 2026-11 | HDW-514 |
+| Pollinations: OpenAI-compatible base `https://gen.pollinations.ai/v1`, bearer key `POLLINATIONS_API_KEY` (secret keys start `sk_`); spend is metered in Pollen | `https://gen.pollinations.ai/llms.txt`, OpenAPI spec | docs as of 2026-11 | HDW-514 |
+| Pollinations `GET /v1/models` answers without a key (about 355 KB) with `id`, `input_modalities`, `output_modalities`, `paid_only`, `tools`, `reasoning`, `context_length`, `pricing` (in Pollen) | anonymous GET, read the body | 2026-11-03 | HDW-514 |
+| Pollinations documents no keyless generation (absence check across `llms.txt`, the OpenAPI spec and the docs pages) | read all three | 2026-11-03 | HDW-514 |
+| Kilo Gateway: base `https://ai-gateway.kilo.ai/api/v1`, bearer `KILO_API_KEY`; `GET /models` answers without a key (379 models, OpenRouter-shaped: `architecture`, `context_length`, `supported_parameters`, `pricing`, `isFree`) | `https://kilo.ai/docs/gateway/api-reference`; anonymous GET | 2026-11-03 | HDW-514 |
+| Kilo: models marked free (`:free` suffix, `isFree: true`) work without a key at 200 requests per hour per IP; paid models need a key | Kilo gateway docs | docs as of 2026-11 | HDW-514 |
+| OpenCode: no page shows that a key changes the 403 non-OpenCode clients get for free-tier models (absence check; the docs say free-tier chat models require OpenCode) | opencode.ai/docs/zen and the Console pages | docs as of 2026-11 | HDW-514 |
+| litellm's `openai/<model>` route with an `api_base` and no `api_key` falls back to `OPENAI_API_KEY`, so a registered provider with no key must send a placeholder instead of nothing | litellm docs for OpenAI-compatible endpoints (not run live) | litellm as pinned | HDW-514 |
