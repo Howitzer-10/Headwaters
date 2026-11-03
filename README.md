@@ -39,3 +39,18 @@ claude
 `ANTHROPIC_MODEL` matters: Claude Code would otherwise ask for a Claude model name, which the
 gateway pins instead of routing — map that name in `models.aliases` to have it routed. Token
 counting (`POST /v1/messages/count_tokens`) is not served yet.
+
+## Privacy and the daemon token
+
+`headwaters doctor` checks the machine it runs on and prints one row per area (Ollama, GPU, ports,
+the daemon, the token, saved keys, the catalog, git, the MCP launcher). `--host <host>` adds the
+three rows a host of that kind actually sees, and `--bundle` writes a redacted zip to the state
+directory for support: no prompt, no key and no path outside the Headwaters app directories.
+
+Private Mode (airplane mode, the Private lock, or a local default scope) stops Headwaters from
+calling the cloud, but Ollama can still run a cloud model on its own. Set `OLLAMA_NO_CLOUD=1`, or
+`"disable_ollama_cloud": true` in `~/.ollama/server.json`, and restart Ollama to close that.
+
+On Windows `daemon.token` relies on the ACL of your per-user profile folder: the file has no
+explicit ACL of its own, so another process of the same user can read it. Treat the token like a
+password, and do not share or copy the profile folder.

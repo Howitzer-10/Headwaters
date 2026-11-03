@@ -269,3 +269,176 @@ def test_stop_reports_a_refused_shutdown() -> None:
     result = stop_daemon(find=lambda: Refusing())  # type: ignore[arg-type,return-value]
     assert result.outcome == "failed"
     assert "401" in result.message
+
+
+def test_start_names_an_invalid_rules_file() -> None:
+    """FU-202-6: exit 2 is a bad rules.yaml, not a mystery exit code."""
+    clock = Clock()
+    result = start_daemon(
+        find=lambda: None,
+        spawn=lambda argv: Child(exit_code=2),  # type: ignore[arg-type,return-value]
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "failed"
+    assert "code 2" in result.message
+    assert "rules.yaml could not be read or parsed" in result.message
+
+
+def test_start_names_the_lock_holder() -> None:
+    clock = Clock()
+    result = start_daemon(
+        find=lambda: None,
+        spawn=lambda argv: Child(exit_code=3),  # type: ignore[arg-type,return-value]
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert "code 3" in result.message
+    assert "holds the lock" in result.message
+    assert "headwaters stop --force" in result.message
+
+
+def test_start_names_a_locked_out_port_range() -> None:
+    clock = Clock()
+    result = start_daemon(
+        find=lambda: None,
+        spawn=lambda argv: Child(exit_code=4),  # type: ignore[arg-type,return-value]
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert "code 4" in result.message
+    assert "no API port was free" in result.message
+    assert "excludedportrange" in result.message
+
+
+def test_start_quotes_an_unknown_exit_code() -> None:
+    clock = Clock()
+    result = start_daemon(
+        find=lambda: None,
+        spawn=lambda argv: Child(exit_code=7),  # type: ignore[arg-type,return-value]
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.message.startswith("The daemon exited with code 7")
+    assert "headwaters.log" in result.message
+
+
+def test_force_stop_kills_the_pid_when_the_api_does_not_answer() -> None:
+    """FU-201-10: a daemon.json that outlives its daemon is cleared by killing the pid."""
+    clock = Clock()
+    write_info(INFO)
+    state = {"alive": True}
+    killed: list[int] = []
+
+    def kill(pid: int) -> None:
+        killed.append(pid)
+        state["alive"] = False
+
+    result = stop_daemon(
+        force=True,
+        find=lambda: None,
+        alive=lambda pid: state["alive"],
+        kill=kill,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "forced"
+    assert killed == [INFO.pid]
+    assert result.info is not None
+    assert result.info.pid == INFO.pid
+    assert "kill" in result.message
+
+
+def test_force_stop_kills_after_a_refused_shutdown() -> None:
+    class Refusing(Found):
+        def shutdown(self) -> dict[str, Any]:
+            raise DaemonError("HTTP 401")
+
+    clock = Clock()
+    state = {"alive": True}
+    killed: list[int] = []
+
+    def kill(pid: int) -> None:
+        killed.append(pid)
+        state["alive"] = False
+
+    result = stop_daemon(
+        force=True,
+        find=lambda: Refusing(),  # type: ignore[arg-type,return-value]
+        alive=lambda pid: state["alive"],
+        kill=kill,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "forced"
+    assert killed == [INFO.pid]
+
+
+def test_force_stop_gives_up_when_the_pid_survives() -> None:
+    clock = Clock()
+    write_info(INFO)
+    result = stop_daemon(
+        force=True,
+        find=lambda: None,
+        alive=lambda pid: True,
+        kill=lambda pid: None,
+        timeout_s=2,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "failed"
+    assert "still running after a kill" in result.message
+
+
+def test_force_stop_never_kills_this_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    clock = Clock()
+    write_info(INFO)
+    monkeypatch.setattr(os, "getpid", lambda: INFO.pid)
+    result = stop_daemon(
+        force=True,
+        find=lambda: None,
+        alive=lambda pid: True,
+        kill=lambda pid: None,
+        timeout_s=1,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "failed"
+    assert "Refusing" in result.message
+
+
+def test_force_stop_reports_a_kill_that_raises() -> None:
+    def kill(pid: int) -> None:
+        raise OSError("access denied")
+
+    clock = Clock()
+    write_info(INFO)
+    result = stop_daemon(
+        force=True,
+        find=lambda: None,
+        alive=lambda pid: True,
+        kill=kill,
+        timeout_s=1,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "failed"
+    assert "Could not kill the daemon" in result.message
+    assert "access denied" in result.message
+
+
+def test_stop_without_force_never_kills() -> None:
+    clock = Clock()
+    write_info(INFO)
+    killed: list[int] = []
+    result = stop_daemon(
+        find=lambda: None,
+        alive=lambda pid: True,
+        kill=killed.append,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert result.outcome == "not_running"
+    assert killed == []

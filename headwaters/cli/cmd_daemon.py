@@ -63,10 +63,17 @@ def register(app: typer.Typer) -> None:
 
     @app.command("stop")
     def stop(
+        force: Annotated[
+            bool,
+            typer.Option(
+                "--force",
+                help="Kill the pid in daemon.json when the API does not answer.",
+            ),
+        ] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
     ) -> None:
-        """Stop the shared daemon gracefully."""
-        _report(stop_daemon(), as_json)
+        """Stop the shared daemon gracefully; --force kills it when the API is stuck."""
+        _report(stop_daemon(force=force), as_json)
 
     @app.command("daemon-status")
     def daemon_status(

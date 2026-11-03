@@ -68,6 +68,34 @@ def test_stop_and_not_running(cli_home: Path, monkeypatch: pytest.MonkeyPatch) -
     assert data["outcome"] == "not_running"
 
 
+def test_stop_force_passes_the_flag(cli_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def fake(**kw: Any) -> ControlResult:
+        seen.append(kw)
+        return ControlResult("forced", "The daemon (pid 77) was killed.", INFO)
+
+    monkeypatch.setattr(cmd_daemon, "stop_daemon", fake)
+    result = invoke("stop", "--force")
+    assert result.exit_code == 0
+    assert seen == [{"force": True}]
+    assert "was killed" in result.output
+
+
+def test_stop_without_force_does_not_ask_for_it(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def fake(**kw: Any) -> ControlResult:
+        seen.append(kw)
+        return ControlResult("stopped", "The daemon has stopped.", INFO)
+
+    monkeypatch.setattr(cmd_daemon, "stop_daemon", fake)
+    assert invoke("stop").exit_code == 0
+    assert seen == [{"force": False}]
+
+
 def test_status_when_nothing_runs(cli_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cmd_daemon, "find_running", lambda: None)
     assert "not running" in invoke("daemon-status").stdout

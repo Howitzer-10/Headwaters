@@ -12,6 +12,7 @@ import headwaters
 from headwaters.cli import (
     cmd_catalog,
     cmd_daemon,
+    cmd_doctor,
     cmd_features,
     cmd_keys,
     cmd_mcp,
@@ -68,6 +69,7 @@ def version_command(
 cmd_pick.register(app)
 cmd_status.register(app)
 cmd_daemon.register(app)
+cmd_doctor.register(app)
 cmd_mcp.register(app)
 cmd_scope.register(app)
 cmd_features.register(app)
