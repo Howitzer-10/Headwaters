@@ -7,6 +7,7 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 - If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
 - Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
 - **Decisions override packets.** Every packet carries a `DECISIONS OVERRIDE PACKET TEXT` block (just above `WORKFLOW FOR THIS TICKET`) that tells the session to read `docs/DECISIONS.md` and `docs/ASSUMPTIONS.md` first; D7 and later win over conflicting packet text, and tickets listed under "Deferred tickets" are not built. **If you regenerate the packets, put this block back into the Context Pack template**, or the protection is lost.
+- **HDW-516, HDW-517 and HDW-518** are capability packets for routing order and local-model residency, written on top of the unmerged HDW-513 work (`interleave_tiers`), which is **not** on `main`. **HDW-517 depends on HDW-516**: the downward cascade in 517 targets the descending order that 516 defines, so 516 lands first. HDW-518 is independent of both. All three default to today's behaviour unless opted in.
 - Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings. HDW-142 and later (HDW-144 to HDW-154 are the Phase 2.5 tickets) come from triage sessions (`docs/FOLLOWUPS.md`); their Part 3 names the follow-up.
 
 | Ticket | Title | Model | Design sections included | ≈ k tokens |
@@ -100,6 +101,9 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-508 | Opt-in usage report, feedback, survey ★ | Sonnet | v3.5 §D2, v3.5 §D4 | 1.7 |
 | HDW-509 | Beta 0.2 review gate | Opus | Full design + phase diff (attach) | 1.2 |
 | HDW-514 | Free cloud providers (registry as data and owner of provider identity, D18, NVIDIA NIM, HuggingFace, Pollinations, Mistral, OpenCode key, Kilo) | Sonnet | v3 §4.2, v3 §6, v3 §14, v3.3 §A, v3.3 §B1, v3.3 §F1 | 6.9 |
+| HDW-516 | Cloud-first descending order (tier order as a configured preference; default unchanged) | Sonnet | v3.3 §A, docs/reports/HDW-513.md | 3.4 |
+| HDW-517 | Draft-and-verify cascade (downward verified hand-off; provenance of the pass/fail signal; **depends on HDW-516**) | Sonnet + Opus | v3 §4.5, v3 §4.6, D10 | 3.0 |
+| HDW-518 | Local model keep-warm heartbeat (opt-in residency; reuses `Daemon._every`) | Sonnet | v3 §7, A-OLL-3, A-OLL-5 | 2.8 |
 | HDW-601 | Repo context engine A: symbol index ★ | Sonnet | v3.4 §D | 1.4 |
 | HDW-602 | Context engine B: embeddings and packing ★ | Sonnet | v3.4 §D | 1.5 |
 | HDW-603 | Analyzer layer 2: embedding kNN ★ | Sonnet | v3.4 §C | 1.5 |
