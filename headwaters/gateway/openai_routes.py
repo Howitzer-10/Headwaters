@@ -35,7 +35,12 @@ from headwaters.core.router_verify import schema_of
 from headwaters.core.rules import Rules
 from headwaters.core.scope import ScopeError
 from headwaters.gateway.aliases import requested
-from headwaters.gateway.anthropic_routes import MESSAGES_PATH, messages
+from headwaters.gateway.anthropic_routes import (
+    COUNT_TOKENS_PATH,
+    MESSAGES_PATH,
+    count_tokens,
+    messages,
+)
 from headwaters.gateway.models import card, find, listed
 from headwaters.gateway.server import HEALTH_PATH, GuardedApp
 from headwaters.gateway.shared import (
@@ -57,6 +62,7 @@ __all__ = [
     "ADVICE_HEADER",
     "BELOW_FLOOR_HEADER",
     "CHAT_PATH",
+    "COUNT_TOKENS_PATH",
     "IMAGE_URL_NOT_LOCAL",
     "MESSAGES_PATH",
     "MODELS_PATH",
@@ -104,12 +110,16 @@ def build_gateway_app(
     async def post_messages(request: Request) -> Response:
         return await messages(request, router, rules)
 
+    async def post_count_tokens(request: Request) -> Response:
+        return await count_tokens(request)
+
     routes = [
         Route(HEALTH_PATH, get_health, methods=["GET"]),
         Route(MODELS_PATH, get_models, methods=["GET"]),
         Route(f"{MODELS_PATH}/{{model_id:path}}", get_model, methods=["GET"]),
         Route(CHAT_PATH, post_chat, methods=["POST"]),
         Route(MESSAGES_PATH, post_messages, methods=["POST"]),
+        Route(COUNT_TOKENS_PATH, post_count_tokens, methods=["POST"]),
     ]
     return GuardedApp(Starlette(routes=routes), token)
 

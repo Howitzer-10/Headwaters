@@ -14,9 +14,14 @@ the way out; and the Messages stream (``message_start`` ... ``message_stop``), w
 event for a failure after the first token.
 
 Not translatable yet, because the core request carries no such fields: ``stop_sequences``,
-``top_p``, ``top_k``, ``tool_choice`` and ``metadata`` (FU-303-2), and ``/v1/messages/count_tokens``
-(FU-303-1). ``input_tokens`` is only known once the provider reports usage, so ``message_start``
-says 0 and the real count arrives on ``message_delta``.
+``top_p``, ``top_k``, ``tool_choice`` and ``metadata`` (FU-303-2). ``input_tokens`` is only known
+once the provider reports usage, so ``message_start`` says 0 and the real count arrives on
+``message_delta``.
+
+``POST /v1/messages/count_tokens`` is served (HDW-408) and is local arithmetic: the same body
+parsing as ``/v1/messages``, no route, no model choice and no provider call, so it answers even
+when no model can serve anything. The number is ``Analyzer.estimate_tokens``'s estimate rather
+than a provider-exact count, which is the right answer for an advisory budget figure.
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ from typing import Any, cast
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from headwaters.core.analyzer import Analyzer
+from headwaters.core.analyzer._extract import collect, dumps
 from headwaters.core.executor.types import ExecOptions, ExecResult, ToolCall
 from headwaters.core.logging import get_logger
 from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
@@ -42,9 +49,10 @@ from headwaters.gateway.shared import (
     meta_headers,
 )
 
-__all__ = ["MESSAGES_PATH", "messages"]
+__all__ = ["COUNT_TOKENS_PATH", "MESSAGES_PATH", "count_tokens", "messages"]
 
 MESSAGES_PATH = "/v1/messages"
+COUNT_TOKENS_PATH = "/v1/messages/count_tokens"
 MESSAGE_OBJECT = "message"
 EVENT_STREAM = "text/event-stream"
 NOT_READY_STATUS = 529
@@ -114,6 +122,37 @@ async def messages(
     return JSONResponse(
         _message(result),
         headers=meta_headers(result.decision, live_rules, result=result),
+    )
+
+
+# The default hints are the ones a catalog with no overrides gives, so counting needs no catalog.
+_COUNTER = Analyzer()
+
+
+async def count_tokens(request: Request) -> Response:
+    """One ``POST /v1/messages/count_tokens``: parse like the messages face, then count.
+
+    Nothing here routes, picks a model or calls a provider, so it answers even while the daemon
+    has no model to serve with. The body is read by the same helpers as ``/v1/messages``, so a
+    body that route accepts is counted the same way and one it refuses is refused here too.
+    """
+    body = await _json_body(request)
+    if isinstance(body, Response):
+        return body
+    try:
+        messages = _messages(body)
+        tools = _tools(body.get("tools"))
+    except MessageError as exc:
+        return _error(400, str(exc))
+    return JSONResponse({"input_tokens": _count(messages, tools)})
+
+
+def _count(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> int:
+    """The analyzer's own rule: prose at 4 chars/token, code and tools at 3.5, images per hint."""
+    collected = collect(messages, None)
+    tools_chars = len(dumps(tools)) if tools else 0
+    return _COUNTER.estimate_tokens(
+        collected.all_text, collected.code_extra_chars + tools_chars, collected.image_count
     )
 
 

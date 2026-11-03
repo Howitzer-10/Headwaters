@@ -31,6 +31,8 @@ from tests.executor_support import decision
 from tests.rebuild_support import ASK, TOKEN, DaemonRig
 
 BASE = "http://127.0.0.1:4000"
+HELLO = [{"role": "user", "content": "Hello, Claude"}]
+COUNTING = "/v1/messages/count_tokens"
 TOOL = {
     "name": "get_weather",
     "description": "the weather in a city",
@@ -172,6 +174,141 @@ def failure(router: Any) -> str:
             await client.close()
 
     return asyncio.run(go())
+
+
+def counted(router: Any, messages: Sequence[Any] | None = None, **kwargs: Any) -> int:
+    """One ``messages.count_tokens`` through a router stand-in, as the SDK sends it."""
+
+    async def go() -> int:
+        client = client_for(plain_app(router))
+        try:
+            asked = await client.messages.count_tokens(
+                model="headwaters/auto",
+                messages=cast("Any", HELLO if messages is None else list(messages)),
+                **kwargs,
+            )
+            return asked.input_tokens
+        finally:
+            await client.close()
+
+    return asyncio.run(go())
+
+
+def reply(
+    app: ASGIApp,
+    body: Any = None,
+    *,
+    raw: bytes | None = None,
+    key: str | None = TOKEN,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """One raw ``POST`` to the counting face: the bodies and headers the SDK will not send."""
+
+    async def go() -> tuple[int, dict[str, Any]]:
+        sent_headers = dict(headers or {})
+        if key is not None:
+            sent_headers["x-api-key"] = key
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url=BASE, headers=sent_headers
+        ) as http:
+            if raw is not None:
+                answer = await http.post(COUNTING, content=raw)
+            else:
+                answer = await http.post(COUNTING, json=body)
+            return answer.status_code, answer.json()
+
+    return asyncio.run(go())
+
+
+def test_a_token_count_answers_with_the_documented_shape() -> None:
+    router = Recording(answer=answered())
+    status, body = reply(plain_app(router), {"model": "headwaters/auto", "messages": HELLO})
+    assert status == 200
+    # One key and one key only, as MessageTokensCount defines; 13 chars of prose at 4 per token.
+    assert body == {"input_tokens": 4}
+    assert router.seen is None  # counting never reaches the router
+
+
+def test_the_sdk_counts_through_the_same_face() -> None:
+    assert counted(Recording(answer=answered())) == 4
+
+
+def test_a_count_answers_when_no_model_can_serve_anything() -> None:
+    """No router at all: there is nothing to route, so the count still comes back."""
+    assert counted(None) == 4
+
+
+def test_the_system_prompt_and_tools_are_in_the_count() -> None:
+    """The documented count spans messages, system prompt and tools, so both must add up."""
+    router = Recording(answer=answered())
+    prose_only = counted(router)
+    with_system = counted(router, system="You are a terse and precise assistant.")
+    with_tools = counted(router, tools=[TOOL])
+    assert prose_only == 4
+    assert with_system > prose_only
+    assert with_tools > prose_only
+    assert router.seen is None
+
+
+def test_an_image_is_counted_by_the_hint_not_by_its_bytes() -> None:
+    """A base64 payload must cost one image hint, not four thousand characters of text."""
+    image = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "A" * 4000},
+    }
+    _, body = reply(
+        plain_app(Recording(answer=answered())),
+        {"model": "headwaters/auto", "messages": [{"role": "user", "content": [image]}]},
+    )
+    assert body == {"input_tokens": 800}
+
+
+def test_a_count_body_the_messages_face_refuses_is_a_400_here_too() -> None:
+    router = Recording(answer=answered())
+    status, body = reply(
+        plain_app(router),
+        {
+            "model": "headwaters/auto",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "document", "source": {"type": "text", "data": "hi"}}],
+                }
+            ],
+        },
+    )
+    assert status == 400
+    assert body["type"] == "error"
+    assert body["error"]["type"] == "invalid_request_error"
+    assert "document" in body["error"]["message"]
+    assert router.seen is None
+
+
+def test_a_count_body_that_is_not_json_is_an_anthropic_400() -> None:
+    status, body = reply(plain_app(Recording(answer=answered())), raw=b"not json")
+    assert status == 400
+    assert body["type"] == "error"
+    assert body["error"]["type"] == "invalid_request_error"
+
+
+def test_a_count_body_without_a_model_still_counts() -> None:
+    """``model`` is carried for shape only: counting never picks, checks or routes a model."""
+    app = plain_app(Recording(answer=answered()))
+    assert reply(app, {"messages": HELLO}) == (200, {"input_tokens": 4})
+    assert reply(app, {"model": "some/unknown-model", "messages": HELLO}) == (
+        200,
+        {"input_tokens": 4},
+    )
+
+
+def test_a_count_request_keeps_the_token_and_the_loopback_guards() -> None:
+    app = plain_app(Recording(answer=answered()))
+    body = {"model": "headwaters/auto", "messages": HELLO}
+    assert reply(app, body, key="not-the-token")[0] == 401
+    assert reply(app, body, key=None)[0] == 401
+    assert reply(app, body, headers={"host": "example.com"})[0] == 421
+    assert reply(app, body, headers={"origin": "https://example.com"})[0] == 403
+    assert reply(app, body, key=None, headers={"authorization": f"Bearer {TOKEN}"})[0] == 200
 
 
 def test_a_messages_request_answers_with_one_text_block(rig: DaemonRig) -> None:

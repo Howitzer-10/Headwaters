@@ -86,7 +86,9 @@ claude
 
 `ANTHROPIC_MODEL` matters: Claude Code would otherwise ask for a Claude model name, which the
 gateway pins instead of routing — map that name in `models.aliases` to have it routed. Token
-counting (`POST /v1/messages/count_tokens`) is not served yet.
+counting (`POST /v1/messages/count_tokens`) is served (HDW-408): it reads the same body, chooses
+no model and calls no provider, and answers `{"input_tokens": N}` from the daemon's own estimate,
+so Claude Code can budget context even while no model can serve anything.
 
 ## Privacy and the daemon token
 

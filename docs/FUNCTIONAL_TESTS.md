@@ -169,14 +169,18 @@ Expected: [needs a key or Ollama] an Anthropic `message` object with `content`, 
 `stop_reason` and `usage`. With no model able to serve it, HTTP 400 with
 `{"type":"error","error":{"type":"invalid_request_error","message":"No model can serve this request in the current scope."}}`.
 
-### 12. Token counting is not served yet
+### 12. Token counting answers without a model
 
 ```
 curl.exe -s -o - -w "`nHTTP %{http_code}`n" -X POST -H "x-api-key: $token" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" --data "@body.json" http://127.0.0.1:4000/v1/messages/count_tokens
 ```
 
-Expected: HTTP 404. `/v1/messages/count_tokens` is a known follow-up (FU-303-1) in this build; a 404
-here is the current, documented gap, not a new bug. Note it and move on.
+Expected: HTTP 200 `{"input_tokens":N}` — one field, an integer. `N` is the daemon's own estimate
+from the same body `body.json` sends: about 4 characters per token of prose, 3.5 inside code fences
+and tool definitions, 800 per image. No model is chosen and no provider is called, so this answers
+even when check #11 answers 400 or 529. A body the messages face refuses (invalid JSON, an unknown
+content block) is HTTP 400 `{"type":"error","error":{"type":"invalid_request_error",...}}`; it is
+never a 404.
 
 ### 13. The port stays private
 
