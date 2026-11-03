@@ -19,6 +19,7 @@ that name it.
 | `ServerSession.elicit_form(message, requested_schema, related_request_id=)` asks a handshake-era host | read `server/session.py` | mcp 2.3 | 146 |
 | `NoBackChannelError` is a subclass of `MCPError` | ran it | mcp 2.3 | 146 |
 | `Client.call_tool(name, arguments, meta=...)` takes a per-call `RequestParamsMeta` (keyword-only), which is how a probe sends the client identity block the daemon reads | read `client/client.py` | mcp 2.3 | HDW-402 |
+| `CallToolResult` exposes structured data as `structured_content` (snake_case, in `model_fields`); `structuredContent` does not exist, so reading only the camelCase name yields `None` on a healthy call | `model_fields` dump on a live `call_tool` | 2.3.0 | doctor-host-probe |
 
 ## Windows and repo tooling
 

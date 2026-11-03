@@ -27,7 +27,10 @@ FRONT_DOOR = "headwaters_do"
 
 def _payload(result: Any) -> dict[str, Any]:
     """The structured part of a tool result, whichever way the SDK exposes it."""
-    data = getattr(result, "structuredContent", None)
+    # mcp 2.3 exposes ``structured_content`` (snake_case); older shapes used camelCase.
+    data = getattr(result, "structured_content", None)
+    if not isinstance(data, dict):
+        data = getattr(result, "structuredContent", None)
     if isinstance(data, dict):
         return data
     for item in getattr(result, "content", None) or []:
@@ -40,6 +43,22 @@ def _payload(result: Any) -> dict[str, Any]:
             if isinstance(parsed, dict):
                 return parsed
     return {}
+
+
+def _answered(result: Any) -> bool:
+    """Whether the tool answered at all, structured or only rendered.
+
+    The ``tool_call`` row proves the daemon answers a call without an error, so a non-error result
+    carrying any text is an answer. Tools here render prose, which is not JSON, so requiring
+    structured data on this row would fail a healthy daemon.
+    """
+    if _payload(result):
+        return True
+    for item in getattr(result, "content", None) or []:
+        text = getattr(item, "text", None)
+        if isinstance(text, str) and text.strip():
+            return True
+    return False
 
 
 async def run(host: str) -> dict[str, Any]:
@@ -67,7 +86,7 @@ async def run(host: str) -> dict[str, Any]:
             )
             status = await client.call_tool("headwaters_status", {}, meta=meta)
             body = _payload(status)
-            ok = not getattr(status, "is_error", False) and bool(body)
+            ok = not getattr(status, "is_error", False) and _answered(status)
             checks.append(
                 {
                     "name": "tool_call",
@@ -79,6 +98,8 @@ async def run(host: str) -> dict[str, Any]:
                     ),
                 }
             )
+            # ``scope`` proves the contract, not just that the call ran: the effective scope has to
+            # come back as data, so a prose-only answer does not count.
             scope = await client.call_tool("headwaters_scope", {}, meta=meta)
             scope_body = _payload(scope)
             raw_scope = scope_body.get("scope")
