@@ -7,6 +7,8 @@ models could serve a request with these requirements, and how well do they fit?
 * Scores: user override, else learned average, else catalog seed (``state_models``).
 * Local models: KV/fit math for this request's size, plus warm/eviction inputs from the models
   Ollama held at the last refresh.
+* A ``local`` row whose name matches the catalog's cloud-proxied patterns is dropped (HDW-153):
+  discovery never writes one, but a row from an older build stays until Ollama answers a refresh.
 * Walls and cooldowns are NOT applied here: the router overlays live quota state on every request.
 * The user's paid primary models (``tiers.paid.models``) are flagged ``is_primary``.
 
@@ -32,6 +34,7 @@ from headwaters.core.hardware.residency import (
 )
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.hardware.sysmem import expected_tps_for
+from headwaters.core.ollama_remote import RemotePatterns, is_remote_name, remote_patterns_from
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.rules import Rules
 from headwaters.core.state import Database
@@ -73,6 +76,19 @@ def fit_for_row(
     return evaluate_fit(_entry_for(row), budget_gb, est_tokens, cfg)
 
 
+def is_stale_remote_local(
+    row: ModelRow, entry: ModelEntry | None, patterns: RemotePatterns
+) -> bool:
+    """True when a ``local`` row names an Ollama cloud-proxied model (R4, FU-121-4).
+
+    Discovery drops such rows, but one written by an older build stays in SQLite until Ollama
+    answers a refresh. Re-checked here from the catalog patterns, so it never becomes a
+    candidate; the executor refuses it as well (defence in depth).
+    """
+    names = (row.id, *entry.aliases) if entry is not None else (row.id,)
+    return any(is_remote_name(name, patterns) for name in names)
+
+
 class CandidateBuilder:
     """``CandidateSource`` for the router. Cheap to create; reads the database per request."""
 
@@ -93,6 +109,7 @@ class CandidateBuilder:
         scores = effective_scores(self._db)
         hw = self._hardware()
         lookup = CatalogLookup(self._catalog)
+        patterns = remote_patterns_from(self._catalog)
         primary = set(self._rules.tiers.paid.models)
         loaded = [
             LoadedModel(r.id, r.size_vram_gb or r.size_gb or 0.0)
@@ -105,8 +122,10 @@ class CandidateBuilder:
             residency: ResidencyInputs | None = None
             tps: float | None = None
             if row.tier == "local":
-                fit, residency = self._local_inputs(row, reqs.est_tokens, hw, loaded)
                 entry = lookup.find([row.id])
+                if is_stale_remote_local(row, entry, patterns):
+                    continue
+                fit, residency = self._local_inputs(row, reqs.est_tokens, hw, loaded)
                 if entry is not None and hw is not None:
                     tps = expected_tps_for(entry, hw.profile)
             # F18: a model that reports no context gets the catalog default, flagged as assumed.

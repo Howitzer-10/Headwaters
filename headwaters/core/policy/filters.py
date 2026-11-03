@@ -2,6 +2,7 @@
 
 Hard filter = requirements (vision, tools, json, context >= headroom x tokens) intersected with
 availability (walls/quotas), hardware fit (local models) and the effective scope tiers.
+A remote image URL also drops local models here: they cannot fetch it (HDW-153).
 Pure functions: the router gathers candidates (catalog merge, quota tracker, hardware fit) and
 this module only decides. No I/O, never touches request text.
 """
@@ -104,6 +105,9 @@ def _first_failure(
             return f"no_fit_{c.fit.reason}"
     elif hw is not None and hw.battery_policy == "local_only":
         return "on_battery_local_only"
+    if c.is_local and hard.remote_image:
+        # FU-135-2: a local model cannot fetch a remote image, so do not spend an attempt on it.
+        return "image_url_not_local"
     if hard.vision and "image" not in c.row.modalities:
         return "no_vision"
     if hard.tools and c.row.tools_ok is not True:

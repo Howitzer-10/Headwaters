@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from tests.policy_golden_support import check
+from headwaters.core.policy.errors import NoRouteError
+from tests.policy_golden_support import check, run
 from tests.test_policy_scoring import fit
 
 Case = tuple[str, dict[str, Any], dict[str, Any]]
@@ -16,6 +17,10 @@ NO_FIT = fit("no_fit", "weights_too_large")
 
 def img(mid: str) -> dict[str, Any]:
     return {mid: {"row": VISION}}
+
+
+# Local and cheap models that can all see, so only the remote-image rule decides the route.
+VISION_ALL = {"loc14": {"row": VISION}, "loc7": {"row": VISION}, "free1": {"row": VISION}}
 
 
 CASES: list[Case] = [
@@ -34,6 +39,18 @@ CASES: list[Case] = [
     (
         "vision-local-scope-none",
         {"vision": True, "scope": "local", "mods": img("paid1")},
+        {"error": "no_candidates"},
+    ),
+    # HDW-153 / FU-135-2: a remote image URL drops local candidates in the hard filter, so the
+    # ladder falls to the cheapest cloud model that can see, and local scope has nothing left.
+    (
+        "vision-remote-image-skips-local",
+        {"vision": True, "remote_image": True, "mods": VISION_ALL},
+        {"model": "free1", "rung": "cheap"},
+    ),
+    (
+        "vision-remote-image-local-scope",
+        {"vision": True, "remote_image": True, "scope": "local", "mods": VISION_ALL},
         {"error": "no_candidates"},
     ),
     (
@@ -177,3 +194,19 @@ CASES: list[Case] = [
 @pytest.mark.parametrize(("spec", "expect"), [c[1:] for c in CASES], ids=[c[0] for c in CASES])
 def test_golden_b(spec: dict[str, Any], expect: dict[str, Any]) -> None:
     check(spec, expect)
+
+
+def test_remote_image_rejection_names_the_reason() -> None:
+    """HDW-153: the local drop is visible in ``rejected`` and explained in ``reasons``."""
+    spec = {"vision": True, "remote_image": True, "scope": "local", "mods": VISION_ALL}
+    got = run(spec)
+    assert isinstance(got, NoRouteError)
+    reasons = {r.reason for r in got.rejected if r.model_id in {"loc14", "loc7"}}
+    assert reasons == {"image_url_not_local"}
+
+
+def test_remote_image_reason_reaches_the_decision() -> None:
+    spec = {"vision": True, "remote_image": True, "mods": VISION_ALL}
+    got = run(spec)
+    assert not isinstance(got, NoRouteError)
+    assert "remote image: local models cannot fetch it" in got.reasons

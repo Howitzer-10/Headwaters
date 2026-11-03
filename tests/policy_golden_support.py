@@ -118,6 +118,7 @@ def run(s: dict[str, Any]) -> Any:
             s.get("tools", False),
             s.get("json", False),
             s.get("min_ctx", 1000),
+            remote_image=s.get("remote_image", False),
         ),
         soft(task, s.get("complexity", 2), s.get("risk", "low"), s.get("agentic", False)),
         0.9,

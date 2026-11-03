@@ -11,6 +11,7 @@ TEXT_PART_TYPES = frozenset({"text", "input_text", "output_text"})
 JSON_FORMAT_TYPES = frozenset({"json_object", "json_schema", "json"})
 MAX_DEPTH = 6
 MAX_LEAF_DEPTH = 32
+_DATA_URL_PREFIX = "data:"
 
 
 def dumps(value: Any) -> str:
@@ -26,6 +27,7 @@ class Collected:
     __slots__ = (
         "all_text",
         "code_extra_chars",
+        "has_remote_image",
         "image_count",
         "last_user_text",
         "scan_groups",
@@ -47,6 +49,9 @@ class Collected:
         self.last_user_text = ""
         self.code_extra_chars = 0  # tool-call arguments: JSON/code-like, counted at code rate
         self.image_count = 0
+        # An image part that names a URL rather than a data: payload. A local model cannot
+        # fetch it, so the hard filter drops local candidates up front (FU-135-2).
+        self.has_remote_image = False
 
 
 def _leaves(value: Any, out: list[str], depth: int = 0) -> None:
@@ -77,6 +82,27 @@ def _leaves(value: Any, out: list[str], depth: int = 0) -> None:
             _leaves(item, out, depth + 1)
 
 
+def _image_url(part: Mapping[str, Any]) -> str:
+    """The URL an image part names, if any (OpenAI/Responses string or mapping, Anthropic)."""
+    for raw in (part.get("image_url"), part.get("url")):
+        if isinstance(raw, Mapping):
+            raw = raw.get("url")
+        if isinstance(raw, str) and raw:
+            return raw
+    source = part.get("source")
+    if isinstance(source, Mapping):
+        url = source.get("url")
+        if isinstance(url, str) and url:
+            return url
+    return ""
+
+
+def _is_remote_image(part: Mapping[str, Any]) -> bool:
+    """True unless the image is inline: fetching any other URL would be local egress."""
+    url = _image_url(part)
+    return bool(url) and not url.startswith(_DATA_URL_PREFIX)
+
+
 def _scan_content(content: Any, texts: list[str], out: Collected, depth: int) -> None:
     """Append text parts to ``texts``; count images; count tool-use input as code bytes."""
     if depth > MAX_DEPTH or content is None:
@@ -97,6 +123,8 @@ def _scan_content(content: Any, texts: list[str], out: Collected, depth: int) ->
         kind = part.get("type")
         if kind in IMAGE_PART_TYPES:
             out.image_count += 1
+            if _is_remote_image(part):
+                out.has_remote_image = True
         elif kind == "tool_result":
             nested: list[str] = []
             _scan_content(part.get("content"), nested, out, depth + 1)

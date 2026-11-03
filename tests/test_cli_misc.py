@@ -55,7 +55,7 @@ def fixture_features(monkeypatch: pytest.MonkeyPatch) -> list[FeatureRegistry]:
 
     def discover(registry: FeatureRegistry) -> list[str]:
         seen.append(registry)
-        found = real_discover(registry, "tests.fixtures.features")
+        found = real_discover(registry, "tests.fixtures.features", include_private=True)
         registry.register(FeatureSpec(id="demo_star", star=True, title="Demo star feature"))
         return [*found, "demo_star"]
 

@@ -8,7 +8,7 @@ from headwaters.core.features import FeatureRegistry, discover_features
 from tests.contracts.harness import run_contract
 
 _registry = FeatureRegistry()
-discover_features(_registry, "tests.fixtures.features")
+discover_features(_registry, "tests.fixtures.features", include_private=True)
 _CASES = [
     (iface, plugin)
     for spec in _registry.all()

@@ -107,6 +107,8 @@ def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
         *req.scope.reasons,
         f"floor {floor.value:.0f} for {reqs.soft.task}",
     ]
+    if reqs.hard.remote_image and any(r.reason == "image_url_not_local" for r in rejected):
+        reasons.append("remote image: local models cannot fetch it")
     forced = _override(kept, rejected, req, ctx)
     if forced is not None:
         cand, rung, label = forced

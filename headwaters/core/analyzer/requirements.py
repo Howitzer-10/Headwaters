@@ -42,6 +42,8 @@ class HardRequirements:
     json: bool
     min_ctx: int
     reasoning: bool = False  # set by the caller (HDW-140), never by keyword analysis
+    # An image is a URL, not a data: payload, so a local model cannot fetch it (FU-135-2).
+    remote_image: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +244,7 @@ class Analyzer:
             tools=has_tools,
             json=json_needed,
             min_ctx=est_tokens + max(0, inp.max_output_tokens or 0),
+            remote_image=collected.has_remote_image,
         )
         soft = SoftRequirements(
             task=task,

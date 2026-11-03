@@ -103,11 +103,18 @@ class FeatureRegistry:
         self._plugins.clear()
 
 
-def discover_features(registry: FeatureRegistry, package: str = FEATURES_PACKAGE) -> list[str]:
+def discover_features(
+    registry: FeatureRegistry,
+    package: str = FEATURES_PACKAGE,
+    *,
+    include_private: bool = False,
+) -> list[str]:
     """Import each subpackage of ``package`` by name and call its ``register(registry)``.
 
     Returns the module names that registered. Subpackages without ``register`` are skipped.
-    Imports are dynamic on purpose: core has no static dependency on ★ code.
+    A name starting with ``_`` marks a test fixture or unfinished package, so it is skipped
+    unless ``include_private`` is set (the test fixtures ask). Imports are dynamic on purpose:
+    core has no static dependency on ★ code.
     """
     root = importlib.import_module(package)
     search_path = getattr(root, "__path__", None)
@@ -116,6 +123,8 @@ def discover_features(registry: FeatureRegistry, package: str = FEATURES_PACKAGE
     registered: list[str] = []
     for info in sorted(pkgutil.iter_modules(search_path), key=lambda m: m.name):
         if not info.ispkg:
+            continue
+        if info.name.startswith("_") and not include_private:
             continue
         module = importlib.import_module(f"{package}.{info.name}")
         hook = getattr(module, "register", None)

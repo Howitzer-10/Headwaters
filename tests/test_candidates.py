@@ -126,3 +126,18 @@ def test_rows_without_architecture_data_do_not_fit(db: Database) -> None:
     assert (result.status, result.reason) == ("no_fit", "missing_catalog_data")
     upsert_model(db, row)  # the builder must tolerate such a row too
     assert fit_of(builder(db, gpu_state())(requirements())[0]).usable is False
+
+
+def test_a_stale_local_row_for_a_cloud_model_is_never_a_candidate(db: Database) -> None:
+    """R4 / FU-121-4: a ``local`` row whose name matches the cloud patterns is dropped here."""
+    add_model(db, "gpt-oss:120b-cloud", "local", 99.0)
+    add_model(db, "qwen2.5-coder:14b", "local", 70.0)
+    found = by_id(builder(db, gpu_state(16))(requirements()))
+    assert "gpt-oss:120b-cloud" not in found
+    assert "qwen2.5-coder:14b" in found
+
+
+def test_cloud_tier_rows_are_unaffected_by_the_remote_name_check(db: Database) -> None:
+    add_model(db, "vendor/x-cloud", "free_cloud", 70.0)
+    found = by_id(builder(db, gpu_state(16))(requirements()))
+    assert "vendor/x-cloud" in found

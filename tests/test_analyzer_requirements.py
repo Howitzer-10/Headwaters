@@ -98,6 +98,33 @@ def test_nested_tool_result_image_counts(analyzer: Analyzer) -> None:
     assert analyzer.analyze(AnalyzerInput(messages)).hard.vision is True
 
 
+BASE64_PNG = "data:image/png;base64,iVBORw0KGgo="
+
+
+@pytest.mark.parametrize(
+    ("part", "remote"),
+    [
+        ({"type": "image_url", "image_url": {"url": BASE64_PNG}}, False),
+        ({"type": "image_url", "image_url": {"url": "https://x.example/a.png"}}, True),
+        ({"type": "image_url", "image_url": "http://x.example/a.png"}, True),
+        ({"type": "input_image", "image_url": "https://x.example/a.png"}, True),
+        ({"type": "image", "source": {"type": "base64", "data": "iVBORw0KGgo="}}, False),
+        ({"type": "image", "source": {"type": "url", "url": "https://x.example/a.png"}}, True),
+    ],
+)
+def test_a_remote_image_url_is_flagged_apart_from_an_inline_one(
+    analyzer: Analyzer, part: dict[str, Any], remote: bool
+) -> None:
+    """HDW-153 / FU-135-2: only a non-``data:`` URL means a local model cannot read the image."""
+    req = analyzer.analyze(AnalyzerInput([user([part])]))
+    assert req.hard.vision is True
+    assert req.hard.remote_image is remote
+
+
+def test_a_text_only_request_is_not_flagged_as_a_remote_image(analyzer: Analyzer) -> None:
+    assert analyzer.analyze(AnalyzerInput([user("hi")])).hard.remote_image is False
+
+
 def test_anthropic_tool_use_counts_as_code_tokens(analyzer: Analyzer) -> None:
     block = {"type": "tool_use", "input": {"content": "x" * 700}}
     req = analyzer.analyze(AnalyzerInput([{"role": "assistant", "content": [block]}]))

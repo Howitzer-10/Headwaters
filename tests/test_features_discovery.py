@@ -34,7 +34,7 @@ def test_production_discovery_registers_no_example() -> None:
 
 def test_plugins_for_respects_flags() -> None:
     reg = FeatureRegistry()
-    discover_features(reg, EXAMPLE_PACKAGE)
+    discover_features(reg, EXAMPLE_PACKAGE, include_private=True)
     assert len(reg.plugins_for("VerifierPlugin")) == 1
     reg.set_flags({"_example": False})
     assert reg.plugins_for("VerifierPlugin") == []
@@ -44,7 +44,9 @@ def test_plugins_for_respects_flags() -> None:
 
 def test_example_found_by_discovery_and_passes_contracts() -> None:
     reg = FeatureRegistry()
-    assert discover_features(reg, EXAMPLE_PACKAGE) == [f"{EXAMPLE_PACKAGE}._example"]
+    assert discover_features(reg, EXAMPLE_PACKAGE, include_private=True) == [
+        f"{EXAMPLE_PACKAGE}._example"
+    ]
     spec = reg.get("_example")
     assert spec is not None
     assert spec.star
@@ -86,6 +88,28 @@ def test_discover_skips_packages_without_register(
 
 def test_discover_non_package_returns_empty() -> None:
     assert discover_features(FeatureRegistry(), "headwaters.core.paths") == []
+
+
+def test_discover_skips_underscore_packages_unless_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FU-126-3: a test-only or half-finished ``_`` package never registers in production."""
+    pkg = tmp_path / "fakeprivate"  # its own name: "fakefeatures" is already in sys.modules
+    (pkg / "_draft").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "_draft" / "__init__.py").write_text(
+        "from headwaters.core.features import FeatureSpec\n"
+        "\n"
+        "\n"
+        "def register(registry):\n"
+        "    registry.register(FeatureSpec(id='_draft', star=True, title='Draft'))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert discover_features(FeatureRegistry(), "fakeprivate") == []
+    reg = FeatureRegistry()
+    assert discover_features(reg, "fakeprivate", include_private=True) == ["fakeprivate._draft"]
+    assert reg.get("_draft") is not None
 
 
 class _FakeEntryPoint:

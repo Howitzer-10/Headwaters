@@ -19,8 +19,9 @@ from headwaters.core.executor.errors import ExecutorError
 from headwaters.core.executor.types import BackendRequest, Delta
 from headwaters.core.ollama_remote import is_remote_name
 from headwaters.core.policy.types import RouteDecision
-from headwaters.core.router_types import RouteFailed, RouteRequest
+from headwaters.core.router_types import RouteRequest
 from headwaters.core.rules import OpenAICompatEndpoint, Rules
+from headwaters.core.scope import ScopeError
 from headwaters.core.state import open_database
 from tests.executor_support import decision
 from tests.test_ollama_remote_exec import PATTERNS
@@ -131,9 +132,15 @@ def test_engine_executor_carries_the_catalog_remote_patterns(tmp_path: Path) -> 
     assert backend._remote_patterns == engine.remote_patterns  # type: ignore[attr-defined]
 
 
-def test_engine_refuses_a_cloud_proxied_model_even_if_a_stale_row_says_local(
+def test_engine_drops_a_cloud_proxied_model_even_if_a_stale_row_says_local(
     tmp_path: Path,
 ) -> None:
+    """HDW-153 / R4: the candidate builder drops the row, so the router never gets a route.
+
+    The executor still refuses such a model (see ``tests/test_ollama_remote_exec.py``); with the
+    row gone earlier, this request has no local model at all, so scope resolution reports
+    ``local_unavailable`` with a pull hint instead of an execution-time refusal.
+    """
     from tests.cli_support import add_model, gpu_state
 
     db = open_database(tmp_path / "state.db")
@@ -152,9 +159,10 @@ def test_engine_refuses_a_cloud_proxied_model_even_if_a_stale_row_says_local(
         messages=[{"role": "user", "content": "write a function that adds two numbers"}],
         scope="local",
     )
-    with pytest.raises(RouteFailed) as raised:
+    with pytest.raises(ScopeError) as raised:
         asyncio.run(engine.router.run(request))  # type: ignore[arg-type]
-    assert raised.value.code == "local_scope_violation"
+    assert raised.value.code == "local_unavailable"
+    assert raised.value.fix_hint.startswith("pull ")  # a doctor recommendation, never the row
     assert backend.requests == []  # refused before any backend was called
 
 
