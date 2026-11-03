@@ -43,7 +43,8 @@ source) and [FUNCTIONAL_TESTS.md](FUNCTIONAL_TESTS.md) (what to check by hand).
 
 Stage 2 is everything on the path from a build the owner trusts to something other people can install
 and, eventually, buy. It starts only when Phase 7 is complete, that is when tickets 501-509, 601-608
-and 701-706 are all done.
+and 701-706 are all done. That is the start condition and it is unchanged; once Stage 2 has started,
+Phase 8 (tickets 801-803) runs as part of it.
 
 Stage 2 contains:
 
@@ -53,7 +54,10 @@ Stage 2 contains:
 - the itch.io `windows-beta` and `linux-beta` uploads;
 - the store copy;
 - the 11 owner evidence steps recorded in `docs/release/evidence.json`;
-- the release gate going green because those evidence steps are recorded and true.
+- the release gate going green because those evidence steps are recorded and true;
+- RC hardening and the open-source-readiness review (Phase 8, ticket 801);
+- the decision evidence report (Phase 8, ticket 802);
+- applying the 1.0 decision, conditional on the owner's decision (Phase 8, ticket 803).
 
 This page deliberately does not repeat the Stage 2 detail. That detail lives in:
 
@@ -99,7 +103,7 @@ work; it does not mean a build with that version is published to anyone.
 | Phase 5 | 501-509 | Beta 0.2 | Stage 1, ticket work after the functional test pass |
 | Phase 6 | 601-608 | Beta 0.3 | Stage 1, after Phase 5 |
 | Phase 7 | 701-706 | Beta 0.4 | Stage 1, after Phase 6, and the gate into Stage 2 |
-| Phase 8 | 801-803 | 1.0 | not scheduled in either stage |
+| Phase 8 | 801-803 | 1.0 | Stage 2, after Phase 7 |
 | Stage 2 | the 11 owner steps | distribution and sale | starts when Phase 7 is complete |
 
 The ticket rows themselves live in

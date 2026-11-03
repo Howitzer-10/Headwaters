@@ -113,13 +113,16 @@ into two stages, recorded in `docs/PLAN.md` and as D16 in `docs/DECISIONS.md`.
   tickets or follow-ups that may reorder what is left.
 - **Stage 2, deferred.** Distribution and sale: the Windows installer and its signature, the clean
   Windows VM run, the Linux payload and its clean run, the itch `windows-beta` and `linux-beta`
-  uploads, the store copy and the 11 owner evidence steps. It starts only after Phase 7 is complete.
+  uploads, the store copy and the 11 owner evidence steps. It starts only after Phase 7 is complete,
+  and from then on it also contains Phase 8 (801-803): RC hardening and open-source readiness, the
+  decision evidence report, and applying the 1.0 decision, which is the owner's to make.
 - **Phase 4 (401-407) produced the first complete build**, and that build exists for the owner's
   evaluation. No 0.1 public beta will be released, so the "Beta 0.x" labels above name phases of
   ticket work, not published versions.
 - **The release gate stays red and unmodified** until Stage 2 records the owner steps. It is not a
   bug to fix, and no document is edited to turn one of its lines green.
-- Phases 8 and 9 are not scheduled in either stage.
+- **Phase 8 (801-803) is Stage 2 work** and runs once Stage 2 has started. Phase 9 (901-905) is not
+  scheduled in either stage, and SPW-905 stays deferred under D9.
 
 **Critical path to Beta 0.1:** 001 → 002 → 003/004 → 101 → 102 → 103 → 105 → 106 → 108 → 109 → 110 → 112 → 113 → 114 → 115 → 117 → 201 → 204 → 301 → 302 → 403 → 405 → 407.
 
