@@ -17,6 +17,20 @@ shows the computed context per model. Fix it by sending fewer tokens, by raising
 the GPU really has the room, or by adding a larger step to `local.ctx_steps`. Truncation that only
 happens in one host is that host's own limit: check its model context setting, not ours.
 
+## Tool-heavy requests
+
+A prompt of a few words fails with a message about context even though the model is installed.
+Every MCP server a host enables contributes its whole `tools` array to the request estimate, so
+two servers can be tens of thousands of tokens before the user types anything: 109 Summer Engine
+schemas measure about 44,000 tokens and our eight `headwaters_*` front-door tools about 2,400. The
+error names that split, the largest namespaces and the fixes that work: a wider scope such as
+`headwaters/auto`, removing a server, or `tools.prune_to_fit: true` in `rules.yaml`. That setting
+is off by default; switched on, Headwaters drops the largest non-`headwaters` namespaces until a
+local model fits and records what it dropped in the decision reasons, so `headwaters explain` (and
+anything else that reads them) shows the drop and its size. It
+never drops the `headwaters_*` tools, never runs on the free or cloud tiers, and never prunes a
+request whose message or images alone already exceed the window.
+
 ## Tool-call failures
 
 A host reports "tool not found", "invalid tool schema" or an MCP server that immediately exits, or

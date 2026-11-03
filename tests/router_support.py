@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from typing import Any
 
 from headwaters.core.analyzer.requirements import (
+    Analyzer,
     AnalyzerInput,
     HardRequirements,
     Requirements,
@@ -60,10 +61,15 @@ class FixedAnalyzer:
     def __init__(self, reqs: Requirements | None = None) -> None:
         self.reqs = reqs or requirements()
         self.inputs: list[AnalyzerInput] = []
+        self._estimator = Analyzer()
 
     def analyze(self, inp: AnalyzerInput) -> Requirements:
         self.inputs.append(inp)
         return self.reqs
+
+    def estimate_tokens(self, chunks: Iterable[str], code_extra_chars: int, images: int) -> int:
+        """HDW-511: the real arithmetic, so the tool-cost composition can be measured."""
+        return self._estimator.estimate_tokens(chunks, code_extra_chars, images)
 
 
 class Dispatch:

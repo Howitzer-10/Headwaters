@@ -28,6 +28,7 @@ Privacy: this module never logs or stores request text, only decision metadata.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -43,9 +44,18 @@ from headwaters.core.features import FeatureRegistry, get_registry
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.plugins import EscalationPlugin, LedgerPlugin, VerifierPlugin
 from headwaters.core.policy.decide import decide
-from headwaters.core.policy.errors import NoRouteError
+from headwaters.core.policy.errors import NoRouteError, Suggestion
 from headwaters.core.policy.filters import Candidate, hard_filter
 from headwaters.core.policy.scoring import AGENTIC_TASK
+from headwaters.core.policy.tool_budget import (
+    HEADWATERS_NAMESPACE,
+    AmbiguousTools,
+    Composition,
+    attribute,
+    diagnose,
+    measure,
+    tool_name,
+)
 from headwaters.core.policy.types import PolicyContext, PolicyRequest, RouteDecision
 from headwaters.core.quotas import QuotaTracker, WallDecision
 from headwaters.core.router_log import LogEntry
@@ -90,6 +100,9 @@ from headwaters.core.state_misc import SessionRow, get_session, pin_session
 __all__ = ["CandidateSource", "RequirementsAnalyzer", "RoutePlan", "Router", "RouterConfig"]
 
 CandidateSource = Callable[[Requirements], Sequence[Candidate]]
+
+# HDW-511: the rejection reasons that mean "the window is too small", never "pull a model".
+_CONTEXT_REASONS = frozenset({"ctx_too_small", "ctx_unknown", "no_fit_context_too_large"})
 
 
 class RequirementsAnalyzer(Protocol):
@@ -247,11 +260,21 @@ class Router:
             explicit=request.session_id,
         )
         reqs = await self._analyze(request)
-        chosen = self._select(request, key, reqs)
+        note = ""
+        try:
+            chosen = self._select(request, key, reqs)
+        except (ScopeError, NoRouteError) as exc:
+            recovered = await self._recover_selection(request, key, reqs, exc)
+            if isinstance(recovered, Exception):
+                raise recovered from None
+            request, reqs, chosen, note = recovered
+        first = (
+            replace(chosen.first, reasons=(*chosen.first.reasons, note)) if note else chosen.first
+        )
         rejected = hard_filter(
             chosen.candidates, reqs.hard, chosen.scope, chosen.rules, chosen.hw
         ).rejected
-        return RoutePlan(reqs, chosen.scope, chosen.first, chosen.candidates, rejected, key)
+        return RoutePlan(reqs, chosen.scope, first, chosen.candidates, rejected, key)
 
     async def _analyze(self, request: RouteRequest) -> Requirements:
         """Layer 1-3 analysis, then the caller's ``task_hint`` / ``reasoning`` (HDW-140)."""
@@ -269,12 +292,16 @@ class Router:
         self._progress(request, "analyzing")
         reqs = await self._analyze(request)
         scope_name = request.scope or self._rules_source().default_scope
+        note = ""
         try:
             chosen = self._select(request, key, reqs)
         except (ScopeError, NoRouteError) as exc:
-            self._log_early(request, key, started, reqs, scope_name, exc)
-            raise
-        return RouteRun(
+            recovered = await self._recover_selection(request, key, reqs, exc)
+            if isinstance(recovered, Exception):
+                self._log_early(request, key, started, reqs, scope_name, recovered)
+                raise recovered from None
+            request, reqs, chosen, note = recovered
+        run = RouteRun(
             request=request,
             key=key,
             started=started,
@@ -286,6 +313,9 @@ class Router:
             options=executor_options(request),
             first=chosen.first,
         )
+        if note:
+            run.notes.append(note)
+        return run
 
     def _select(self, request: RouteRequest, key: str, reqs: Requirements) -> _Selection:
         """Steps 2-3: secrets, candidates, scope and the policy ladder. No side effects."""
@@ -318,6 +348,150 @@ class Router:
             PolicyContext(candidates, rules, hw, self._escalation(), hint),
         )
         return _Selection(rules, scope, candidates, hw, first)
+
+    # ------------------------------------------------- HDW-511: tool-cost diagnosis
+
+    async def _recover_selection(
+        self, request: RouteRequest, key: str, reqs: Requirements, exc: ScopeError | NoRouteError
+    ) -> tuple[RouteRequest, Requirements, _Selection, str] | ScopeError | NoRouteError:
+        """Explain a context shortfall, or prune non-headwaters tools when allowed.
+
+        Returns either a pruned selection (with the note to record) or the error the caller
+        should raise. Anything else — no tools, a non-context failure, a scope that is not
+        local-only — leaves ``exc`` untouched.
+        """
+        if not request.tools:
+            return exc
+        composition = measure(self._analyzer, analyzer_input(request), reqs)
+        if composition is None or composition.tools <= 0:
+            return exc
+        scope = self._local_only_scope(request)
+        if scope is None:
+            return exc
+        pool = self._with_live_availability(self._candidates(reqs))
+        if not self._context_shortfall(exc, pool, scope):
+            return exc
+        rules = self._rules_source()
+        if rules.tools.prune_to_fit:
+            pruned = await self._prune_to_fit(request, key, reqs, composition)
+            if pruned is not None:
+                return pruned
+        return self._honest_error(exc, composition, reqs, pool, scope)
+
+    def _context_shortfall(
+        self, exc: ScopeError | NoRouteError, pool: Sequence[Candidate], scope: ScopeDecision
+    ) -> bool:
+        """True only when context is why nothing in scope could answer (HDW-511)."""
+        if isinstance(exc, ScopeError):
+            if exc.code != "local_unavailable":
+                return False
+            return any(
+                c.is_local and c.fit is not None and c.fit.reason == "context_too_large"
+                for c in pool
+            )
+        tiers = {c.id: c for c in pool}
+        reasons = {
+            rejection.reason
+            for rejection in exc.rejected
+            if (c := tiers.get(rejection.model_id)) is None or c.tier in scope.tiers
+        }
+        return bool(reasons) and reasons <= _CONTEXT_REASONS
+
+    def _local_only_scope(self, request: RouteRequest) -> ScopeDecision | None:
+        """The effective scope, when it allows local models only; ``None`` otherwise."""
+        try:
+            scope = resolve_scope(
+                self._rules_source(),
+                request.project,
+                requested=request.scope,
+                strategy=request.strategy,
+                verify=request.verify,
+                secret_matches=self._scan_secrets(request),
+                secret_override=request.secret_override,
+                paid_scopes=paid_scopes_available(self._registry),
+                local_available=True,
+            )
+        except ScopeError:
+            return None
+        return scope if scope.local_only else None
+
+    def _honest_error(
+        self,
+        exc: ScopeError | NoRouteError,
+        composition: Composition,
+        reqs: Requirements,
+        pool: Sequence[Candidate],
+        scope: ScopeDecision,
+    ) -> ScopeError | NoRouteError:
+        """Rewrite a context failure to state the real composition and the real fixes."""
+        rules = self._rules_source()
+        headroom = rules.scoring.ctx_headroom
+        diagnosis = diagnose(
+            composition,
+            needed=math.ceil(headroom * reqs.hard.min_ctx),
+            headroom=headroom,
+            local_ctx=[c.row.ctx for c in pool if c.is_local and c.row.ctx],
+            prune_enabled=rules.tools.prune_to_fit,
+            widen=not scope.active_locks,
+        )
+        if isinstance(exc, ScopeError):
+            return ScopeError(exc.code, diagnosis.message, diagnosis.fix_hint)
+        tips = tuple(s for s in exc.suggestions if s.code != "pull_model")
+        return NoRouteError(
+            exc.code,
+            diagnosis.message,
+            etas=exc.etas,
+            suggestions=(*tips, Suggestion("fix_tool_cost", diagnosis.fix_hint)),
+            rejected=exc.rejected,
+        )
+
+    async def _prune_to_fit(
+        self, request: RouteRequest, key: str, reqs: Requirements, composition: Composition
+    ) -> tuple[RouteRequest, Requirements, _Selection, str] | None:
+        """Drop the largest non-headwaters namespaces until a local model fits (HDW-511).
+
+        Cumulative and largest-first, so the smallest number of drops does it. Every attempt
+        re-runs analysis and the normal selection path; the first that yields an answer wins.
+        Returns ``None`` when nothing helps, leaving the original request untouched.
+        """
+        rules = self._rules_source()
+        tools = list(request.tools or ())
+        names = [tool_name(spec) for spec in tools]
+        try:
+            mapping = attribute(names)
+        except AmbiguousTools:
+            return None
+        namespaces = sorted(
+            {namespace for namespace in mapping.values() if namespace != HEADWATERS_NAMESPACE},
+            key=lambda namespace: (-composition.namespace_tokens(namespace), namespace),
+        )
+        if not namespaces:
+            return None
+        pool = self._with_live_availability(self._candidates(reqs))
+        largest = max((c.row.ctx or 0 for c in pool if c.is_local), default=0)
+        budget = largest or max(rules.tiers.local.ctx_steps)
+        if composition.images > budget or composition.messages > budget:
+            return None
+        dropped: list[str] = []
+        for namespace in namespaces:
+            dropped.append(namespace)
+            removed = set(dropped)
+            kept = tuple(
+                spec
+                for spec, name in zip(tools, names, strict=True)
+                if mapping[name] not in removed
+            )
+            pruned = replace(request, tools=kept)
+            pruned_reqs = await self._analyze(pruned)
+            try:
+                chosen = self._select(pruned, key, pruned_reqs)
+            except (ScopeError, NoRouteError):
+                continue
+            note = "tools pruned to fit a local model: dropped " + ", ".join(
+                f"{name} ({composition.namespace_tokens(name):,} tokens)" for name in dropped
+            )
+            return pruned, pruned_reqs, chosen, note
+        return None
 
     def _with_live_availability(self, candidates: Sequence[Candidate]) -> tuple[Candidate, ...]:
         """Walls live in shared SQLite, so another engine may have set one a moment ago.

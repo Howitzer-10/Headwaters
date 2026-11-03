@@ -1019,6 +1019,19 @@
       "title": "TiersRules",
       "type": "object"
     },
+    "ToolsRules": {
+      "additionalProperties": false,
+      "description": "Tool-schema handling (HDW-511).\n\n``prune_to_fit`` drops non-headwaters tool schemas to fit a local model when the\nrequest failed only because the schemas did not fit its context. Off by default:\ndropping tools changes what the model on the other end can do.",
+      "properties": {
+        "prune_to_fit": {
+          "default": false,
+          "title": "Prune To Fit",
+          "type": "boolean"
+        }
+      },
+      "title": "ToolsRules",
+      "type": "object"
+    },
     "WallsRules": {
       "additionalProperties": false,
       "properties": {
@@ -1204,6 +1217,9 @@
     },
     "tiers": {
       "$ref": "#/$defs/TiersRules"
+    },
+    "tools": {
+      "$ref": "#/$defs/ToolsRules"
     },
     "verify": {
       "default": "agentic",

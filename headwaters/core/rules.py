@@ -40,6 +40,17 @@ class PickerRules(_Model):
     show_extras: bool = False
 
 
+class ToolsRules(_Model):
+    """Tool-schema handling (HDW-511).
+
+    ``prune_to_fit`` drops non-headwaters tool schemas to fit a local model when the
+    request failed only because the schemas did not fit its context. Off by default:
+    dropping tools changes what the model on the other end can do.
+    """
+
+    prune_to_fit: bool = False
+
+
 class BudgetRules(_Model):
     paid_daily_usd: float = Field(default=5.00, ge=0)
     premium_max_usd_per_call: float = Field(default=1.00, ge=0)
@@ -325,6 +336,7 @@ class Rules(_Model):
     secrets: SecretsRules = Field(default_factory=SecretsRules)
     verify: Literal["always", "agentic", "off"] = "agentic"
     picker: PickerRules = Field(default_factory=PickerRules)
+    tools: ToolsRules = Field(default_factory=ToolsRules)
     budget: BudgetRules = Field(default_factory=BudgetRules)
     tiers: TiersRules = Field(default_factory=TiersRules)
     floors: FloorsRules = Field(default_factory=FloorsRules)
