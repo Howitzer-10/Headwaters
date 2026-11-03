@@ -14,8 +14,27 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = REPO_ROOT / ".importlinter"
-SUBPACKAGES = ["core", "cli", "features", "gateway", "mcp", "control", "installer", "daemon"]
-CORE_FORBIDDEN = ["features", "gateway", "mcp", "daemon", "control", "installer", "cli"]
+SUBPACKAGES = [
+    "core",
+    "cli",
+    "features",
+    "gateway",
+    "mcp",
+    "control",
+    "installer",
+    "packaging",
+    "daemon",
+]
+CORE_FORBIDDEN = [
+    "features",
+    "gateway",
+    "mcp",
+    "daemon",
+    "control",
+    "installer",
+    "packaging",
+    "cli",
+]
 
 
 def _lint_imports(cwd: Path, config: Path) -> subprocess.CompletedProcess[str]:

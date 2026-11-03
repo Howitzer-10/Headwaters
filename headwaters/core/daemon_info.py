@@ -71,6 +71,13 @@ class DaemonInfo:
     def mcp_url(self) -> str:
         return self.api_url + self.mcp_path
 
+    @property
+    def dashboard_url(self) -> str | None:
+        """The status page, once the daemon has bound its dashboard port (HDW-404)."""
+        if self.ports.dashboard is None:
+            return None
+        return f"http://{self.host}:{self.ports.dashboard}/"
+
     def to_json(self) -> str:
         payload: dict[str, Any] = {"schema": SCHEMA, **asdict(self)}
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"

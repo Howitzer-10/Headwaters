@@ -3,7 +3,7 @@ root_package = headwaters
 include_external_packages = True
 
 [importlinter:contract:core-is-a-leaf]
-name = Core must not import features, gateway, mcp, daemon, control, installer or cli
+name = Core must not import features, gateway, mcp, daemon, control, installer, packaging or cli
 type = forbidden
 source_modules =
     headwaters.core
@@ -14,6 +14,7 @@ forbidden_modules =
     headwaters.daemon
     headwaters.control
     headwaters.installer
+    headwaters.packaging
     headwaters.cli
 
 # litellm is reached through importlib in cloud.py (invisible to this linter), so the allowed edge
@@ -39,6 +40,7 @@ source_modules =
     headwaters.features
     headwaters.gateway
     headwaters.installer
+    headwaters.packaging
 forbidden_modules =
     mcp
 
@@ -52,6 +54,7 @@ source_modules =
     headwaters.features
     headwaters.installer
     headwaters.mcp
+    headwaters.packaging
 forbidden_modules =
     fastapi
     starlette
@@ -69,6 +72,7 @@ source_modules =
     headwaters.features
     headwaters.gateway
     headwaters.installer
+    headwaters.packaging
     headwaters.mcp
 forbidden_modules =
     headwaters.daemon

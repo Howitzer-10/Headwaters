@@ -71,3 +71,13 @@ that name it.
 | Claude Desktop reads `%APPDATA%\Claude\claude_desktop_config.json` as `mcpServers.<name> = {command, args}`, and has no prompt-file or rules mechanism | official Claude Desktop MCP quickstart (modelcontextprotocol.io) | docs as of 2026-11 | HDW-403 |
 | Cline reads MCP servers from `~/.cline/data/settings/cline_mcp_settings.json` (`CLINE_DATA_DIR` overrides the data dir, `CLINE_DIR` the install dir) as `mcpServers.<name> = {command, args, disabled, autoApprove, timeout}`; project rules go in `.clinerules/` or `AGENTS.md`, and workflows are `.cline/workflows/<name>.md`, invoked as `/<name>.md` | official Cline docs: MCP, rules, workflows | docs as of 2026-11 | HDW-403 |
 | `headwaters-mcp` is a console script and may sit outside the interpreter's `Scripts`/`bin` folder (pipx, `uv tool`, a frozen build), so an installer writes a host config only after checking that the launcher's path exists | scratch probe of this venv; `tests/test_installer_core.py` | repo 0.1 (HDW-403) | HDW-403 |
+
+## itch.io packaging (HDW-405)
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| An itch build is pushed with `butler push <dir> <user>/<game>:<channel>`, and the channel name is whatever the push names (`windows-beta` here), so the manifest and the push script must agree on it | official butler docs (itch.io/docs/butler) | docs as of 2026-11 | HDW-405 |
+| A payload root containing `.itch.toml` is what gives the itch app its launch actions; the file is pushed as part of the build, so its presence is also how the app knows it manages this install | official itch app docs, `.itch.toml` manifest | docs as of 2026-11 | HDW-405 |
+| `.itch.toml` holds `[[actions]]` entries with `name`, `path`, `args`, `platform` and `scope`; `path` is resolved relative to the manifest's own folder, which is why every action here names `runtime/uv.exe` rather than an absolute path | official itch app docs, `.itch.toml` manifest | docs as of 2026-11 | HDW-405 |
+| The working directory an action is launched in is **not** documented, so the actions pass relative paths only and the CLI is given an explicit `--project runtime`; verifying it needs `butler validate` plus one real install (FU-405-4) | official itch app docs (no cwd statement) | docs as of 2026-11 | HDW-405 |
+| Inno Setup 6 installs per user with `PrivilegesRequired=lowest` and `DefaultDirName={localappdata}\...`; `[UninstallRun]` can call `schtasks`, and `CurUninstallStepChanged(usUninstall)` can run an `Exec` before the files go, which is where the optional state/key removal runs | official Inno Setup 6 documentation (setup directives, UninstallRun, Code events) | Inno Setup 6 | HDW-405 |

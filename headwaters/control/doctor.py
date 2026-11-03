@@ -40,6 +40,7 @@ from headwaters.core.mcp_launch import launch_options
 from headwaters.core.rules import Rules
 from headwaters.installer import verify as host_verify
 from headwaters.installer.context import default_context
+from headwaters.packaging.layout import installed_root, update_mode
 
 __all__ = [
     "HOSTS",
@@ -359,6 +360,7 @@ class Doctor:
     git_config: GitConfig | None = None
     probe: Prober | None = None
     platform: str | None = None
+    executable: str | None = None
     now: float | None = None
     _client: DaemonClient | None = field(default=None, init=False, repr=False)
     _found: bool = field(default=False, init=False, repr=False)
@@ -425,6 +427,24 @@ class Doctor:
                 "platform": self._platform(),
                 "state_dir": str(paths.state_dir()),
             },
+        )
+
+    def _install(self) -> Check:
+        """Where this copy came from and how it updates (HDW-405).
+
+        A source checkout has no opinion; an installed copy reports its root and whether the
+        itch app owns updates, so a self-update never fights the itch client.
+        """
+        root = installed_root(self.executable)
+        if root is None:
+            return Check("install", "Install", OK, "running from a source checkout")
+        mode = update_mode(root)
+        return Check(
+            "install",
+            "Install",
+            OK,
+            f"{root}: {mode.detail}",
+            data={"root": str(root), "update": mode.kind},
         )
 
     def _ollama(self) -> Check:
@@ -863,6 +883,7 @@ class Doctor:
         self._client_for()
         checks = [
             self._environment(),
+            self._install(),
             self._ollama(),
             self._ollama_env(),
             self._private_mode(),

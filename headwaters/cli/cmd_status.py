@@ -4,12 +4,15 @@ Reads only local state (rules, project rule, the shared SQLite database); no net
 """
 
 import time
+import webbrowser
 from typing import Annotated, Any
 
 import typer
 
 from headwaters.cli import runtime
-from headwaters.cli.output import emit_json, fmt_eta, make_console, table
+from headwaters.cli.output import emit_json, fail, fmt_eta, make_console, table
+from headwaters.core.daemon_client import find_running
+from headwaters.core.daemon_control import start_daemon
 from headwaters.core.quotas import wall_label
 from headwaters.core.scope import ScopeDecision, ScopeError, paid_scopes_available, resolve_scope
 from headwaters.core.state_limits import WallRow, active_walls
@@ -20,6 +23,55 @@ _KIND_TEXT = {
     "exhausted": "out of credit",
     "overloaded": "overloaded",
 }
+
+DASHBOARD_FIX = (
+    "Set dashboard.enabled: true in rules.yaml, or start the daemon by hand and read the "
+    "dashboard port from `headwaters daemon-status`."
+)
+
+
+def status_page_url(
+    rt: runtime.Runtime,
+    *,
+    find: Any = find_running,
+    start: Any = start_daemon,
+) -> tuple[str | None, str | None]:
+    """The status page URL, starting the daemon if needed. Returns ``(url, problem)``.
+
+    ``--open`` is what the Start Menu shortcut and the itch "Open status page" action run, so it
+    has to work on a cold machine: the daemon is started and its bound dashboard port is read
+    from ``daemon.json`` rather than assumed from the rules.
+    """
+    if not rt.rules.dashboard.enabled:
+        return None, "the dashboard is disabled in rules (dashboard.enabled: false)"
+    client = find()
+    if client is None:
+        started = start(None)
+        if not started.ok or started.info is None:
+            return None, started.message
+        client = find()
+    if client is None:
+        return None, "the daemon started but did not report its ports"
+    url = client.info.dashboard_url
+    if url is None:
+        return None, "the daemon is not serving the dashboard on any port"
+    return url, None
+
+
+def _open_status_page(rt: runtime.Runtime, *, as_json: bool) -> None:
+    url, problem = status_page_url(rt)
+    if url is None:
+        fail(
+            "no_dashboard",
+            problem or "the status page is unavailable",
+            fix=DASHBOARD_FIX,
+            as_json=as_json,
+        )
+    if as_json:
+        emit_json({"ok": True, "url": url})
+        return
+    typer.echo(f"Status page: {url}")
+    webbrowser.open(url)
 
 
 def effective_scope(rt: runtime.Runtime) -> tuple[ScopeDecision | None, ScopeError | None]:
@@ -73,9 +125,23 @@ def register(app: typer.Typer) -> None:
     @app.command("status")
     def status(
         as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
+        open_page: Annotated[
+            bool,
+            typer.Option(
+                "--open",
+                help="Start the daemon if needed and open the status page in the browser.",
+            ),
+        ] = False,
     ) -> None:
-        """Show the scope in force, locks, walls with their reset times, and the warm model."""
+        """Show the scope in force, locks, walls with their reset times, and the warm model.
+
+        With --open, do not print the table: start the daemon if it is not running and open the
+        dashboard page the daemon is serving.
+        """
         rt = runtime.load_runtime(as_json=as_json)
+        if open_page:
+            _open_status_page(rt, as_json=as_json)
+            return
         now = time.time()
         decision, scope_error = effective_scope(rt)
         locks = locks_in_force(rt, decision)

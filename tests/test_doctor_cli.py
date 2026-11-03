@@ -53,7 +53,7 @@ def test_doctor_json_is_the_report(cli_home: Path) -> None:
     assert payload["ok"] is True
     assert payload["host"] is None
     ids = [row["id"] for row in payload["checks"]]
-    assert ids[:3] == ["environment", "ollama", "ollama_env"]
+    assert ids[:4] == ["environment", "install", "ollama", "ollama_env"]
     assert "daemon_token" in ids
     assert payload["fixes"]
 

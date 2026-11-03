@@ -481,6 +481,7 @@ def test_run_covers_every_check_and_adds_the_host_rows(cli_home: Path) -> None:
     )
     assert [check.id for check in report.checks] == [
         "environment",
+        "install",
         "ollama",
         "ollama_env",
         "private_mode",
