@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "@provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Headwaters",
+      "options": {
+        "baseURL": "@base_url",
+        "apiKey": "{env:@token_env}"
+      },
+      "models": {
+        "auto": { "name": "Headwaters Auto" },
+        "free": { "name": "Headwaters Free" },
+        "local": { "name": "Headwaters Local" }
+      }
+    }
+  },
+  "mcp": {
+    "@server": {
+      "type": "local",
+      "command": "@argv",
+      "enabled": true
+    }
+  }
+}

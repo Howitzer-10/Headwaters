@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "@server": {
+      "command": "@command",
+      "args": "@args",
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

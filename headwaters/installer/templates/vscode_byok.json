@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Headwaters",
+    "vendor": "customendpoint",
+    "apiKey": "${input:headwatersToken}",
+    "apiType": "chat-completions",
+    "models": [
+      {
+        "id": "headwaters/auto",
+        "name": "Headwaters Auto",
+        "url": "@chat_url",
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 8192
+      },
+      {
+        "id": "headwaters/free",
+        "name": "Headwaters Free",
+        "url": "@chat_url",
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 8192
+      },
+      {
+        "id": "headwaters/local",
+        "name": "Headwaters Local",
+        "url": "@chat_url",
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 4096
+      }
+    ]
+  }
+]

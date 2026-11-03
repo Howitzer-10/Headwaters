@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "@server": {
+      "type": "stdio",
+      "command": "@command",
+      "args": "@args"
+    }
+  }
+}

@@ -238,7 +238,7 @@ def test_ports_warn_when_something_else_holds_one(cli_home: Path) -> None:
 
 def test_ports_held_by_the_running_daemon_are_not_a_warning(cli_home: Path) -> None:
     doctor = _doctor(find=lambda: FakeClient(), port_state=lambda port: "busy")
-    setattr(doctor, "_client", FakeClient())
+    doctor._client = FakeClient()  # type: ignore[assignment]
     check = doctor._ports()
     assert check.status == OK
 
@@ -492,6 +492,7 @@ def test_run_covers_every_check_and_adds_the_host_rows(cli_home: Path) -> None:
         "catalog",
         "git",
         "mcp_launch",
+        "host_configs",
     ]
     assert report.ok  # warnings do not fail it
     payload = report.as_dict()

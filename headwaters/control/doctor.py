@@ -38,6 +38,8 @@ from headwaters.core.hardware.sysmem import SYSMEM_HINT
 from headwaters.core.keys import KeyStore
 from headwaters.core.mcp_launch import launch_options
 from headwaters.core.rules import Rules
+from headwaters.installer import verify as host_verify
+from headwaters.installer.context import default_context
 
 __all__ = [
     "HOSTS",
@@ -97,6 +99,11 @@ OLLAMA_PRIVATE_HINT = (
 HOST_FIX = (
     "Run `headwaters mcp-path` and put that command in the host's MCP config, restart the host so "
     "it relaunches the server, then run `headwaters doctor --host <host>` again."
+)
+# FU-402-2: `mcp-path` resolving says nothing about the file a host actually reads.
+HOST_CONFIG_FIX = (
+    "Run `headwaters install --host <id>`: it shows the diff of the host's own config, asks first "
+    "and writes the entry again."
 )
 
 OLLAMA_ENV_VARS = (
@@ -800,6 +807,22 @@ class Doctor:
             data={"kind": best.kind, "command": best.command, "args": list(best.args)},
         )
 
+    def _host_configs(self) -> Check:
+        """FU-402-2: the host's own config, not just whether the MCP command resolves."""
+        ctx = default_context(launch=launch_options()[0], require_launcher=False)
+        found = host_verify.problems(ctx)
+        if not found:
+            return Check(
+                "host_configs",
+                "Host config files",
+                OK,
+                "no installed host config has a problem",
+            )
+        detail = "; ".join(f"{item.host}: {item.detail}" for item in found[:3])
+        if len(found) > 3:
+            detail += f"; and {len(found) - 3} more"
+        return Check("host_configs", "Host config files", WARN, detail, fix=HOST_CONFIG_FIX)
+
     def _host_checks(self) -> list[Check]:
         assert self.host is not None
         probe = self.probe or host_probe
@@ -851,6 +874,7 @@ class Doctor:
             self._catalog(),
             self._git(),
             self._mcp_launch(),
+            self._host_configs(),
         ]
         if self.host:
             checks.extend(self._host_checks())

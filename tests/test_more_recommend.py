@@ -14,6 +14,7 @@ import pytest
 from headwaters.core.quotas import model_subject
 from headwaters.core.rules import Rules
 from headwaters.core.state_limits import record_wall
+from headwaters.installer.names import OPENCODE_PROVIDER_ID
 from tests.cli_support import add_model
 from tests.frontdoor_support import Rig, make_repo, structured, text_of
 
@@ -45,10 +46,10 @@ def test_recommend_model_names_the_pick_and_the_switch_commands(tmp_path: Path) 
     assert any("dry run" in n for n in data["notes"])
 
 
-def test_recommend_uses_the_ollama_provider_id_for_a_local_model(tmp_path: Path) -> None:
+def test_recommend_uses_the_installed_provider_id_for_a_local_model(tmp_path: Path) -> None:
     data = _call(Rig(tmp_path), "headwaters_recommend_model", {"task": "write a function"})
     command = next(s["command"] for s in data["switch"] if s["host"] == "opencode")
-    assert command == "opencode --model ollama/qwen:14b"
+    assert command == f"opencode --model {OPENCODE_PROVIDER_ID}/qwen:14b"
 
 
 def test_recommend_calls_no_model_and_writes_no_decision(tmp_path: Path) -> None:

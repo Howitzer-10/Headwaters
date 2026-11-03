@@ -4,9 +4,10 @@ Both are dry runs on ``Router.plan()``: no model is called, no decision row or s
 written, and the task summary is analysed but never logged or stored. The switch commands use only
 formats verified in the OpenCode docs (A-MCP-14): ``opencode --model provider/model`` and the
 ``/models`` picker; model ids are ``opencode/<name>`` (its free models), ``openrouter/<id>`` and
-the id of a user-defined Ollama provider (the docs' example id is ``ollama``). Other hosts get the
-Headwaters picker names (``headwaters/free`` ...), which any OpenAI-compatible host can use once
-the gateway is configured. The user runs every command; nothing is executed here.
+``OPENCODE_PROVIDER_ID/<id>`` for a local model, which is the provider entry
+``headwaters install --host opencode`` writes (FU-205-3, HDW-403). Other hosts get the Headwaters
+picker names (``headwaters/free`` ...), which any OpenAI-compatible host can use once the gateway is
+configured. The user runs every command; nothing is executed here.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from headwaters.core.router_types import RouteRequest
 from headwaters.core.rules import Scope
 from headwaters.core.scope import ScopeError
 from headwaters.core.state_limits import active_walls
+from headwaters.installer.names import OPENCODE_PROVIDER_ID
 from headwaters.mcp.threads import run_blocking
 from headwaters.mcp.tools import prompts
 from headwaters.mcp.tools.attach import pack_paths
@@ -33,9 +35,8 @@ from headwaters.mcp.tools.schemas import ErrorInfo, SuggestionOut
 from headwaters.mcp.tools.schemas_more import HostSwitch, RecommendResult, SwitchHostResult
 from headwaters.mcp.tools.workspace import open_workspace
 
-__all__ = ["OLLAMA_PROVIDER_ID", "recommend", "should_switch", "switch_commands"]
+__all__ = ["OPENCODE_PROVIDER_ID", "recommend", "should_switch", "switch_commands"]
 
-OLLAMA_PROVIDER_ID = "ollama"  # the id the OpenCode docs use for a user-defined Ollama provider
 _PICKER = {"auto": "headwaters/auto", "free": "headwaters/free", "local": "headwaters/local"}
 _PROBE_TOOL: ToolSpec = {
     "type": "function",
@@ -52,7 +53,7 @@ def _opencode_model(candidate: Candidate) -> str:
     """The model id as OpenCode names it, from the model's source provider."""
     row = candidate.row
     if candidate.is_local:
-        return f"{OLLAMA_PROVIDER_ID}/{row.id}"
+        return f"{OPENCODE_PROVIDER_ID}/{row.id}"
     if row.id.startswith("opencode/"):
         return row.id
     if row.provider == "opencode":
