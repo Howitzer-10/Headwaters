@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from headwaters.core.executor.types import Delta
 from headwaters.core.policy.filters import Candidate
@@ -18,6 +19,7 @@ WEAKER = "openrouter/weaker:free"
 PAID = "anthropic/paid-model"
 LOC_A = "local-a"
 LOC_B = "local-b"
+LOC_C = "local-c"
 
 
 def _agentic(mid: str, code: float, agentic: float, **kw: float) -> Candidate:
@@ -134,4 +136,79 @@ def test_below_floor_local_with_nothing_stronger_is_flagged_verify_failed(tmp_pa
     assert rig.dispatch.calls == [LOC_A]
     assert result.decision.model == LOC_A
     assert result.verify_failed
+    assert rig.cloud_clients == 0
+
+
+# HDW-154 (D10 refinement, FU-129-2): an agentic escalation also keeps tool-call strength.
+AGENTIC = requirements("code", complexity=2, agentic=True)  # floor 80 + 15 agentic = 95
+NO_TOOL_NOTE = "no stronger model keeps tool strength"
+
+
+def _tool_strength(mid: str, tier: str, code: float, tools: float, **kw: Any) -> Candidate:
+    c = candidate(mid, tier, code, **kw)
+    return replace(c, scores={**c.scores, "agentic_tools": tools})
+
+
+def test_agentic_escalation_keeps_an_equal_tool_score(tmp_path: Path) -> None:
+    pool = [
+        _tool_strength(CHEAP, "free_cloud", 75.0, 90.0),
+        _tool_strength(STRONGER, "free_cloud", 78.0, 90.0, expected_tps=10.0),
+    ]
+    rig = Rig(tmp_path, {CHEAP: BAD, STRONGER: OK}, pool, reqs=AGENTIC, verifiers=[Verifier()])
+    result = rig.run()
+    assert rig.dispatch.calls == [CHEAP, STRONGER]
+    assert result.decision.model == STRONGER
+    assert not result.verify_failed
+
+
+def test_agentic_escalation_skips_a_higher_task_score_with_weaker_tools(tmp_path: Path) -> None:
+    pool = [
+        _tool_strength(CHEAP, "free_cloud", 75.0, 90.0),
+        _tool_strength(WEAKER, "free_cloud", 80.0, 60.0, expected_tps=10.0),
+        _tool_strength(STRONGER, "free_cloud", 78.0, 95.0, expected_tps=10.0),
+    ]
+    rig = Rig(tmp_path, {CHEAP: BAD, STRONGER: OK}, pool, reqs=AGENTIC, verifiers=[Verifier()])
+    result = rig.run()
+    assert rig.dispatch.calls == [CHEAP, STRONGER]
+    assert result.decision.model == STRONGER
+    assert not result.verify_failed
+
+
+def test_agentic_with_nothing_as_strong_at_tools_says_so(tmp_path: Path) -> None:
+    pool = [
+        _tool_strength(CHEAP, "free_cloud", 75.0, 90.0),
+        _tool_strength(WEAKER, "free_cloud", 80.0, 60.0, expected_tps=10.0),
+    ]
+    rig = Rig(tmp_path, {CHEAP: BAD, WEAKER: OK}, pool, reqs=AGENTIC, verifiers=[Verifier()])
+    result = rig.run()
+    assert rig.dispatch.calls == [CHEAP]  # the weaker-tools model is never a retry
+    assert result.decision.model == CHEAP
+    assert result.verify_failed
+    assert any(NO_TOOL_NOTE in r for r in result.reasons)
+
+
+def test_a_non_agentic_request_still_escalates_on_a_weaker_tool_score(tmp_path: Path) -> None:
+    pool = [
+        _tool_strength(CHEAP, "free_cloud", 75.0, 75.0),
+        _tool_strength(STRONGER, "free_cloud", 78.0, 10.0, expected_tps=10.0),
+    ]
+    rig = Rig(tmp_path, {CHEAP: BAD, STRONGER: OK}, pool, verifiers=[Verifier()])
+    result = rig.run()
+    assert rig.dispatch.calls == [CHEAP, STRONGER]
+    assert not result.verify_failed
+
+
+def test_local_scope_agentic_escalation_stays_local_and_keeps_tool_strength(
+    tmp_path: Path,
+) -> None:
+    pool = [
+        _tool_strength(LOC_A, "local", 88.0, 85.0),
+        _tool_strength(LOC_B, "local", 90.0, 70.0, expected_tps=10.0),  # higher task, worse tools
+        _tool_strength(LOC_C, "local", 89.0, 86.0, expected_tps=10.0),
+    ]
+    rig = Rig(tmp_path, {LOC_A: BAD, LOC_C: OK}, pool, reqs=AGENTIC, verifiers=[Verifier()])
+    result = rig.run(scope="local")
+    assert rig.dispatch.calls == [LOC_A, LOC_C]
+    assert result.decision.model == LOC_C
+    assert not result.verify_failed
     assert rig.cloud_clients == 0

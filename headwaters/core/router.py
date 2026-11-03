@@ -45,6 +45,7 @@ from headwaters.core.plugins import EscalationPlugin, LedgerPlugin, VerifierPlug
 from headwaters.core.policy.decide import decide
 from headwaters.core.policy.errors import NoRouteError
 from headwaters.core.policy.filters import Candidate, hard_filter
+from headwaters.core.policy.scoring import AGENTIC_TASK
 from headwaters.core.policy.types import PolicyContext, PolicyRequest, RouteDecision
 from headwaters.core.quotas import QuotaTracker, WallDecision
 from headwaters.core.router_log import LogEntry
@@ -425,7 +426,10 @@ class Router:
 
         ``stronger_than`` (escalation, F10) keeps only candidates whose task score is above it
         and passes ``escalation=None`` so the optimistic rung cannot fire again. The scope and
-        the hard filter still apply, so a local-only request retries on local models only.
+        the hard filter still apply, so a local-only request retries on local models only. For an
+        agentic request the escalation also keeps tool-call strength (HDW-154, D10): a candidate
+        whose ``agentic_tools`` score is *below* the failed model's is skipped, and when that
+        filter is what empties the pool the note says so.
         """
         pool = [c for c in run.candidates if c.id not in run.excluded]
         escalation = self._escalation()
@@ -433,6 +437,8 @@ class Router:
             task = run.reqs.soft.task
             pool = [c for c in pool if c.scores.get(task, 0.0) > stronger_than]
             escalation = None
+            if run.reqs.soft.agentic:
+                pool = self._keep_tool_strength(run, last, pool)
         fresh = self._with_live_availability(pool)
         try:
             return decide(
@@ -447,6 +453,22 @@ class Router:
                 last_error=last_error,
                 no_route=err,
             ) from err
+
+    @staticmethod
+    def _keep_tool_strength(
+        run: RouteRun, last: RouteDecision, pool: list[Candidate]
+    ) -> list[Candidate]:
+        """Drop escalations that would call tools worse than the model that just failed.
+
+        Not-below, not strictly-above (D10 refinement, HDW-154): equal tool strength still counts,
+        or a good escalation would be lost and the answer flagged when it need not be.
+        """
+        failed = run.candidate(last.model)
+        floor = failed.scores.get(AGENTIC_TASK, 0.0) if failed is not None else 0.0
+        kept = [c for c in pool if c.scores.get(AGENTIC_TASK, 0.0) >= floor]
+        if pool and not kept:
+            run.notes.append(f"{last.model}: no stronger model keeps tool strength")
+        return kept
 
     # ------------------------------------------------------------------ steps 6-7
 
