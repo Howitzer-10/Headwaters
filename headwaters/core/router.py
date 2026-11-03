@@ -222,10 +222,12 @@ class Router:
                     "no_result", "The model returned no result.", model=decision.model
                 )
             if seen_first or not failure.before_first_token:
-                # Tokens already reached the caller: never switch models mid-stream.
+                # Tokens already reached the caller: never switch models mid-stream. The session
+                # drops the pin, exactly as it does after a failed verification (FU-134-3).
                 self._record_wall(run, decision, failure)
                 run.attempts.append(Attempt(decision.model, decision.tier, failure.code))
                 self._log_failure(run, decision, failure.code)
+                self._forget(run, decision)
                 yield RouteEvent("final", error=failure)
                 return
             decision = await self._recover(run, decision, failure)

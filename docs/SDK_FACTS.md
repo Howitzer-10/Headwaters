@@ -42,3 +42,4 @@ that name it.
 | Fact | Verified by | Version | Ticket |
 | --- | --- | --- | --- |
 | `AsyncOpenAI(base_url="http://127.0.0.1:4000/v1", http_client=httpx.AsyncClient(transport=httpx.ASGITransport(app=app)))` drives an ASGI app in-process: `chat.completions.create(..., stream=True)` parses our SSE frames (role/content/finish/usage chunks and `data: [DONE]`), and a JSON error body surfaces as `BadRequestError` (400), `NotFoundError` (404) or `InternalServerError` (502) with the body `message` in `str(exc)` | `tests/test_gateway_openai.py` | openai 2.54.0 | HDW-301 |
+| An SSE chunk carrying an unknown top-level key (ours: `headwaters`) still parses: the streaming `ChatCompletionChunk` keeps the known fields and tolerates the extra one, so additive per-chunk metadata does not break the client | `tests/test_gateway_openai.py` (the SDK stream tests run against the chunks HDW-302 adds to) | openai 2.54.0 | HDW-302 |

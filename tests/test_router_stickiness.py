@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from headwaters.core.executor.errors import ProviderError
 from headwaters.core.executor.types import Delta
 from headwaters.core.hardware.residency import ResidencyInputs
 from headwaters.core.policy.scoring import score_candidate
 from headwaters.core.router_prep import with_session_model
 from headwaters.core.state_misc import get_session, pin_session
+from tests.executor_support import Step
 from tests.router_rig import Rig
 from tests.router_support import OK, RATE_LIMITED, Verifier, candidate
 from tests.test_policy_scoring import RULES, soft
@@ -87,6 +89,24 @@ def test_verify_failed_does_not_pin_and_the_next_turn_moves_on(tmp_path: Path) -
     session = get_session(rig.db, KEY)
     assert session is not None
     assert session.pinned_model == B
+
+
+def test_a_mid_stream_failure_unpins_the_session(tmp_path: Path) -> None:
+    # A stream that dies after the first token pins nothing: the caller has half an answer, so
+    # the session drops the model exactly as it would after a failed verification (FU-134-3).
+    broken: list[Step] = [Delta(content="par"), ProviderError(500, {}, "", kind="stream_error")]
+    pool = [candidate(A, "free_cloud", 90.0), candidate(B, "free_cloud", 92.0)]
+    rig = Rig(tmp_path, {A: broken, B: OK}, pool)
+    pin_session(rig.db, KEY, A, "free_cloud")
+    events = rig.stream(session_id="s1")
+    assert events[-1].error is not None
+    session = get_session(rig.db, KEY)
+    assert session is not None
+    assert session.pinned_model is None
+    moved = rig.stream(session_id="s1")
+    assert moved[0].kind == "route"
+    assert moved[0].decision is not None
+    assert moved[0].decision.model == B
 
 
 def test_a_new_model_is_pinned_only_on_ok(tmp_path: Path) -> None:

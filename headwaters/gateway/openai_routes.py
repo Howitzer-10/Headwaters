@@ -23,7 +23,12 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
-from headwaters.core.advice import REMOTE_IMAGE_ADVICE
+from headwaters.core.advice import (
+    BELOW_FLOOR_WARNING,
+    REMOTE_IMAGE_ADVICE,
+    STREAMED_VERIFY_NOTE,
+    UNCHECKED_NOTE,
+)
 from headwaters.core.executor.errors import ExecutorError
 from headwaters.core.executor.types import ExecOptions, ExecResult, ToolCall
 from headwaters.core.logging import get_logger
@@ -43,6 +48,11 @@ CHAT_PATH = "/v1/chat/completions"
 COMPLETION_OBJECT = "chat.completion"
 CHUNK_OBJECT = "chat.completion.chunk"
 IMAGE_URL_NOT_LOCAL = "image_url_not_local"
+BELOW_FLOOR_HEADER = "x-headwaters-below-floor"
+SUGGESTION_HEADER = "x-headwaters-suggestion"
+VERIFY_HEADER = "x-headwaters-verify"
+ADVICE_HEADER = "x-headwaters-advice"
+VERIFY_PENDING = "pending"
 _log = get_logger("gateway")
 
 # What ``Router.handle`` can raise before or instead of an answer: a policy refusal, an upstream
@@ -88,7 +98,7 @@ def build_gateway_app(
         return JSONResponse(card(found))
 
     async def post_chat(request: Request) -> Response:
-        return await _chat(request, router)
+        return await _chat(request, router, rules)
 
     routes = [
         Route(HEALTH_PATH, get_health, methods=["GET"]),
@@ -99,7 +109,11 @@ def build_gateway_app(
     return GuardedApp(Starlette(routes=routes), token)
 
 
-async def _chat(request: Request, router: Callable[[], RouterLike | None]) -> Response:
+async def _chat(
+    request: Request,
+    router: Callable[[], RouterLike | None],
+    rules: Callable[[], Rules],
+) -> Response:
     """One ``POST /v1/chat/completions``: validate, route through the live router, translate."""
     body = await _json_body(request)
     if isinstance(body, Response):
@@ -122,17 +136,21 @@ async def _chat(request: Request, router: Callable[[], RouterLike | None]) -> Re
     if live is None:
         return error_response(503, "gateway_not_ready", "The daemon is still starting; retry.")
     wanted = _request_for(body, model.strip(), messages, parsed, request.headers)
+    live_rules = rules()
     try:
         if wanted.stream:
             events = cast("AsyncIterator[RouteEvent]", live.handle(wanted))
-            return await _stream(events, body)
+            return await _stream(events, body, live_rules)
         result = await cast("Coroutine[Any, Any, RouteResult]", live.handle(wanted))
     except SERVING_ERRORS as exc:
         return failure_response(exc)
     except Exception:  # a broken engine must not hand the IDE a traceback
         _log.exception("gateway chat failed")
         return error_response(500, "internal_error", "The gateway could not serve the request.")
-    return JSONResponse(_completion(result), headers=_meta_headers(result.decision))
+    return JSONResponse(
+        _completion(result),
+        headers=_meta_headers(result.decision, live_rules, result=result),
+    )
 
 
 def _request_for(
@@ -177,7 +195,9 @@ def _request_for(
     )
 
 
-async def _stream(events: AsyncIterator[RouteEvent], body: Mapping[str, Any]) -> Response:
+async def _stream(
+    events: AsyncIterator[RouteEvent], body: Mapping[str, Any], rules: Rules
+) -> Response:
     """Start the SSE answer; a refusal before the first token is still a JSON error."""
     try:
         first = await anext(events)
@@ -185,21 +205,27 @@ async def _stream(events: AsyncIterator[RouteEvent], body: Mapping[str, Any]) ->
         return failure_response(exc)
     except StopAsyncIteration:
         return error_response(502, "empty_stream", "The gateway produced no answer.")
-    headers = _meta_headers(first.decision)
+    headers = _meta_headers(first.decision, rules, pending=True)
     headers["Cache-Control"] = "no-cache"
-    chunks = _chunks(first, events, include_usage=_wants_usage(body))
+    chunks = _chunks(first, events, include_usage=_wants_usage(body), rules=rules)
     return StreamingResponse(chunks, media_type="text/event-stream", headers=headers)
 
 
 async def _chunks(
-    first: RouteEvent, events: AsyncIterator[RouteEvent], *, include_usage: bool
+    first: RouteEvent,
+    events: AsyncIterator[RouteEvent],
+    *,
+    include_usage: bool,
+    rules: Rules,
 ) -> AsyncIterator[str]:
     completion_id, created = _completion_id(), int(time.time())
-    model = first.decision.model if first.decision is not None else ""
+    decision = first.decision
+    model = decision.model if decision is not None else ""
     yield _sse(_chunk(completion_id, created, model, {"role": "assistant", "content": ""}))
     tool_index, result, failure = 0, None, None
     async for event in _chain(first, events):
         if event.kind == "route":
+            decision = event.decision if event.decision is not None else decision
             model = event.decision.model if event.decision is not None else model
         elif event.kind == "stream":
             item = event.event
@@ -220,6 +246,10 @@ async def _chunks(
     else:
         done = _chunk(completion_id, created, model, None)
         done["choices"][0]["finish_reason"] = _finish_reason(result.result if result else None)
+        if decision is not None:
+            # The streamed answer is checked after the fact, so the result arrives here: this is
+            # the only place a client learns the verification outcome of a streamed answer.
+            done["headwaters"] = _headwaters_meta(decision, result, rules)
         yield _sse(done)
         if include_usage and result is not None:
             yield _sse(
@@ -233,6 +263,7 @@ async def _chunks(
 
 
 def _completion(result: RouteResult) -> dict[str, Any]:
+    """The OpenAI body, unchanged: the routing facts live in the headers (FU-123-2)."""
     message: dict[str, Any] = {"role": "assistant", "content": result.result.content or ""}
     if result.result.tool_calls:
         message["tool_calls"] = [_tool_json(call) for call in result.result.tool_calls]
@@ -271,15 +302,86 @@ async def _chain(first: RouteEvent, rest: AsyncIterator[RouteEvent]) -> AsyncIte
         yield event
 
 
-def _meta_headers(decision: RouteDecision | None) -> dict[str, str]:
+def _meta_headers(
+    decision: RouteDecision | None,
+    rules: Rules,
+    *,
+    result: RouteResult | None = None,
+    pending: bool = False,
+) -> dict[str, str]:
     """The routing headers (v3.3 §5.1); absent when nothing was decided."""
     if decision is None:
         return {}
-    return {
+    headers = {
         "x-headwaters-model": decision.model,
         "x-headwaters-tier": decision.tier,
+        "x-headwaters-scope": str(decision.scope.scope),
         "x-headwaters-reason": decision.rung,
     }
+    if decision.below_floor:
+        headers[BELOW_FLOOR_HEADER] = "true"
+        code = _suggestion(decision)
+        if code is not None:
+            headers[SUGGESTION_HEADER] = code
+    status = _verify_status(decision, result, pending=pending)
+    if status is not None:
+        headers[VERIFY_HEADER] = status
+    note = _advice(decision, result, rules, pending=pending)
+    if note:
+        headers[ADVICE_HEADER] = note
+    return headers
+
+
+def _headwaters_meta(
+    decision: RouteDecision, result: RouteResult | None, rules: Rules
+) -> dict[str, Any]:
+    """The same facts as the routing headers, for a body that scrolls headers out of reach."""
+    return {
+        "model": decision.model,
+        "tier": decision.tier,
+        "scope": str(decision.scope.scope),
+        "reason": decision.rung,
+        "below_floor": decision.below_floor,
+        "suggestion": _suggestion(decision),
+        "verify_status": _verify_status(decision, result, pending=False),
+        "advice": _advice(decision, result, rules, pending=False)
+        if rules.advice == "inline"
+        else None,
+    }
+
+
+def _suggestion(decision: RouteDecision) -> str | None:
+    return decision.suggestions[0].code if decision.suggestions else None
+
+
+def _verify_status(
+    decision: RouteDecision | None, result: RouteResult | None, *, pending: bool
+) -> str | None:
+    """``pending`` while the check has not run yet (a stream), else the gate's own outcome.
+
+    ``None`` means no check was due at all; an outcome is never invented, so an answer no gate
+    looked at is reported ``unchecked`` by the router and never as verified.
+    """
+    if pending:
+        return VERIFY_PENDING if decision is not None and decision.verify_required else None
+    return None if result is None else result.verify_status
+
+
+def _advice(
+    decision: RouteDecision | None, result: RouteResult | None, rules: Rules, *, pending: bool
+) -> str | None:
+    """The note that explains a refusal-shaped answer; only when advice is on at all."""
+    if decision is None or rules.advice == "off":
+        return None
+    parts: list[str] = []
+    if decision.below_floor:
+        parts.append(BELOW_FLOOR_WARNING)
+    if pending:
+        if decision.verify_required:
+            parts.append(STREAMED_VERIFY_NOTE)
+    elif result is not None and result.verify_status == "unchecked":
+        parts.append(UNCHECKED_NOTE)
+    return " ".join(parts) if parts else None
 
 
 def _usage(result: ExecResult) -> dict[str, int]:
