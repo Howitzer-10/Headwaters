@@ -4,6 +4,11 @@ Use this for every Linux release. It covers the per-user prefix, `install.sh`, t
 unit and the itch.io `linux-beta` channel. Everything here is per user: no step needs `sudo`, and
 nothing is written outside `$XDG_DATA_HOME` and `$XDG_CONFIG_HOME` (HDW-406).
 
+> **Stage 2 only.** This checklist is a Stage 2 document, not a task list for today: no step in it
+> may be performed during Stage 1, and the Linux release is explicitly out of scope until Stage 2
+> starts. Its incomplete state is not a defect. Stage 2 begins only after Phase 7 is complete. See
+> [PLAN.md](PLAN.md) for the two stages and for what is active now.
+
 Two facts this document depends on and that a test asserts:
 
 - the payload ships no interpreter: `install.sh` runs `uv sync --frozen --no-dev --python 3.11`

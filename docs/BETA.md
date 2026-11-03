@@ -5,14 +5,22 @@ while it lasts, what a person has to prove before the gate will call the build r
 still missing. Every claim here is checked by `headwaters release-gate`; if this page and the code
 disagree, the gate fails.
 
+> **This is a Stage 2 page.** It describes the path to distribution and sale. There is no public beta
+> and no closed alpha running, and there is no 0.1 release of any kind. The closed-alpha criteria,
+> the clean-machine runs and the uploads described below are prerequisites the owner works through
+> during Stage 2, only after Phase 7 is complete. For what is actually happening now, read
+> [PLAN.md](PLAN.md).
+
 ## What beta means
 
-You get the whole product, free, for as long as beta lasts, with no account and no telemetry. You
-do not get a stability promise we have not measured: the closed-alpha criteria below, the clean
-Windows VM run and the clean Linux run have not been performed by a person yet, and the Windows
-build is not code-signed. Read [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) for the exact list of
-runs that still have to happen, and run `headwaters release-gate` to see the same list machine
-checked.
+A beta is a Stage 2 event here, not something in progress. When it happens, you get the whole
+product, free, for as long as beta lasts, with no account and no telemetry. You do not get a
+stability promise we have not measured: the closed-alpha criteria below, the clean Windows VM run and
+the clean Linux run have not been performed by a person yet, and the Windows build is not
+code-signed. None of that work is underway today; Stage 1 is the owner running the build from source
+and testing it, and [PLAN.md](PLAN.md) says when that changes. Read
+[RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) for the exact list of runs that still have to happen, and
+run `headwaters release-gate` to see the same list machine checked.
 
 ## Promises
 
@@ -83,6 +91,9 @@ The Windows and Linux clean-machine runs, the code-signing run and the two itch 
 release criteria rather than alpha criteria, and the gate lists them separately.
 
 ## What is not done
+
+This is the Stage 2 gap list. It is not being closed during Stage 1; it is written down so that
+Stage 2 has a definition of done.
 
 - No binary is published. There is no Microsoft Store listing, no itch build and no signed
   installer that anyone has downloaded.

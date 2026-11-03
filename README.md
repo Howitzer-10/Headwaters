@@ -2,11 +2,13 @@
 
 Windows-first, local-first LLM router that keeps developers coding when paid credits or rate limits run out.
 
-**Beta 0.1: nothing is published yet.** There is no installer download, no store build and no
-signed binary that a person has verified on a clean machine. `headwaters release-gate` says exactly
-which runs are missing and refuses to pass until they are recorded — see
-[docs/BETA.md](docs/BETA.md) and [docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md). Install from
-source until then.
+**Stage 1, owner evaluation: nothing is published yet.** There is no installer download, no store
+build, no signed binary and no beta of any kind. The owner is running the build from source and
+testing it; distribution and sale are a separate, deferred stage.
+[docs/PLAN.md](docs/PLAN.md) explains both stages, [docs/BETA.md](docs/BETA.md) and
+[docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md) record what a release will eventually require,
+and `headwaters release-gate` lists the runs that are still missing and refuses to pass until they are
+recorded. Install from source until then: [docs/DOGFOOD.md](docs/DOGFOOD.md) walks through it.
 
 ## Install
 
@@ -103,11 +105,14 @@ password, and do not share or copy the profile folder.
 
 ## Docs
 
-- [docs/BETA.md](docs/BETA.md): what beta promises, the free list and the closed-alpha exit criteria.
+- [docs/PLAN.md](docs/PLAN.md): the two stages, Stage 1 dogfooding now and Stage 2 distribution later.
+- [docs/DOGFOOD.md](docs/DOGFOOD.md): run the current build from source on your own machine.
+- [docs/FUNCTIONAL_TESTS.md](docs/FUNCTIONAL_TESTS.md): the Stage 1 checks to run by hand, and the bug-report template.
+- [docs/BETA.md](docs/BETA.md): what beta will promise at Stage 2, the free list and the closed-alpha exit criteria.
 - [docs/hosts/index.md](docs/hosts/index.md): every host, generated from the installer.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): the six common failures and the fix for each.
 - [docs/PRIVACY.md](docs/PRIVACY.md): what is stored, what is logged and what leaves the machine.
-- [docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md): the gate, the evidence file and the exit codes.
-- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) and [docs/RELEASE_CHECKLIST_LINUX.md](docs/RELEASE_CHECKLIST_LINUX.md): the runs a person has to do.
+- [docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md): the gate, the evidence file and the exit codes, all Stage 2.
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) and [docs/RELEASE_CHECKLIST_LINUX.md](docs/RELEASE_CHECKLIST_LINUX.md): the runs a person has to do at Stage 2.
 - [docs/ITCH_STORE.md](docs/ITCH_STORE.md): the store copy, kept in the repo so it is reviewed.
 - [docs/DECISIONS.md](docs/DECISIONS.md): binding decisions, D1 onwards.

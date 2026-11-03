@@ -101,6 +101,26 @@ WORKFLOW FOR THIS TICKET
 | 8 RC → 1.0 | **1.0** | SPW-801 → 803 | Hardening, decision evidence, apply decision |
 | 9 Extras | 1.x | SPW-901 → 905 | Fusion, duck, image, learning, sampling (SPW-905 DEFERRED, D9) |
 
+### Stage split: dogfooding first, distribution later
+
+The phases above still stand. What changed is when their end product is packaged: the work is split
+into two stages, recorded in `docs/PLAN.md` and as D16 in `docs/DECISIONS.md`.
+
+- **Stage 1, active now.** The owner runs the build from source on their own machine and functionally
+  tests it (`docs/DOGFOOD.md`, `docs/FUNCTIONAL_TESTS.md`), and then ticket work continues with Phase
+  5 (501-509), Phase 6 (601-608) and Phase 7 (701-706). No packaging, installer distribution, code
+  signing, itch.io or Linux release work happens in this stage, and bug reports from dogfooding become
+  tickets or follow-ups that may reorder what is left.
+- **Stage 2, deferred.** Distribution and sale: the Windows installer and its signature, the clean
+  Windows VM run, the Linux payload and its clean run, the itch `windows-beta` and `linux-beta`
+  uploads, the store copy and the 11 owner evidence steps. It starts only after Phase 7 is complete.
+- **Phase 4 (401-407) produced the first complete build**, and that build exists for the owner's
+  evaluation. No 0.1 public beta will be released, so the "Beta 0.x" labels above name phases of
+  ticket work, not published versions.
+- **The release gate stays red and unmodified** until Stage 2 records the owner steps. It is not a
+  bug to fix, and no document is edited to turn one of its lines green.
+- Phases 8 and 9 are not scheduled in either stage.
+
 **Critical path to Beta 0.1:** 001 → 002 → 003/004 → 101 → 102 → 103 → 105 → 106 → 108 → 109 → 110 → 112 → 113 → 114 → 115 → 117 → 201 → 204 → 301 → 302 → 403 → 405 → 407.
 
 **Scope-risk valve (v3.5 §G):** if 0.1 slips, ship Phases 1, 2 and 4 to closed-alpha testers without the gateway, then finish Phase 3 before the open beta.

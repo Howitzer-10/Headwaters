@@ -197,3 +197,39 @@ repeated, in the same words, on the itch store page.
 - What does not change: D6 (free beta, every feature included) and D3 (superseded). The free core
   list in `docs/BETA.md` is checked against `headwaters.core.features.CORE_FEATURES`, so the tester
   promise cannot silently pull a core feature behind the paywall it describes.
+
+## D16 detail: two stages, dogfooding first and distribution later
+
+**Decision.** The remaining work is split into two stages, recorded in `docs/PLAN.md` and repeated as
+a stage banner in `docs/BETA.md`, `docs/RELEASE_CHECKLIST.md`, `docs/RELEASE_CHECKLIST_LINUX.md` and
+`docs/RELEASE_EVIDENCE.md`, in the README and in the ticket backlog:
+
+- **No public beta and no closed alpha.** No 0.1 of any kind is released, and the "Beta 0.x" names in
+  the backlog are phase labels for ticket work, not published versions.
+- **Stage 1 is what happens now:** the owner runs the build from source on their own machine and
+  functionally tests it, and then ticket work continues through Phase 5 (501-509), Phase 6 (601-608)
+  and Phase 7 (701-706). No packaging, no installer distribution, no code signing, no clean-machine
+  runs, no itch.io pages or uploads, no store copy and no marketing during Stage 1.
+- **Stage 2 is distribution and sale, and it starts only when Phase 7 is complete.** It owns the
+  Windows installer and its signature, the clean Windows VM run, the Linux payload and its clean run,
+  the `windows-beta` and `linux-beta` uploads, the store copy, the 11 owner evidence steps in
+  `docs/release/evidence.json`, and a green release gate.
+- **The release gate stays red and unmodified until then.** `headwaters release-gate` exits 1 with its
+  owner steps blocked. That is the expected Stage 1 state: nobody treats it as a bug, works around it,
+  or edits a document so a line turns green, and `headwaters/control/release_gate.py` and its tests
+  are not touched.
+
+**Reason.** The owner's question is whether the product is worth taking to market, and that question
+is answered by using it, not by packaging it. Every Stage 2 step needs a machine or a person that is
+not available until the build is worth releasing, and a red gate that is expected removes the
+pressure to fake evidence.
+
+**Cost.** The release documents read as unfinished until Stage 2, the README says plainly that nothing
+is published, and the backlog keeps two kinds of work that used to look like one list.
+
+**Tickets.** None. Stage 1 is the functional test pass in `docs/FUNCTIONAL_TESTS.md` followed by
+Phases 5-7; Stage 2 is the 11 owner steps.
+
+**Revisit** if the owner's evaluation concludes the product is not worth distributing. Nothing has
+been published at that point, so the plan simply stops.
+

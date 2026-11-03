@@ -8,6 +8,10 @@ feed is valid. **Owner steps** are facts only a person can prove: a timed instal
 distribution, an Authenticode signature, two itch uploads, an open-source review and a tester list.
 Nothing in this file makes a machine check pass, and no test can make an owner step pass.
 
+> **Stage 2 only.** This file describes the evidence Stage 2 collects. Recording any of it during
+> Stage 1 would be wrong, because the runs it asks for are Stage 2 work and start only after Phase 7
+> is complete; until then the gate stays red and unmodified. See [PLAN.md](PLAN.md).
+
 ## Where the evidence lives
 
 `docs/release/evidence.json`, committed with the release pull request:
