@@ -22,8 +22,10 @@ from headwaters.core.keepwarm import KeepWarm, KeepWarmResult
 from headwaters.core.key_poll import KeyPollResult, poll_paid_walls
 from headwaters.core.logging import get_logger
 from headwaters.core.quotas import QuotaTracker
+from headwaters.core.router import Router
 from headwaters.core.rules import Rules, RulesProvider
 from headwaters.core.state import Database
+from headwaters.gateway.openai_routes import build_gateway_app
 from headwaters.gateway.server import HttpServer, build_app
 from headwaters.mcp.endpoint import build_endpoint
 from headwaters.mcp.jobs import recover_orphans
@@ -78,6 +80,10 @@ class Daemon:
     # ``RulesManager.current`` in production: the live rules, read at each use (HDW-131). The
     # daemon keeps no copy of its own (HDW-148, FU-131-2).
     rules_source: RulesProvider
+    # The gateway socket bound by ``pick_ports`` (FU-201-6): the OpenAI-compatible app is served
+    # on it, so the port in daemon.json is the one that is really listening. None in tests and
+    # when ``gateway.enabled`` is false.
+    gateway_sock: socket.socket | None = None
     started_at: float = field(default_factory=time.time)
     engine: Engine | None = None
     last_keep_warm: KeepWarmResult | None = None
@@ -90,6 +96,7 @@ class Daemon:
     # ``RulesManager.last_error`` in production: why the last reload was rejected, or ``None``.
     rules_error: Callable[[], object] | None = None
     _server: HttpServer | None = None
+    _gateway_server: HttpServer | None = None
     _stop: asyncio.Event | None = None
     # The rules the current engine was built from. Only the rebuild hook sets it, so a rebuild
     # started by the catalog refresh never goes back to older rules (and never has to read the
@@ -280,8 +287,22 @@ class Daemon:
     def request_stop(self) -> None:
         if self._stop is not None:
             self._stop.set()
-        if self._server is not None:
-            self._server.request_shutdown()
+        for server in (self._server, self._gateway_server):
+            if server is not None:
+                server.request_shutdown()
+
+    def gateway_app(self) -> Any:
+        """The OpenAI-compatible app (HDW-301), reading the live engine and rules per request."""
+        return build_gateway_app(
+            token=self.token,
+            router=self.gateway_router,
+            rules=lambda: self.live_rules,
+        )
+
+    def gateway_router(self) -> Router | None:
+        """The router of the engine in force, or None while the daemon is still building one."""
+        engine = self.live_engine()
+        return None if engine is None else engine.router
 
     async def serve(self) -> None:
         self._stop = asyncio.Event()
@@ -301,40 +322,60 @@ class Daemon:
             mcp_lifespan=endpoint.lifespan,
         )
         self._server = HttpServer(app, self.sock)
-        serving = asyncio.create_task(self._server.serve())
+        servers = [self._server]
+        if self.gateway_sock is not None:
+            self._gateway_server = HttpServer(self.gateway_app(), self.gateway_sock)
+            servers.append(self._gateway_server)
+        serving = [asyncio.create_task(server.serve()) for server in servers]
         tasks = [
-            asyncio.create_task(self._announce(serving)),
+            asyncio.create_task(self._announce(serving, servers)),
             asyncio.create_task(self._every(self.refresh_interval, self.refresh_once)),
             asyncio.create_task(self._every(self.keep_warm_interval, self.keep_warm_once)),
             asyncio.create_task(self._every(self.key_poll_interval, self.key_poll_once)),
         ]
         try:
-            await serving
+            await asyncio.gather(*serving)
         finally:
             self._stop.set()
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _announce(self, serving: asyncio.Task[None]) -> None:
-        """Write the state file only once the server really accepts connections."""
-        while not (self._server is not None and self._server.started):
-            if serving.done():
+    async def _announce(self, serving: list[asyncio.Task[None]], servers: list[HttpServer]) -> None:
+        """Write the state file only once every server really accepts connections."""
+        while not all(server.started for server in servers):
+            if any(task.done() for task in serving):
                 return
             await asyncio.sleep(0.05)
         write_info(self.info())
-        _log.info("daemon listening", extra={"port": self.ports.api, "pid": os.getpid()})
+        _log.info(
+            "daemon listening",
+            extra={
+                "port": self.ports.api,
+                "gateway": self.ports.gateway,
+                "pid": os.getpid(),
+            },
+        )
 
 
 def pick_ports(
     rules: Rules, preferred: int | None, api_default: int
-) -> tuple[socket.socket, DaemonPorts]:
-    """Bind the API socket (kept) and probe free ports for the gateway and the dashboard."""
+) -> tuple[socket.socket, socket.socket | None, DaemonPorts]:
+    """Bind the API socket and, when the gateway is enabled, the gateway socket. Both are kept.
+
+    FU-201-6: the gateway port used to be probed and recorded while nothing listened on it. It is
+    bound through ``bind_first_free`` here and served by the daemon, so daemon.json names the port
+    actually taken. The dashboard port stays a probe until it has a server (HDW-401).
+    """
     excluded = netports.read_excluded_ranges()
     sock = netports.bind_first_free(preferred or api_default, excluded=excluded)
     api = int(sock.getsockname()[1])
     taken = {api}
-    gateway = netports.pick_free_port(rules.gateway.port, excluded=excluded, taken=taken)
-    taken.add(gateway)
+    gateway_sock: socket.socket | None = None
+    gateway: int | None = None
+    if rules.gateway.enabled:
+        gateway_sock = netports.bind_first_free(rules.gateway.port, excluded=excluded, taken=taken)
+        gateway = int(gateway_sock.getsockname()[1])
+        taken.add(gateway)
     dashboard = netports.pick_free_port(rules.dashboard.port, excluded=excluded, taken=taken)
-    return sock, DaemonPorts(api=api, gateway=gateway, dashboard=dashboard)
+    return sock, gateway_sock, DaemonPorts(api=api, gateway=gateway, dashboard=dashboard)

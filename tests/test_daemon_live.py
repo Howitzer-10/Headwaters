@@ -15,6 +15,7 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 
 from headwaters.core import paths
@@ -70,6 +71,11 @@ def test_state_file_lists_loopback_ports_and_endpoint(live_home: Path) -> None:
     assert info.ports.dashboard is not None
     assert len({info.ports.api, info.ports.gateway, info.ports.dashboard}) == 3
     assert info.mcp_url.endswith("/mcp")
+    # FU-201-6: the recorded gateway port is really served (it used to be only probed).
+    assert info.ports.gateway is not None
+    gateway = httpx.get(f"http://{info.host}:{info.ports.gateway}/health", timeout=10.0)
+    assert gateway.status_code == 200
+    assert gateway.json()["gateway"] == "openai"
 
 
 def test_daemon_listens_on_loopback_only(live_home: Path) -> None:

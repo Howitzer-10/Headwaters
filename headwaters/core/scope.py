@@ -56,7 +56,12 @@ PRIVACY_TIERS: dict[Privacy, frozenset[TierName]] = {
 SUFFIX_STRATEGY: dict[str, Strategy] = {"quality": "quality_first", "primary": "primary_first"}
 SUFFIX_VERIFY: dict[str, VerifyMode] = {"verify": "always", "noverify": "off"}
 # ``headwaters/quality`` is the optional picker entry: auto scope + quality_first.
-_EXTRA_ALIASES: dict[str, tuple[Scope, Strategy]] = {"quality": ("auto", "quality_first")}
+_EXTRA_ALIASES: dict[str, tuple[Scope, Strategy]] = {
+    "quality": ("auto", "quality_first"),
+    # The duck picker entry (HDW-301) is the cheapest fast model that clears the floor. Its
+    # rubber-duck prompt overlay is not built yet (HDW-902), so it routes as ``cost_saver``.
+    "duck": ("auto", "cost_saver"),
+}
 
 
 class ScopeError(Exception):

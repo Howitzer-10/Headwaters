@@ -243,6 +243,7 @@ def test_decision_helpers() -> None:
         ("headwaters/cloud+primary+noverify", "cloud", "primary_first", "off"),
         ("Headwaters/Local", "local", None, None),
         ("headwaters/quality", "auto", "quality_first", None),
+        ("headwaters/duck", "auto", "cost_saver", None),
         ("headwaters/auto+quality+verify", "auto", "quality_first", "always"),
     ],
 )

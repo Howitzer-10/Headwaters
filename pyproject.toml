@@ -40,6 +40,7 @@ dev = [
     "freezegun",
     "import-linter>=2.15",
     "mypy>=2.4.1",
+    "openai>=2.54.0",
     "pre-commit>=4.7.0",
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
