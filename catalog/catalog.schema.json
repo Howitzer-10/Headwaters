@@ -626,6 +626,19 @@
           "default": null,
           "title": "Retains Data"
         },
+        "session_header": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Header"
+        },
         "skip_id_pattern": {
           "anyOf": [
             {

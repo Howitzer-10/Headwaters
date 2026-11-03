@@ -96,7 +96,7 @@ class TargetBuilder:
             name = model.removeprefix(prefix)
             if entry.refuses(name):
                 # The provider's own listing excludes this id for outside clients (OpenCode's
-                # free-tier models work only inside its app): refuse instead of calling for a 403.
+                # free-tier models are app-only): refuse instead of calling for a 429.
                 raise ExecutorError(
                     "provider_unsupported",
                     f"{entry.title} does not serve {name!r} outside its own app.",
@@ -104,9 +104,15 @@ class TargetBuilder:
                     model=model,
                 )
             base = entry.base_url.rstrip("/")
-            return ExecTarget(model, provider, f"{_OPENAI_ROUTE}/{name}", api_base=base)
+            return ExecTarget(
+                model,
+                provider,
+                f"{_OPENAI_ROUTE}/{name}",
+                api_base=base,
+                session_header=entry.session_header,
+            )
         if provider == OPENCODE:
-            # Free-tier models are served only to OpenCode itself (403 elsewhere); defence in
+            # Free-tier models are served only to OpenCode itself (429 elsewhere); defence in
             # depth, since discovery no longer offers them (A-OC-3, HDW-150).
             raise ExecutorError(
                 "provider_unsupported",

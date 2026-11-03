@@ -180,6 +180,11 @@ class ProviderEntry(_Model):
     honor_free_markers: bool = False
     key_required: bool = True
     skip_id_pattern: str | None = None
+    # HDW-515 amendment: a provider that routes a call by conversation requires this header on
+    # every chat request (OpenCode Go answers 400 MissingSessionID without it, so a plain
+    # bearer-style call can never succeed). The header name is data; the value is the request's
+    # stable session key, set by the executor. ``None`` means the provider needs no such header.
+    session_header: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
     retains_data: bool | None = None
     free_notes: str | None = None
     source_url: str = Field(pattern=r"^https://\S+$")

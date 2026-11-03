@@ -10,8 +10,10 @@ from typing import Any
 from headwaters.core.analyzer.requirements import Requirements
 from headwaters.core.catalog.schema import FreeLimit, GpuProfile
 from headwaters.core.executor.executor import Executor
+from headwaters.core.executor.types import ExecTarget
 from headwaters.core.features import FeatureRegistry
 from headwaters.core.policy.filters import Candidate
+from headwaters.core.policy.types import RouteDecision
 from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import Router, RouterConfig
 from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
@@ -41,6 +43,7 @@ class Rig:
         rules_source: Callable[[], Rules] | None = None,
         gpu_profiles: Mapping[str, GpuProfile] | None = None,
         analyzer: Any | None = None,
+        resolve: Callable[[RouteDecision], ExecTarget] | None = None,
     ) -> None:
         self.rules = rules or Rules()
         live: Rules | Callable[[], Rules] = rules_source or self.rules  # HDW-131
@@ -58,7 +61,7 @@ class Rig:
         executor = Executor(
             live,
             WALLS,
-            lambda d: target_for(d, cold=False),
+            resolve or (lambda d: target_for(d, cold=False)),
             cloud_factory=cloud_factory,
             local_factory=lambda host: self.dispatch,
             key_alias_for=key_alias_for,

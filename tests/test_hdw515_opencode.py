@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from headwaters.core.catalog import http as catalog_http
 from headwaters.core.catalog import sources
 from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
 from headwaters.core.catalog.schema import ProviderEntry
 from headwaters.core.engine import TargetBuilder
 from headwaters.core.executor.errors import ExecutorError
+from headwaters.core.executor.executor import Executor
+from headwaters.core.executor.types import Delta, ExecResult, ExecTarget
 from headwaters.core.keys import KeyStore
 from headwaters.core.providers import Registry, default_registry
 from headwaters.core.rules import Rules
-from tests.executor_support import decision
+from headwaters.core.user_agent import USER_AGENT
+from tests.executor_support import MESSAGES, WALLS, ScriptedBackend, decision
 from tests.keys_support import FakeKeyring
+from tests.router_rig import Rig
+from tests.router_support import candidate, registry_with
 from tests.test_discovery_sources import FakeHttp
 from tests.test_hdw514_registry import catalog_with, entry
 
@@ -194,3 +201,132 @@ def test_one_variable_keys_both_products_for_a_call() -> None:
     builder = TargetBuilder(Rules(), {"OPENCODE_API_KEY": "k-abcdef123456"}, registry=REGISTRY)
     assert builder.api_key_for("opencode") == "k-abcdef123456"
     assert builder.api_key_for("opencode-go") == "k-abcdef123456"
+
+
+# ------------------------------------------- the session header and the user agent (2026-11-03)
+
+
+def go_target(model: str = f"opencode-go/{PAID_MODEL}") -> Any:
+    return ExecTarget(
+        model,
+        "opencode-go",
+        f"openai/{PAID_MODEL}",
+        api_base=GO_BASE,
+        session_header="x-opencode-session",
+    )
+
+
+def go_call(conversation_id: str | None) -> tuple[ScriptedBackend, ExecResult]:
+    """One cloud call to the Go target, with the given conversation key."""
+    backend = ScriptedBackend([Delta(content="ok"), Delta(finish_reason="stop")])
+    target = go_target()
+    executor = Executor(
+        Rules(),
+        WALLS,
+        lambda d: target,
+        cloud_factory=lambda: backend,
+        local_factory=lambda host: backend,
+        api_key_for=lambda provider: "placeholder-key-123456",
+    )
+    result = asyncio.run(
+        executor.run(
+            decision("paid", target.model_id),
+            MESSAGES,
+            None,
+            False,
+            None,
+            conversation_id=conversation_id,
+        )
+    )
+    return backend, result
+
+
+def test_only_the_go_row_declares_a_session_header() -> None:
+    # Go answers 400 MissingSessionID without it; Console does not ask for one.
+    assert provider("opencode-go").session_header == "x-opencode-session"
+    assert provider("opencode").session_header is None
+
+
+def test_the_go_target_carries_the_header_the_catalog_row_names() -> None:
+    builder = TargetBuilder(Rules(), {}, registry=REGISTRY)
+    assert builder(decision("paid", f"opencode-go/{PAID_MODEL}")).session_header == (
+        "x-opencode-session"
+    )
+    assert builder(decision("paid", f"opencode/{PAID_MODEL}")).session_header is None
+
+
+def test_a_go_call_sends_the_conversation_key_in_the_session_header() -> None:
+    backend, result = go_call("id:ide-42")
+    assert result.content == "ok"
+    sent = backend.requests[0].headers
+    assert sent["x-opencode-session"] == "id:ide-42"
+    # The same conversation reuses the same id, so Go can route it efficiently.
+    again, _ = go_call("id:ide-42")
+    assert again.requests[0].headers["x-opencode-session"] == "id:ide-42"
+
+
+def test_a_go_call_without_a_conversation_id_is_refused() -> None:
+    with pytest.raises(ExecutorError) as raised:
+        go_call(None)
+    assert raised.value.code == "session_required"
+    assert "session id" in raised.value.message
+
+
+def test_a_console_call_sends_no_session_header() -> None:
+    backend = ScriptedBackend([Delta(content="ok"), Delta(finish_reason="stop")])
+    target = ExecTarget(
+        f"opencode/{PAID_MODEL}", "opencode", f"openai/{PAID_MODEL}", api_base=CONSOLE_BASE
+    )
+    executor = Executor(
+        Rules(),
+        WALLS,
+        lambda d: target,
+        cloud_factory=lambda: backend,
+        local_factory=lambda host: backend,
+        api_key_for=lambda provider: "placeholder-key-123456",
+    )
+    asyncio.run(executor.run(decision("paid", target.model_id), MESSAGES, None, False, None))
+    assert "x-opencode-session" not in backend.requests[0].headers
+
+
+GENERIC_AGENTS = (
+    "python-urllib",
+    "urllib",
+    "httpx",
+    "openai",
+    "asyncopenai",
+    "litellm",
+    "aiohttp",
+)
+
+
+def test_every_provider_call_names_headwaters_as_its_user_agent() -> None:
+    # Cloudflare answers a generic SDK/HTTP-library user agent with 403 "error code: 1010".
+    backend, _ = go_call("id:ide-42")
+    sent = backend.requests[0].headers["User-Agent"]
+    assert sent == USER_AGENT
+    assert sent.startswith("headwaters/")
+    assert not sent.lower().startswith(GENERIC_AGENTS)
+
+
+def test_discovery_uses_the_same_product_user_agent() -> None:
+    assert catalog_http.USER_AGENT == USER_AGENT
+    assert catalog_http.USER_AGENT.startswith("headwaters/")
+    assert not catalog_http.USER_AGENT.lower().startswith(GENERIC_AGENTS)
+
+
+def test_the_router_keys_the_go_session_header_to_the_conversation(tmp_path: Path) -> None:
+    model = f"opencode-go/{PAID_MODEL}"
+    target = go_target(model)
+    rig = Rig(
+        tmp_path,
+        {model: [Delta(content="ok"), Delta(finish_reason="stop")]},
+        [candidate(model, "paid", 96, price_in=3.0, price_out=15.0, is_primary=True)],
+        rules=Rules.model_validate({"strategy": "primary_first"}),
+        registry=registry_with(paid=True),
+        resolve=lambda d: target,
+    )
+    rig.run(headers={"x-session-id": "ide-42"})
+    sent = rig.dispatch.backends[model].requests[0]
+    assert sent.headers["x-opencode-session"] == "id:ide-42"
+    assert sent.headers["User-Agent"] == USER_AGENT

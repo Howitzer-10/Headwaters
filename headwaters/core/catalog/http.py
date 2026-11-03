@@ -13,7 +13,7 @@ import urllib.request
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
-USER_AGENT = "Headwaters-discovery"
+from headwaters.core.user_agent import USER_AGENT
 
 
 class SourceError(Exception):
