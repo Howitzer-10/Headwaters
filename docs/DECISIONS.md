@@ -29,6 +29,7 @@ Forward-looking notes, not decisions to implement now. Nothing below is ticketed
 - **A credits wall stops; it does not downgrade.** When paid tiers do become routable and a credits wall is hit, the product stops and tells the person. It does not silently downgrade them to a free model. Any downgrade to free must be an explicit, visible, opt-in behaviour. Recorded as a user directive on 2026-11-03.
 - **Cost- and quality-aware routing is wanted, not designed.** A future capability: routing paid-tier models on cost and quality, from a per-model price ledger, benchmark data and other metadata-derived ratings. Nothing here is designed or ticketed.
 - **Provenance for that future work.** This machine already runs a separate MCP-only solution called VRAMWeave-MCP, registered as the MCP server `vramweave-mcp`. It has done related work on pricing and metric data and should be reviewed as a starting point when that capability is eventually ticketed. The pointer was identified by the MCP server name alone; its source has not been surveyed and nothing here is designed from it.
+- **Fuller reference.** A fuller reference of the VRAMWeave-MCP prior art, including what is worth borrowing and what would not survive our topology, is in `docs/REFERENCE_VRAMWEAVE.md`.
 
 ## Deferred tickets (do not build)
 
