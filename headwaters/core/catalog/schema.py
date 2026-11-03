@@ -152,7 +152,8 @@ class Endpoints(_Model):
 
 ProviderTier = Literal["free_cloud", "paid"]
 # Names the router already uses for providers that are wired in code (or never routed).
-RESERVED_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "ollama", "opencode"})
+# ``opencode`` left this set in HDW-515: it is a catalog row now (Console, key required).
+RESERVED_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "ollama"})
 
 
 class ProviderEntry(_Model):
@@ -171,6 +172,10 @@ class ProviderEntry(_Model):
     auth_style: Literal["bearer"] = "bearer"
     metadata_url: str | None = Field(default=None, pattern=r"^https://\S+$")
     models_path: str = Field(default="/models", pattern=r"^/\S*$")
+    # HDW-515: some providers list models outside the chat root (OpenCode: chat on
+    # ``/inference/openai/v1``, listing on ``/inference/v1/models``). A full URL here wins over
+    # ``base_url + models_path``; it is never guessed, only read from the provider's docs.
+    models_endpoint: str | None = Field(default=None, pattern=r"^https://\S+$")
     tier: ProviderTier
     honor_free_markers: bool = False
     key_required: bool = True
@@ -188,7 +193,21 @@ class ProviderEntry(_Model):
 
     @property
     def models_url(self) -> str:
+        if self.models_endpoint is not None:
+            return self.models_endpoint
         return self.base_url.rstrip("/") + self.models_path
+
+    def refuses(self, model_id: str) -> bool:
+        """Whether ``skip_id_pattern`` covers this upstream id.
+
+        Discovery uses it to drop ids the provider has for its own client only; the executor uses
+        it so such a model is refused with a clear error instead of being called for a 403
+        (HDW-515, defence in depth — no model slug is ever hard-coded).
+        """
+        return (
+            self.skip_id_pattern is not None
+            and re.search(self.skip_id_pattern, model_id) is not None
+        )
 
 
 class SubscriptionRate(_Model):
@@ -291,19 +310,14 @@ class Catalog(_Model):
     def _cross_references(self) -> Self:
         problems: list[str] = []
         seen_names: set[str] = set()
-        seen_env: dict[str, str] = {}
+        # A repeated ``env_var`` is allowed (HDW-515: ``opencode`` and ``opencode-go`` both read
+        # one key): the key store keeps a record per provider name, so the share is safe.
         for provider in self.providers:
             if provider.name in seen_names:
                 problems.append(f"providers: name {provider.name!r} is listed twice")
             seen_names.add(provider.name)
             if provider.name in RESERVED_PROVIDER_NAMES:
                 problems.append(f"providers: {provider.name!r} is a reserved provider name")
-            if provider.env_var in seen_env:
-                problems.append(
-                    f"providers: {provider.env_var} is used by {seen_env[provider.env_var]!r} "
-                    f"and {provider.name!r}"
-                )
-            seen_env.setdefault(provider.env_var, provider.name)
         names: dict[str, int] = {}
         for index, entry in enumerate(self.models):
             for name in {entry.id.lower(), *(a.lower() for a in entry.aliases)}:

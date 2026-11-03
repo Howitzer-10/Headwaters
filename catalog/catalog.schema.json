@@ -590,6 +590,19 @@
           "default": null,
           "title": "Metadata Url"
         },
+        "models_endpoint": {
+          "anyOf": [
+            {
+              "pattern": "^https://\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Models Endpoint"
+        },
         "models_path": {
           "default": "/models",
           "pattern": "^/\\S*$",

@@ -94,6 +94,15 @@ class TargetBuilder:
         entry = self._registry.get(provider)
         if entry is not None:
             name = model.removeprefix(prefix)
+            if entry.refuses(name):
+                # The provider's own listing excludes this id for outside clients (OpenCode's
+                # free-tier models work only inside its app): refuse instead of calling for a 403.
+                raise ExecutorError(
+                    "provider_unsupported",
+                    f"{entry.title} does not serve {name!r} outside its own app.",
+                    provider=provider,
+                    model=model,
+                )
             base = entry.base_url.rstrip("/")
             return ExecTarget(model, provider, f"{_OPENAI_ROUTE}/{name}", api_base=base)
         if provider == OPENCODE:

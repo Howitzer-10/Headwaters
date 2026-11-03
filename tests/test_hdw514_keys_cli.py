@@ -30,6 +30,7 @@ CANONICAL = [
     "mistral",
     "pollinations",
     "opencode",
+    "opencode-go",
     "kilo",
     "ollama",
 ]

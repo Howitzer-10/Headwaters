@@ -26,6 +26,9 @@ EXPECTED = {
     "mistral": ("MISTRAL_API_KEY", "paid"),
     "pollinations": ("POLLINATIONS_API_KEY", "paid"),
     "kilo": ("KILO_API_KEY", "paid"),
+    # HDW-515: two products of one company, one variable, two endpoints, both paid.
+    "opencode": ("OPENCODE_API_KEY", "paid"),
+    "opencode-go": ("OPENCODE_API_KEY", "paid"),
 }
 
 
@@ -77,7 +80,6 @@ def test_default_registry_reads_the_seed_offline() -> None:
     "providers",
     [
         (entry(), entry(env_var="OTHER_KEY")),
-        (entry(), entry(name="other")),
         (entry(name="openrouter"),),
         (entry(name="Bad Name"),),
         (entry(env_var="lower"),),

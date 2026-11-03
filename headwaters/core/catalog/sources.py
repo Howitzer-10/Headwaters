@@ -333,12 +333,17 @@ def _registry_tier(entry: ProviderEntry, item: Mapping[str, Any], providers: lis
 def _registry_text_only(item: Mapping[str, Any]) -> tuple[bool, list[str]]:
     """``(is a chat model, input modalities)`` from either listing shape."""
     arch = _as_dict(item.get("architecture"))
-    outputs = [str(m) for m in _as_list(arch.get("output_modalities"))] or [
-        str(m) for m in _as_list(item.get("output_modalities"))
-    ]
-    inputs = [str(m) for m in _as_list(arch.get("input_modalities"))] or [
-        str(m) for m in _as_list(item.get("input_modalities"))
-    ]
+    modalities = _as_dict(item.get("modalities"))
+    outputs = (
+        [str(m) for m in _as_list(arch.get("output_modalities"))]
+        or [str(m) for m in _as_list(item.get("output_modalities"))]
+        or [str(m) for m in _as_list(modalities.get("output"))]
+    )
+    inputs = (
+        [str(m) for m in _as_list(arch.get("input_modalities"))]
+        or [str(m) for m in _as_list(item.get("input_modalities"))]
+        or [str(m) for m in _as_list(modalities.get("input"))]
+    )
     caps = _as_dict(item.get("capabilities"))
     if "completion_chat" in caps and caps["completion_chat"] is not True:
         return False, inputs
@@ -378,11 +383,13 @@ def registry_models(http: HttpClient, entry: ProviderEntry, api_key: str | None)
             or item.get("tools") is True
             or item.get("supports_tools") is True
             or caps.get("function_calling") is True
+            or _as_dict(caps.get("tools")).get("supported") is True
             or _any_true([_as_dict(p).get("supports_tools") for p in providers])
         )
         ctx = (
             _int(item.get("context_length"))
             or _int(_as_dict(item.get("top_provider")).get("context_length"))
+            or _int(_as_dict(item.get("limit")).get("context"))
             or next((c for p in providers if (c := _int(_as_dict(p).get("context_length")))), None)
         )
         free = tier == "free_cloud"
@@ -394,8 +401,11 @@ def registry_models(http: HttpClient, entry: ProviderEntry, api_key: str | None)
                 source=f"provider:{entry.name}",
                 modalities=inputs or ["text"],
                 tools_ok=tools,
-                json_ok=bool(params & {"response_format", "structured_outputs"}),
-                reasoning_ok="reasoning" in params or item.get("reasoning") is True,
+                json_ok=bool(params & {"response_format", "structured_outputs"})
+                or caps.get("structured_output") is True,
+                reasoning_ok="reasoning" in params
+                or item.get("reasoning") is True
+                or _as_dict(caps.get("reasoning")).get("supported") is True,
                 ctx=ctx,
                 price_in=0.0 if free else None,
                 price_out=0.0 if free else None,

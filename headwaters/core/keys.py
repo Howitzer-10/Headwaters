@@ -61,7 +61,9 @@ SHORT_FORMS: dict[str, str] = {
     "poll": "pollinations",
 }
 # Providers the router knows without a key: they have no key to save, but they are real names.
-_KEYLESS = (("opencode", "free_cloud"), ("ollama", "local"))
+# ``opencode`` left this set in HDW-515: it is a catalog row now and every callable model needs a
+# Console or Go key.
+_KEYLESS = (("ollama", "local"),)
 # A credential-store read is not free on Windows (the timer, the router and the CLI all read it),
 # so metadata and resolved values are cached briefly. Saving or removing a key clears its own
 # entry at once; another process's change is picked up within this window.
@@ -198,7 +200,11 @@ class KeyStore:
         if short in names:
             return short
         spellings = {var.lower(): name for name, var in STANDARD_ENV.items()}
-        spellings.update({e.env_var.lower(): e.name for e in self._providers()})
+        # Two products of one company can share a variable (HDW-515: one key covers ``opencode``
+        # and ``opencode-go``). The first catalog entry that declares it wins, so the answer never
+        # depends on anything but the registry order a person can read.
+        for entry in self._providers():
+            spellings.setdefault(entry.env_var.lower(), entry.name)
         spellings.update(
             {
                 e.api_key_env.lower(): e.name

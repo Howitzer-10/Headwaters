@@ -217,6 +217,28 @@
       "free_notes": "Models marked :free or isFree work without a key (200 requests per hour per IP); the rest need a key.",
       "source_url": "https://kilo.ai/docs/gateway/api-reference",
       "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "opencode", "title": "OpenCode Console", "env_var": "OPENCODE_API_KEY",
+      "base_url": "https://opencode.ai/inference/openai/v1", "auth_style": "bearer",
+      "metadata_url": "https://opencode.ai/inference/v1/models", "models_path": "/models",
+      "models_endpoint": "https://opencode.ai/inference/v1/models",
+      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": "(?i)-free$", "retains_data": null,
+      "free_notes": "Pay as you go. Free-tier models are real and listed at cost 0, but the docs say they work only inside the OpenCode app and other clients get HTTP 403 even with a key, so those ids are not offered and every callable model is paid.",
+      "source_url": "https://opencode.ai/docs/zen/",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "opencode-go", "title": "OpenCode Go", "env_var": "OPENCODE_API_KEY",
+      "base_url": "https://opencode.ai/inference/go/openai/v1", "auth_style": "bearer",
+      "metadata_url": "https://opencode.ai/inference/go/v1/models", "models_path": "/models",
+      "models_endpoint": "https://opencode.ai/inference/go/v1/models",
+      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "The Go plan is a subscription (Go, Go Plus, Go Teams). Beam Free and Iceman Contributor Free are included in it at no per-call price, but the plan itself is paid, so no model here counts as free.",
+      "source_url": "https://opencode.ai/docs/go/",
+      "checked": "2026-11-03", "verify": true
     }
   ],
   "secret_patterns": [

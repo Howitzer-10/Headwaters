@@ -115,3 +115,19 @@ All rows read from each provider's own public docs or public endpoints on 2026-1
 | Kilo: models marked free (`:free` suffix, `isFree: true`) work without a key at 200 requests per hour per IP; paid models need a key | Kilo gateway docs | docs as of 2026-11 | HDW-514 |
 | OpenCode: no page shows that a key changes the 403 non-OpenCode clients get for free-tier models (absence check; the docs say free-tier chat models require OpenCode) | opencode.ai/docs/zen and the Console pages | docs as of 2026-11 | HDW-514 |
 | litellm's `openai/<model>` route with an `api_base` and no `api_key` falls back to `OPENAI_API_KEY`, so a registered provider with no key must send a placeholder instead of nothing | litellm docs for OpenAI-compatible endpoints (not run live) | litellm as pinned | HDW-514 |
+
+## OpenCode providers (HDW-515)
+
+Read on 2026-11-03 from OpenCode's own Console and Go docs and from anonymous GETs of both listing
+endpoints. Two products, two endpoints, one key variable.
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| OpenCode Console and OpenCode Go are separate OpenAI-compatible chat roots: Console `https://opencode.ai/inference/openai/v1`, Go `https://opencode.ai/inference/go/openai/v1`; both take a bearer token, and one key variable covers both | Console and Go docs pages (their path examples) | docs as of 2026-11 | HDW-515 |
+| The model listing is **not** under the chat root: `GET https://opencode.ai/inference/v1/models` answers 200 with 80 models and `GET https://opencode.ai/inference/go/v1/models` answers 200 with 28 models, while `GET …/openai/v1/models` is 404 on both, so a listing URL is a catalog field and is never derived from the base URL | anonymous GET, read the status and body | 2026-11-03 | HDW-515 |
+| Both listings answer 401 `{"error":{"type":"server_error","message":"Invalid credential"}}` to a bogus `Authorization: Bearer …`, so each listing doubles as a key check (and is still 200 anonymously, so it is not a free-tier signal) | anonymous GET with a fake key | 2026-11-03 | HDW-515 |
+| Listing shape: `id`, `name`, `canonical_id`, `family`, `api.<family>.base_url`, `capabilities.tools.supported`, `capabilities.structured_output`, `capabilities.reasoning.supported`, `modalities.input/output`, `limit.context/output`, `cost.text.input/output.price` (USD per million tokens) | read the body | 2026-11-03 | HDW-515 |
+| Free-tier ids end `-free` and carry cost 0/0; the Console listing has 9 (`beam-free`, `crouton-alpha-free`, `deepseek-v4.1-flash-free`, `flint-40b-free`, `glm-5.3-flash-free`, `mimo-v2.6-flash-free`, `nemotron-3.5-lightning-free`, `nemotron-3.5-super-vl-free`, `pulse-alpha-free`). The client also shows "Nemotron 3 Ultra Free", which the listing does not carry, so the listing — not the picker — is what code reads | read the body; client observation for the missing one | 2026-11-03 | HDW-515 |
+| Console docs, verbatim: "Free-tier chat models are only available from within OpenCode; other clients receive HTTP 403, even with an API key." | Console inference and harnesses pages | docs as of 2026-11 | HDW-515 |
+| OpenCode Go is a paid subscription (Go $10/mo, Go Plus $40/mo, Go Teams $20/member/mo); its listing includes `beam-free` and `iceman-contributor-free` at cost 0/0 | Go docs page; anonymous GET of the Go listing | docs as of 2026-11 / 2026-11-03 | HDW-515 |
+| Whether a real Console key reaches the `-free` ids from outside the OpenCode app: **not verified: no key present** in the environment for this ticket. The docs say a key does not change the 403, so nothing here depends on it | absence check (docs) plus no key in the environment | 2026-11-03 | HDW-515 |
