@@ -26,6 +26,7 @@ from headwaters.core.executor.executor import Executor
 from headwaters.core.executor.types import Backend, ExecTarget
 from headwaters.core.features import FeatureRegistry, discover_features
 from headwaters.core.hardware.state import HardwareMonitor, HardwareState
+from headwaters.core.keys import KeyStore
 from headwaters.core.ollama_remote import RemotePatterns, remote_patterns_from
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.policy.types import RouteDecision
@@ -51,8 +52,15 @@ _REQUEST_CANDIDATES: ContextVar[Mapping[str, Candidate] | None] = ContextVar(
 class TargetBuilder:
     """``TargetResolver`` (decision -> what to call) and the key lookup for cloud calls."""
 
-    def __init__(self, rules: Rules, env: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        rules: Rules,
+        env: Mapping[str, str] | None = None,
+        *,
+        key_store: KeyStore | None = None,
+    ) -> None:
         self._env = os.environ if env is None else env
+        self._keys = key_store
         self._endpoints: dict[str, OpenAICompatEndpoint] = {
             e.name: e for e in rules.models.openai_compatible
         }
@@ -92,9 +100,14 @@ class TargetBuilder:
         return ExecTarget(model, provider, route)
 
     def api_key_for(self, provider: str) -> str | None:
-        """Key of a user-configured endpoint, from its env var. ``None`` leaves the lookup to
-        litellm, which reads the provider's standard variable. The OS credential store is
-        HDW-401."""
+        """The key a call to ``provider`` uses.
+
+        A ``KeyStore`` answers first (credential store, then the environment variable), so a key
+        saved with ``headwaters keys set`` reaches the call. Without a store this stays the
+        endpoint-only env lookup it always was.
+        """
+        if self._keys is not None:
+            return self._keys.api_key_for(provider)
         endpoint = self._endpoints.get(provider)
         if endpoint is None or not endpoint.api_key_env:
             return None
@@ -153,6 +166,7 @@ def build_engine(
     cloud_factory: Callable[[], Backend] = LiteLLMBackend,
     local_factory: Callable[[str], Backend] | None = None,
     env: Mapping[str, str] | None = None,
+    key_store: KeyStore | None = None,
     enable_classifier: bool = True,
     snapshot: Rules | None = None,
 ) -> Engine:
@@ -163,11 +177,15 @@ def build_engine(
     build time: ``snapshot`` when the caller has it (the daemon, so its stale-engine check and
     the build agree), else one call of the provider. The daemon builds a new engine whenever
     the rules change (HDW-148); a request already running finishes on the engine it started on.
+
+    Keys come from ``key_store`` (the daemon's credential store); without one a store over
+    ``rules`` and ``env`` is built here, so the executor and the router's key-scoped walls agree.
     """
     provider = as_provider(rules)
     rules = snapshot if snapshot is not None else provider()
     patterns = remote_patterns_from(catalog)
-    targets = TargetBuilder(rules, env)
+    keys = key_store if key_store is not None else KeyStore(rules, env=env)
+    targets = TargetBuilder(rules, env, key_store=keys)
     registry = FeatureRegistry()
     discover_features(registry)
     registry.set_flags(rules.features)
@@ -178,7 +196,8 @@ def build_engine(
         targets,
         cloud_factory=cloud_factory,
         local_factory=local_factory,
-        api_key_for=targets.api_key_for,
+        api_key_for=keys.api_key_for,
+        key_alias_for=keys.key_alias_for,
         remote_patterns=patterns,
     )
     chain = analyzer or build_chain(catalog, rules.tiers.local, enable_layer3=enable_classifier)

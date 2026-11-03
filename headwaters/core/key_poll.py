@@ -76,11 +76,15 @@ def poll_paid_walls(
     *,
     now: float | None = None,
     key_url: str | None = None,
+    provider_for: Callable[[str], str | None] | None = None,
 ) -> KeyPollResult:
     """Poll each key that has a paid wall. ``rules`` is the live rules, read by the caller.
 
-    ``key_for(provider)`` returns the secret to send (never logged, never stored), or None to skip
-    that key. Providers other than OpenRouter are skipped: no balance endpoint is known for them.
+    ``key_for(alias)`` returns the secret to send (never logged, never stored), or None to skip
+    that key. ``provider_for(alias)`` names the provider a key alias belongs to, so a key saved
+    under a custom alias (``work``) polls as its real provider (HDW-401); without it a key wall is
+    read as OpenRouter's. Providers other than OpenRouter are skipped: no balance endpoint is
+    known for them.
     """
     blocked = network_block(rules)
     if blocked is not None:
@@ -89,16 +93,21 @@ def poll_paid_walls(
     polled: list[str] = []
     lifted: list[str] = []
     for wall in paid_walls(db, at):
-        if wall.provider != POLLED_PROVIDER:
+        provider = wall.provider
+        if provider_for is not None:
+            provider = provider_for(wall.alias) or provider
+        if provider != POLLED_PROVIDER:
             continue
-        secret = key_for(wall.provider)
+        # A wall written before the key was renamed, or by an older build, names an alias with no
+        # key of its own: it then polls with the provider's key, as it always did.
+        secret = key_for(wall.alias) or key_for(provider)
         if not secret:
             continue
         status = quotas.poll_key(
             http,
             secret,
             alias=wall.alias,
-            provider=wall.provider,
+            provider=provider,
             airplane=rules.airplane,
             local_lock=rules.private_lock,
             url=key_url,

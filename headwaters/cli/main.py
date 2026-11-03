@@ -13,6 +13,7 @@ from headwaters.cli import (
     cmd_catalog,
     cmd_daemon,
     cmd_features,
+    cmd_keys,
     cmd_mcp,
     cmd_models,
     cmd_pick,
@@ -31,8 +32,10 @@ app = typer.Typer(
 
 models_app = typer.Typer(help="Discovered models: refresh from live sources, or list.")
 catalog_app = typer.Typer(help="Model catalog: update from the signed feed, or show its status.")
+keys_app = typer.Typer(help="API keys: save them in the OS credential store, and test them.")
 app.add_typer(models_app, name="models")
 app.add_typer(catalog_app, name="catalog")
+app.add_typer(keys_app, name="keys")
 
 
 def _version_callback(value: bool) -> None:
@@ -70,3 +73,4 @@ cmd_scope.register(app)
 cmd_features.register(app)
 cmd_models.register(models_app)
 cmd_catalog.register(catalog_app)
+cmd_keys.register(keys_app)

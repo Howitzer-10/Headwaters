@@ -20,6 +20,7 @@ from headwaters.core.daemon_info import DaemonInfo, DaemonPorts, write_info
 from headwaters.core.engine import Engine, build_engine
 from headwaters.core.keepwarm import KeepWarm, KeepWarmResult
 from headwaters.core.key_poll import KeyPollResult, poll_paid_walls
+from headwaters.core.keys import KeyStore
 from headwaters.core.logging import get_logger
 from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import Router
@@ -35,7 +36,6 @@ __all__ = ["Daemon", "pick_ports", "run_in_daemon_thread"]
 
 KEEP_WARM_TIMEOUT_S = 120.0
 KEY_POLL_TIMEOUT_S = 15.0
-KEY_ENV = {"openrouter": "OPENROUTER_API_KEY"}  # litellm's standard variable (HDW-401: keyring)
 _log = get_logger("daemon")
 
 
@@ -84,6 +84,11 @@ class Daemon:
     # on it, so the port in daemon.json is the one that is really listening. None in tests and
     # when ``gateway.enabled`` is false.
     gateway_sock: socket.socket | None = None
+    # The credential store (HDW-401). Production leaves it None: a store over the *live* rules is
+    # built at each use, so a change to the endpoint list is seen. Tests inject one over a fake
+    # keyring backend. The executor, the router's key-scoped walls and the key-poll timer all read
+    # this one keyring, so they agree on a key's alias.
+    keys: KeyStore | None = None
     started_at: float = field(default_factory=time.time)
     engine: Engine | None = None
     last_keep_warm: KeepWarmResult | None = None
@@ -108,6 +113,13 @@ class Daemon:
     def live_rules(self) -> Rules:
         return self.rules_source()
 
+    @property
+    def key_store(self) -> KeyStore:
+        """The credential store in force: the injected one, else one over the live rules."""
+        if self.keys is not None:
+            return self.keys
+        return KeyStore(self.live_rules)
+
     def rebuild_engine(self, rules: Rules | None = None, *, reuse_catalog: bool = False) -> Engine:
         """Build an engine and swap it in. A call already running keeps the engine it started on.
 
@@ -126,7 +138,12 @@ class Daemon:
             else:
                 catalog, source = updater.load_active()
             self.engine = build_engine(
-                self.rules_source, catalog, source, self.db, snapshot=snapshot
+                self.rules_source,
+                catalog,
+                source,
+                self.db,
+                snapshot=snapshot,
+                key_store=self.keys,
             )
             self._built_with = snapshot
             return self.engine
@@ -245,19 +262,22 @@ class Daemon:
         """Check the balance of each key with a spent paid wall; a passing check lifts the wall.
 
         Same blocking rule as discovery (airplane, Private lock, local default scope), read from
-        the live rules. Blocking: it runs in a background thread. The key comes from the
-        provider's standard environment variable (the credential store is HDW-401).
+        the live rules. Blocking: it runs in a background thread. The key is the one the executor
+        would use: the credential store first, then the environment variable (HDW-401), so a key
+        saved with ``headwaters keys set`` also lifts its own paid wall.
         """
         engine = self.engine
         catalog = engine.catalog if engine is not None else updater.load_active()[0]
         quotas = QuotaTracker(self.db, lambda: self.live_rules, catalog.free_limits)
+        store = self.key_store
         result = poll_paid_walls(
             self.db,
             quotas,
             UrllibHttp(timeout=KEY_POLL_TIMEOUT_S),
             self.live_rules,
-            lambda provider: os.environ.get(KEY_ENV.get(provider, "")) or None,
+            store.secret_for,
             key_url=f"{catalog.endpoints.openrouter_base_url}/key",
+            provider_for=store.provider_for,
         )
         self.last_key_poll = result
         return result

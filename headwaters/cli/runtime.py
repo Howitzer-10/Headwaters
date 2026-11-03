@@ -21,6 +21,7 @@ from headwaters.core.executor.executor import Executor
 from headwaters.core.executor.types import ExecTarget
 from headwaters.core.features import FeatureRegistry, discover_features
 from headwaters.core.hardware.state import HardwareMonitor, HardwareState
+from headwaters.core.keys import KeyStore
 from headwaters.core.ollama_remote import remote_patterns_from
 from headwaters.core.policy.types import RouteDecision
 from headwaters.core.project_config import ProjectConfig, load_project_config
@@ -130,10 +131,13 @@ def _never_runs(decision: RouteDecision) -> ExecTarget:
 def build_router(rt: Runtime, hw: HardwareState | None, tokens: int | None = None) -> Router:
     """A router for dry runs: real scope, policy, quotas and candidates; no execution."""
     catalog = rt.catalog
+    keys = KeyStore(rt.rules)
     executor = Executor(
         rt.rules,
         WallClassifier(catalog.wall_patterns),
         _never_runs,
+        api_key_for=keys.api_key_for,
+        key_alias_for=keys.key_alias_for,
         remote_patterns=remote_patterns_from(catalog),
     )
     candidates = CandidateBuilder(rt.db, rt.rules, catalog, lambda: hw)

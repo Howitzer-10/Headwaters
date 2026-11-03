@@ -9,6 +9,7 @@ dependencies = [
     "cryptography",
     "httpx",
     "jsonschema",
+    "keyring>=25.7.0",
     "litellm==1.106.6",
     "mcp>=2.3,<3",
     "nvidia-ml-py",
