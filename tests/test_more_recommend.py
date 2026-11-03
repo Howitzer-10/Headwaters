@@ -119,6 +119,20 @@ def test_quota_status_lists_walls_and_counters(tmp_path: Path) -> None:
     assert 0 < data["walls"][0]["eta_s"] <= 60
 
 
+def test_quota_status_lists_local_models_and_names_the_wall(tmp_path: Path) -> None:
+    """FU-205-9: local models are in the answer; a wall's provider and key scope are separate."""
+    rig = Rig(tmp_path, cloud=True)
+    record_wall(rig.db, "provider:openrouter:paid", "exhausted", until=time.time() + 60)
+    data = _call(rig, "headwaters_quota_status")
+    wall = data["walls"][0]
+    assert wall["label"] == "OpenRouter: paid credits"
+    assert (wall["provider"], wall["credit"]) == ("OpenRouter", "paid")
+    local = next(row for row in data["models"] if row["tier"] == "local")
+    assert local["model"] == "qwen:14b"
+    assert local["status"] == "local"  # no provider quota is spent, but it is what is left
+    assert local["warm"] is True
+
+
 def _switch(rig: Rig, current: str) -> dict[str, Any]:
     return _call(rig, "headwaters_should_switch_host", {"current_model": current, "scope": "local"})
 

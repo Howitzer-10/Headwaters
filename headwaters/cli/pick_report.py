@@ -37,6 +37,7 @@ def plan_payload(plan: RoutePlan) -> dict[str, Any]:
             "strategy": s.strategy,
             "verify": s.verify,
             "locks": list(s.locks),
+            "active_locks": list(s.active_locks),
         },
         "requirements": {
             "task": r.soft.task,
@@ -82,7 +83,9 @@ def print_plan(plan: RoutePlan) -> None:
     head.add_row("Tier", d.tier)
     head.add_row("Scope", f"{s.scope} (tiers: {', '.join(sorted(s.tiers))})")
     head.add_row("Strategy", s.strategy)
-    head.add_row("Locks", ", ".join(s.locks) or "none")
+    # FU-128-3: every lock in force, so Private Mode plus the local scope never reads "none".
+    narrowing = f"  (narrowed by: {', '.join(s.locks)})" if s.locks else ""
+    head.add_row("Locks", (", ".join(s.active_locks) or "none") + narrowing)
     head.add_row("Rung", d.rung)
     head.add_row("Score / floor", f"{d.score:.1f} / {d.floor:.0f}")
     head.add_row("Below floor", yes_no(d.below_floor))

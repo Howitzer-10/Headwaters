@@ -14,9 +14,10 @@ from typing import Any
 from headwaters.core.engine import Engine
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.project_config import ProjectConfig
+from headwaters.core.quotas import parse_wall_subject, provider_name, wall_label
 from headwaters.core.rules import Rules
 from headwaters.core.scope import ScopeError, paid_scopes_available, resolve_scope
-from headwaters.core.state_limits import active_walls
+from headwaters.core.state_limits import WallRow, active_walls
 from headwaters.core.state_misc import kv_get
 from headwaters.core.state_models import list_models
 from headwaters.mcp.tools.context import ToolContext
@@ -49,18 +50,18 @@ def scope_info(engine: Engine | None, rules: Rules, project: ProjectConfig | Non
         decision = resolve_scope(rules, project, paid_scopes=paid, local_available=True)
     except ScopeError as exc:
         info.error = ErrorInfo(code=exc.code, message=exc.message, fix=exc.fix_hint)
-        info.locks = _lock_names(rules, ())
+        info.locks = _lock_names(rules)
         return info
     info.effective = decision.scope
     info.tiers = sorted(decision.tiers)
-    info.locks = _lock_names(rules, decision.locks)
+    # FU-128-1: every lock in force, straight from the scope decision.
+    info.locks = list(decision.active_locks)
     return info
 
 
-def _lock_names(rules: Rules, found: tuple[str, ...]) -> list[str]:
-    names = list(found)
-    if rules.private_lock and "private_lock" not in names:
-        names.append("private_lock")
+def _lock_names(rules: Rules) -> list[str]:
+    """The locks that apply when the scope itself could not be resolved."""
+    names = ["private_lock"] if rules.private_lock else []
     if rules.airplane:
         names.append("airplane")
     return names
@@ -82,15 +83,25 @@ def gpu_info(hw: HardwareState | None) -> GpuInfoOut | None:
 
 def walls_now(tc: ToolContext) -> list[WallInfo]:
     now = time.time()
-    return [
-        WallInfo(
-            subject=w.subject,
-            kind=w.kind,
-            eta_s=None if w.until is None else round(max(0.0, w.until - now), 1),
-            consecutive=w.consecutive_count,
-        )
-        for w in active_walls(tc.state(), now)
-    ]
+    return [_wall_info(tc, w, now) for w in active_walls(tc.state(), now)]
+
+
+def _wall_info(tc: ToolContext, w: WallRow, now: float) -> WallInfo:
+    """One wall: readable label, and provider and credit told apart (FU-122-4/205-9)."""
+    parts = parse_wall_subject(w.subject)
+    provider = provider_name(parts.name) if parts.kind == "provider" else None
+    if parts.kind == "key" and tc.key_store is not None:
+        found = tc.key_store().provider_for(parts.name)
+        provider = None if found is None else provider_name(found)
+    return WallInfo(
+        subject=w.subject,
+        label=wall_label(w.subject),
+        kind=w.kind,
+        eta_s=None if w.until is None else round(max(0.0, w.until - now), 1),
+        consecutive=w.consecutive_count,
+        provider=provider,
+        credit=parts.credit,
+    )
 
 
 def _savings(engine: Engine | None) -> dict[str, Any] | None:

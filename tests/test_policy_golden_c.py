@@ -167,5 +167,13 @@ def test_no_golden_row_leaves_the_local_tier_in_local_scope() -> None:
         assert {tiers[m] for m in got.fallbacks} <= {"local"}, spec
 
 
+def test_the_offload_penalty_is_named_in_the_reasons() -> None:
+    """FU-133-1: the points lost to system RAM are in the reasons, not only in the score."""
+    got = run({"scope": "local", "mods": {"loc14": {"fit": fit("offload", "kv_exceeds_budget")}}})
+    assert not isinstance(got, NoRouteError)
+    assert got.breakdown.offload_penalty == 30.0
+    assert any("offloaded to system RAM: -30.0 points" in r for r in got.reasons)
+
+
 def test_golden_table_has_at_least_40_scenarios() -> None:
     assert len(TABLE_A) + len(TABLE_B) + len(CASES) >= 40

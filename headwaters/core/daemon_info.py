@@ -47,7 +47,7 @@ _REPLACE_TRIES = 5
 
 @dataclass(frozen=True)
 class DaemonPorts:
-    """``gateway`` and ``dashboard`` are probed free ports, recorded for those servers to bind."""
+    """``gateway`` and ``dashboard`` are the ports their servers are bound to (HDW-404)."""
 
     api: int
     gateway: int | None = None

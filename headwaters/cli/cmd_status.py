@@ -10,6 +10,7 @@ import typer
 
 from headwaters.cli import runtime
 from headwaters.cli.output import emit_json, fmt_eta, make_console, table
+from headwaters.core.quotas import wall_label
 from headwaters.core.scope import ScopeDecision, ScopeError, paid_scopes_available, resolve_scope
 from headwaters.core.state_limits import WallRow, active_walls
 from headwaters.core.state_models import ModelRow, list_models
@@ -36,9 +37,14 @@ def effective_scope(rt: runtime.Runtime) -> tuple[ScopeDecision | None, ScopeErr
 
 
 def locks_in_force(rt: runtime.Runtime, decision: ScopeDecision | None) -> list[str]:
-    found = list(decision.locks) if decision is not None else []
-    if rt.rules.private_lock and "private_lock" not in found:
-        found.append("private_lock")
+    """Every lock in force. ``decision.active_locks`` is authoritative (FU-128-1).
+
+    Without a decision (an unsatisfiable scope) the locks still apply, so they are read from the
+    rules: the scope itself could not be resolved, not the locks.
+    """
+    if decision is not None:
+        return list(decision.active_locks)
+    found = ["private_lock"] if rt.rules.private_lock else []
     if rt.rules.airplane:
         found.append("airplane")
     return found
@@ -51,6 +57,7 @@ def _wall_eta(row: WallRow, now: float) -> float | None:
 def _wall_payload(row: WallRow, now: float) -> dict[str, Any]:
     return {
         "subject": row.subject,
+        "label": wall_label(row.subject),
         "kind": row.kind,
         "since": row.since,
         "eta_s": _wall_eta(row, now),
@@ -123,15 +130,15 @@ def register(app: typer.Typer) -> None:
             console.print(f"\nfix: {scope_error.fix_hint}")
 
         if walls:
-            wall_table = table(
-                "Walls", "Subject", "State", "Resets in", "Hits", no_wrap=["Subject"]
-            )
+            wall_table = table("Walls", "Subject", "State", "Ends in", "Hits", no_wrap=["Subject"])
             for row in walls:
                 eta = _wall_eta(row, now)
                 wall_table.add_row(
-                    row.subject,
+                    wall_label(row.subject),
                     _KIND_TEXT.get(row.kind, row.kind),
-                    fmt_eta(eta) if eta is not None else "after a balance check",
+                    # HDW-122 gives every wall an end time; a row without one is unknown, not
+                    # "after a balance check" (FU-122-4).
+                    fmt_eta(eta) if eta is not None else "unknown",
                     str(row.consecutive_count),
                 )
             console.print()

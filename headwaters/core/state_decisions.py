@@ -18,6 +18,9 @@ class DecisionRow:
     scope: str
     strategy: str
     locks_applied: Sequence[str] = ()
+    # FU-128-2: every lock in force, not only the ones that narrowed the scope this request.
+    active_locks: Sequence[str] = ()
+    offload_penalty: float | None = None  # FU-133-1: points lost to a model that spills to RAM
     session: str | None = None
     requirements: dict[str, Any] = field(default_factory=dict)
     chosen: str | None = None
@@ -34,8 +37,8 @@ def insert_decision(db: Database, d: DecisionRow) -> int:
     with db.write() as c:
         cur = c.execute(
             "INSERT INTO decisions (ts, surface, session, scope, strategy, locks_applied,"
-            " requirements_json, chosen, alternatives, floor, score, below_floor, reasons)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " active_locks, offload_penalty, requirements_json, chosen, alternatives, floor, score,"
+            " below_floor, reasons) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 d.ts or time.time(),
                 d.surface,
@@ -43,6 +46,8 @@ def insert_decision(db: Database, d: DecisionRow) -> int:
                 d.scope,
                 d.strategy,
                 dumps(list(d.locks_applied)),
+                dumps(list(d.active_locks)),
+                d.offload_penalty,
                 dumps(d.requirements),
                 d.chosen,
                 dumps(list(d.alternatives)),
@@ -65,6 +70,8 @@ def _decision(r: sqlite3.Row) -> DecisionRow:
         scope=r["scope"],
         strategy=r["strategy"],
         locks_applied=json.loads(r["locks_applied"]),
+        active_locks=json.loads(r["active_locks"]),
+        offload_penalty=r["offload_penalty"],
         requirements=json.loads(r["requirements_json"]),
         chosen=r["chosen"],
         alternatives=json.loads(r["alternatives"]),

@@ -47,6 +47,13 @@ class WallInfo(BaseModel):
     kind: str
     eta_s: float | None = Field(default=None, description="Seconds until it ends, if known.")
     consecutive: int = 0
+    # FU-122-4: the same wall, in words: "OpenRouter: paid credits" instead of
+    # "provider:openrouter:paid".
+    label: str = Field(default="", description="Readable label for the subject.")
+    # FU-205-9: the provider and the credit the wall stops, told apart. A key subject used to
+    # carry its alias and its credit in one opaque string.
+    provider: str | None = Field(default=None, description="Provider the wall names, if known.")
+    credit: str | None = Field(default=None, description="Key scope: paid or free credits.")
 
 
 class ScopeInfo(BaseModel):
@@ -195,6 +202,9 @@ class QuotaLine(BaseModel):
     rpm_limit: int | None = None
     rpd_used: int = 0
     rpd_limit: int | None = None
+    # FU-205-9: local models are listed too, with the tier and whether the model is warm.
+    tier: str | None = None
+    warm: bool | None = None
 
 
 class QuotaResult(BaseModel):

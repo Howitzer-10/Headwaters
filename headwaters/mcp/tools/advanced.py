@@ -97,10 +97,24 @@ def quota_status(tc: ToolContext, engine: Engine | None) -> QuotaResult:
     rpm_window = "rpm:" + moment.strftime("%Y-%m-%dT%H:%M")
     rpd_window = "rpd:" + moment.strftime("%Y-%m-%d")
     for row in list_models(db):
-        if row.tier == "local":
-            continue
         subject = model_subject(row.id)
         rpm, rpd = get_quota(db, subject, rpm_window), get_quota(db, subject, rpd_window)
+        if row.tier == "local":
+            # FU-205-9: a local model spends no provider quota, but it belongs in the answer:
+            # it is what runs when every key is out.
+            lines.append(
+                QuotaLine(
+                    model=row.id,
+                    status="local",
+                    tier=row.tier,
+                    warm=row.warm,
+                    rpm_used=rpm.count if rpm else 0,
+                    rpm_limit=rpm.limit if rpm else None,
+                    rpd_used=rpd.count if rpd else 0,
+                    rpd_limit=rpd.limit if rpd else None,
+                )
+            )
+            continue
         if rpm is None and rpd is None:
             continue
         lines.append(
@@ -109,6 +123,8 @@ def quota_status(tc: ToolContext, engine: Engine | None) -> QuotaResult:
                 status="soft"
                 if (rpm and rpm.soft_exhausted) or (rpd and rpd.soft_exhausted)
                 else "ok",
+                tier=row.tier,
+                warm=row.warm,
                 rpm_used=rpm.count if rpm else 0,
                 rpm_limit=rpm.limit if rpm else None,
                 rpd_used=rpd.count if rpd else 0,

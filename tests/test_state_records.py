@@ -48,6 +48,9 @@ def test_decisions_and_outcomes(db: Database) -> None:
             scope="free",
             strategy="cost_saver",
             locks_applied=["project_rule"],
+            # FU-128-2/FU-133-1: every lock in force, and the points lost to system RAM.
+            active_locks=["private_lock", "project_rule"],
+            offload_penalty=12.5,
             requirements={"task": "code", "prompt": "SECRET USER TEXT"},
             chosen="qwen",
             alternatives=["a", "b"],
@@ -59,6 +62,8 @@ def test_decisions_and_outcomes(db: Database) -> None:
     d = get_decision(db, did)
     assert d is not None
     assert (d.scope, d.strategy, d.locks_applied) == ("free", "cost_saver", ["project_rule"])
+    assert d.active_locks == ["private_lock", "project_rule"]
+    assert d.offload_penalty == 12.5
     assert d.requirements == {"task": "code"}  # prompt text never stored
     assert get_decision(db, 9999) is None
     assert get_outcome(db, did) is None

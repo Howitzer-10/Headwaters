@@ -45,7 +45,9 @@ def run(*, preferred_port: int | None = None) -> int:
             _log.error("rules.yaml is invalid, daemon not started: %s", exc)
             return EXIT_CONFIG
         try:
-            sock, gateway_sock, ports = pick_ports(rules, preferred_port, DEFAULT_API_PORT)
+            sock, gateway_sock, dashboard_sock, ports = pick_ports(
+                rules, preferred_port, DEFAULT_API_PORT
+            )
         except netports.PortError as exc:
             _log.error("no port available: %s", exc)
             return EXIT_NO_PORT
@@ -60,6 +62,7 @@ def run(*, preferred_port: int | None = None) -> int:
             load_or_create_token(),
             rules_source=lambda: manager.current,
             gateway_sock=gateway_sock,
+            dashboard_sock=dashboard_sock,
             reload_rules=manager.reload,
             rules_error=lambda: manager.last_error,
         )
@@ -73,6 +76,8 @@ def run(*, preferred_port: int | None = None) -> int:
             sock.close()
             if gateway_sock is not None:
                 gateway_sock.close()
+            if dashboard_sock is not None:
+                dashboard_sock.close()
             remove_info(os.getpid())
         return EXIT_OK
     finally:

@@ -63,6 +63,12 @@ def _decision(
     below = not b.meets_floor
     tail = f", below floor by {b.below_floor_by:.1f}" if below else ""
     reasons.append(f"{rung}: {cand.id} score {b.total:.1f}, floor {b.floor:.0f}{tail}")
+    if b.offload_penalty:
+        # FU-133-1: a model that spills to system RAM scores lower; say so in the reasons.
+        reasons.append(
+            f"offloaded to system RAM: -{b.offload_penalty:.1f} points"
+            " (the model does not fit the GPU)"
+        )
     return RouteDecision(
         model=cand.id,
         tier=cand.tier,

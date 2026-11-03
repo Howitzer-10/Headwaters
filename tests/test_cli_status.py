@@ -55,15 +55,29 @@ def test_status_unsatisfiable_scope_shows_the_fix(cli_home: Path) -> None:
 def test_status_shows_walls_with_eta_and_kind(cli_home: Path) -> None:
     db = open_database()
     record_wall(db, "model:vendor/free:free", "rate_limit", until=FAR_FUTURE)
-    record_wall(db, "key:openrouter", "exhausted", until=None)
+    record_wall(db, "provider:openrouter:paid", "exhausted", until=None)
     _, data = invoke_json("status")
     walls = {w["subject"]: w for w in data["walls"]}
     assert walls["model:vendor/free:free"]["eta_s"] > 0
-    assert walls["key:openrouter"]["eta_s"] is None  # waits for a balance check, no reset time
+    assert walls["provider:openrouter:paid"]["eta_s"] is None
     out = invoke("status").stdout
     assert "rate limited" in out
     assert "out of credit" in out
-    assert "after a balance check" in out
+    # FU-122-4: readable labels, and no "after a balance check" for a wall with no end time
+    # (every wall gets one per HDW-122), so an end time that is not known says so.
+    assert walls["provider:openrouter:paid"]["label"] == "OpenRouter: paid credits"
+    assert walls["model:vendor/free:free"]["label"] == "Model vendor/free:free"
+    assert "OpenRouter: paid credits" in out
+    assert "after a balance check" not in out
+    assert "unknown" in out
+
+
+def test_status_locks_in_force_is_the_decisions_active_locks(cli_home: Path) -> None:
+    """FU-128-1: every lock in force, including one that narrowed nothing."""
+    write_rules(cli_home, "private_lock: true\ndefault_scope: local\n")
+    _, data = invoke_json("status")
+    assert data["locks"] == ["private_lock"]
+    assert "private_lock" in invoke("status").stdout
 
 
 def test_status_ignores_walls_that_have_expired(cli_home: Path) -> None:

@@ -613,6 +613,7 @@ class Router:
             status=status,
             latency_ms=int((time.monotonic() - run.started) * 1000),
             locks=run.scope.locks,
+            active_locks=run.scope.active_locks,
             requirements=run.reqs,
             decision=decision,
             attempts=tuple(run.attempts),

@@ -23,15 +23,27 @@ from urllib.parse import urlsplit
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from headwaters.core.catalog.http import is_loopback_host
 
-__all__ = ["GuardedApp", "HttpServer", "build_app", "is_loopback_authority"]
+__all__ = [
+    "GuardedApp",
+    "HttpServer",
+    "LoopbackOnlyApp",
+    "build_app",
+    "build_status_page_app",
+    "is_loopback_authority",
+]
 
 HEALTH_PATH = "/health"
+STATUS_PAGE_PATHS = ("/", "/index.html")
+PAGE_FAILED = (
+    "<!doctype html><title>Headwaters status</title>"
+    "<h1>Headwaters status</h1><p>The page could not be built; the daemon log has the error.</p>"
+)
 GRACE_S = 5
 
 JsonProvider = Callable[[], Mapping[str, Any]]
@@ -111,6 +123,58 @@ class GuardedApp:
 
     def _matches(self, value: str) -> bool:
         return hmac.compare_digest(value.strip().encode("utf-8"), self._token)
+
+
+class LoopbackOnlyApp:
+    """ASGI wrapper for the read-only status page (HDW-404): loopback ``Host``/``Origin`` only.
+
+    The page holds no secret and offers no control, so it needs no token; it is still refused
+    unless the ``Host`` (and any ``Origin``) is loopback, which is what stops a page on another
+    machine from pointing a browser at ``127.0.0.1`` here (DNS rebinding).
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self._app(scope, receive, send)  # lifespan
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        refusal = self._refusal(headers)
+        if refusal is None:
+            await self._app(scope, receive, send)
+        elif scope["type"] == "http":
+            status, code = refusal
+            response = JSONResponse({"ok": False, "error": {"code": code}}, status_code=status)
+            await response(scope, receive, send)
+        else:
+            await send({"type": "websocket.close", "code": 1008})
+
+    def _refusal(self, headers: Mapping[str, str]) -> tuple[int, str] | None:
+        if not is_loopback_authority(headers.get("host", "")):
+            return 421, "bad_host"
+        origin = headers.get("origin")
+        if origin is not None and not _origin_ok(origin):
+            return 403, "bad_origin"
+        return None
+
+
+def build_status_page_app(*, render: Callable[[], str]) -> ASGIApp:
+    """The dashboard's read-only page on ``GET /``. ``render`` returns the whole HTML body.
+
+    It runs off the event loop: it reads rules and the shared SQLite state.
+    """
+
+    async def get_page(request: Request) -> HTMLResponse:
+        try:
+            body = await asyncio.to_thread(render)
+        except Exception:
+            return HTMLResponse(PAGE_FAILED, status_code=500)
+        return HTMLResponse(body, headers={"Cache-Control": "no-store"})
+
+    routes = [Route(path, get_page, methods=["GET"]) for path in STATUS_PAGE_PATHS]
+    return LoopbackOnlyApp(Starlette(routes=routes))
 
 
 def build_app(

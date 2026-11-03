@@ -142,6 +142,18 @@ def test_private_lock_forces_local_and_blocks_cloud_request(cli_home: Path) -> N
     assert "headwaters private off" in error["error"]["fix"]
 
 
+def test_private_lock_with_local_scope_still_shows_the_lock(cli_home: Path) -> None:
+    """FU-128-3: a lock in force is shown even when it narrowed nothing."""
+    assert invoke("private", "on").exit_code == 0
+    result, data = invoke_json("pick", CODE_PROMPT, "--scope", "local")
+    assert result.exit_code == 0, data
+    assert data["scope"]["locks"] == []  # it narrowed nothing: local was asked for
+    assert data["scope"]["active_locks"] == ["private_lock"]
+    out = invoke("pick", CODE_PROMPT, "--scope", "local").stdout
+    locks_line = next(line for line in out.splitlines() if "Locks" in line)
+    assert "private_lock" in locks_line  # not "none"
+
+
 def test_secret_in_prompt_forces_local(cli_home: Path) -> None:
     _, data = invoke_json("pick", f"{CODE_PROMPT}; my key is {FAKE_KEY}")
     assert data["scope"]["tiers"] == ["local"]

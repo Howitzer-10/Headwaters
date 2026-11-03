@@ -93,6 +93,17 @@ def test_airplane_mode_removes_every_cloud_candidate(tmp_path: Path) -> None:
     assert rig.cloud_clients == 0
 
 
+def test_the_decision_log_records_every_lock_in_force(tmp_path: Path) -> None:
+    """FU-128-2: ``active_locks`` is logged next to ``locks``, so a report can name both."""
+    rig = Rig(tmp_path, {LOCAL: OK}, pool(), rules=Rules(private_lock=True))
+    result = rig.run(scope="local")
+    (row,) = recent_decisions(rig.db)
+    assert row.active_locks == ["private_lock"]
+    # The lock narrowed nothing here (the request already asked for local scope), which is why
+    # it must not be read back from ``locks``.
+    assert result.decision.scope.locks == ()
+
+
 def test_scope_error_is_raised_and_logged(tmp_path: Path) -> None:
     rig = Rig(tmp_path, {}, pool(), rules=Rules(private_lock=True))
     with pytest.raises(ScopeError) as info:

@@ -10,24 +10,28 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import headwaters
+from headwaters.control.status_page import build_page, render_html
 from headwaters.core import netports
 from headwaters.core.catalog import discovery, updater
 from headwaters.core.catalog.http import UrllibHttp
 from headwaters.core.daemon_info import DaemonInfo, DaemonPorts, write_info
 from headwaters.core.engine import Engine, build_engine
+from headwaters.core.features import FeatureRegistry, discover_features
 from headwaters.core.keepwarm import KeepWarm, KeepWarmResult
 from headwaters.core.key_poll import KeyPollResult, poll_paid_walls
 from headwaters.core.keys import KeyStore
 from headwaters.core.logging import get_logger
+from headwaters.core.project_config import ProjectConfig, load_project_config
 from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import Router
 from headwaters.core.rules import Rules, RulesProvider
 from headwaters.core.state import Database
 from headwaters.gateway.openai_routes import build_gateway_app
-from headwaters.gateway.server import HttpServer, build_app
+from headwaters.gateway.server import HttpServer, build_app, build_status_page_app
 from headwaters.mcp.endpoint import build_endpoint
 from headwaters.mcp.jobs import recover_orphans
 from headwaters.mcp.tools.context import ToolContext
@@ -84,6 +88,9 @@ class Daemon:
     # on it, so the port in daemon.json is the one that is really listening. None in tests and
     # when ``gateway.enabled`` is false.
     gateway_sock: socket.socket | None = None
+    # The dashboard socket bound by ``pick_ports`` (HDW-404): the read-only status page is served
+    # on it. ``None`` in tests and when ``dashboard.enabled`` is false at startup.
+    dashboard_sock: socket.socket | None = None
     # The credential store (HDW-401). Production leaves it None: a store over the *live* rules is
     # built at each use, so a change to the endpoint list is seen. Tests inject one over a fake
     # keyring backend. The executor, the router's key-scoped walls and the key-poll timer all read
@@ -102,7 +109,10 @@ class Daemon:
     rules_error: Callable[[], object] | None = None
     _server: HttpServer | None = None
     _gateway_server: HttpServer | None = None
+    _dashboard_server: HttpServer | None = None
     _stop: asyncio.Event | None = None
+    # The feature registry the status page shows: discovered once, flags re-read per page.
+    _registry: FeatureRegistry | None = None
     # The rules the current engine was built from. Only the rebuild hook sets it, so a rebuild
     # started by the catalog refresh never goes back to older rules (and never has to read the
     # manager while it holds the build lock).
@@ -188,6 +198,7 @@ class Daemon:
             db=self.db,
             reload_rules=self.reload_rules or (lambda: None),
             configured_roots=lambda: self.live_rules.workspace.roots,
+            key_store=lambda: self.key_store,
         )
 
     # ------------------------------------------------------------------ http payloads
@@ -307,7 +318,7 @@ class Daemon:
     def request_stop(self) -> None:
         if self._stop is not None:
             self._stop.set()
-        for server in (self._server, self._gateway_server):
+        for server in (self._server, self._gateway_server, self._dashboard_server):
             if server is not None:
                 server.request_shutdown()
 
@@ -323,6 +334,44 @@ class Daemon:
         """The router of the engine in force, or None while the daemon is still building one."""
         engine = self.live_engine()
         return None if engine is None else engine.router
+
+    def feature_registry(self) -> FeatureRegistry:
+        """The registry the status page shows: discovered once, flags re-read from live rules."""
+        registry = self._registry
+        if registry is None:
+            registry = FeatureRegistry()
+            discover_features(registry)
+            self._registry = registry
+        registry.set_flags(self.live_rules.features)
+        return registry
+
+    def dashboard_page(self) -> str:
+        """The read-only status page (HDW-404), built from the live rules and the shared state.
+
+        Blocking (SQLite reads): ``build_status_page_app`` runs it off the event loop. The project
+        rule is read from the daemon's working directory, as ``headwaters status`` does; an
+        unreadable project file must not take the page down, so it falls back to the defaults.
+        """
+        rules = self.live_rules
+        try:
+            project, project_path = load_project_config(Path.cwd())
+        except Exception:  # an invalid .headwaters.yaml is reported by `headwaters status`
+            _log.warning("project config unreadable", exc_info=True)
+            project, project_path = ProjectConfig(), None
+        engine = self.engine
+        catalog = None
+        if engine is not None:
+            catalog = f"{engine.catalog_source} {engine.catalog.catalog_version}".strip()
+        data = build_page(
+            rules=rules,
+            project=project,
+            project_path=project_path,
+            db=self.db,
+            registry=self.feature_registry(),
+            version=headwaters.__version__,
+            catalog=catalog,
+        )
+        return render_html(data)
 
     async def serve(self) -> None:
         self._stop = asyncio.Event()
@@ -346,6 +395,10 @@ class Daemon:
         if self.gateway_sock is not None:
             self._gateway_server = HttpServer(self.gateway_app(), self.gateway_sock)
             servers.append(self._gateway_server)
+        if self.dashboard_sock is not None:
+            page = build_status_page_app(render=self.dashboard_page)
+            self._dashboard_server = HttpServer(page, self.dashboard_sock)
+            servers.append(self._dashboard_server)
         serving = [asyncio.create_task(server.serve()) for server in servers]
         tasks = [
             asyncio.create_task(self._announce(serving, servers)),
@@ -373,6 +426,7 @@ class Daemon:
             extra={
                 "port": self.ports.api,
                 "gateway": self.ports.gateway,
+                "dashboard": self.ports.dashboard,
                 "pid": os.getpid(),
             },
         )
@@ -380,12 +434,14 @@ class Daemon:
 
 def pick_ports(
     rules: Rules, preferred: int | None, api_default: int
-) -> tuple[socket.socket, socket.socket | None, DaemonPorts]:
-    """Bind the API socket and, when the gateway is enabled, the gateway socket. Both are kept.
+) -> tuple[socket.socket, socket.socket | None, socket.socket | None, DaemonPorts]:
+    """Bind the API socket and, when enabled, the gateway and dashboard sockets. All are kept.
 
     FU-201-6: the gateway port used to be probed and recorded while nothing listened on it. It is
     bound through ``bind_first_free`` here and served by the daemon, so daemon.json names the port
-    actually taken. The dashboard port stays a probe until it has a server (HDW-401).
+    actually taken. HDW-404 does the same for the dashboard port, which now serves the read-only
+    status page: ``ports.dashboard`` is ``None`` when the dashboard is switched off, because
+    nothing listens then (the bind is at startup, so switching it on needs a daemon restart).
     """
     excluded = netports.read_excluded_ranges()
     sock = netports.bind_first_free(preferred or api_default, excluded=excluded)
@@ -397,5 +453,16 @@ def pick_ports(
         gateway_sock = netports.bind_first_free(rules.gateway.port, excluded=excluded, taken=taken)
         gateway = int(gateway_sock.getsockname()[1])
         taken.add(gateway)
-    dashboard = netports.pick_free_port(rules.dashboard.port, excluded=excluded, taken=taken)
-    return sock, gateway_sock, DaemonPorts(api=api, gateway=gateway, dashboard=dashboard)
+    dashboard_sock: socket.socket | None = None
+    dashboard: int | None = None
+    if rules.dashboard.enabled:
+        dashboard_sock = netports.bind_first_free(
+            rules.dashboard.port, excluded=excluded, taken=taken
+        )
+        dashboard = int(dashboard_sock.getsockname()[1])
+    return (
+        sock,
+        gateway_sock,
+        dashboard_sock,
+        DaemonPorts(api=api, gateway=gateway, dashboard=dashboard),
+    )

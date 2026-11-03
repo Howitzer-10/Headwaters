@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from headwaters.core.engine import Engine
+from headwaters.core.keys import KeyStore
 from headwaters.core.rules import Rules
 from headwaters.core.rules_edit import set_setting
 from headwaters.core.state import Database
@@ -67,6 +68,9 @@ class ToolContext:
     enabled_hosts: set[str] = field(default_factory=set)
     # Background jobs (HDW-206). Their rows live in the ``jobs`` table; the running tasks here.
     jobs: JobRegistry = field(default_factory=JobRegistry)
+    # FU-205-9: a wall on a key names an alias (``key:work:paid``); the store says which provider
+    # that key belongs to. None in tests that never touch a key.
+    key_store: Callable[[], KeyStore] | None = None
 
     def state(self) -> Database:
         if self.db is None:

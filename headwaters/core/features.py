@@ -24,6 +24,25 @@ STAR_LEGEND = "★ = free during beta; may become part of Headwaters Pro at 1.0"
 FEATURES_PACKAGE = "headwaters.features"
 ENTRY_POINT_GROUP = "headwaters.plugins"
 
+# v3.5 addendum B, "Core" rows. Core never moves behind a paywall. The list lives here, not in a
+# surface, so the CLI, the status page and the doctor all show the same promise (HDW-404).
+CORE_FEATURES: tuple[tuple[str, str], ...] = (
+    ("gateway", "Gateway: OpenAI and Anthropic endpoints, bring your own keys"),
+    ("mcp", "MCP server with the 8 front-door tools"),
+    ("failover", "Automatic failover across walls (rate limit, out of credit, overloaded)"),
+    (
+        "scopes_free_local",
+        "Free and local scopes, Private mode, project privacy rule, secret detection",
+    ),
+    ("hardware_guard", "Hardware guard: VRAM/KV fit, computed num_ctx, warm model, battery"),
+    ("verify_basic", "Basic verification: parse, placeholder scan, git apply --check"),
+    (
+        "installer",
+        "Installer for VS Code/Copilot, Cline, OpenCode, Claude Desktop; doctor; CLI; status page",
+    ),
+    ("catalog_updates", "Catalog updates"),
+)
+
 
 @dataclass(frozen=True)
 class FeatureSpec:

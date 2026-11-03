@@ -24,7 +24,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from headwaters.core import state_limits
 from headwaters.core.catalog.http import HttpClient, SourceError
@@ -51,12 +51,16 @@ __all__ = [
     "KeyStatus",
     "QuotaTracker",
     "WallDecision",
+    "WallSubject",
     "credit_class",
     "credit_subject",
     "key_subject",
     "model_subject",
     "parse_key_status",
+    "parse_wall_subject",
+    "provider_name",
     "provider_subject",
+    "wall_label",
 ]
 
 
@@ -81,6 +85,67 @@ def credit_class(tier: str) -> CreditClass:
 def credit_subject(subject: str, tier: str) -> str:
     """``provider:openrouter`` + a paid tier -> ``provider:openrouter:paid``."""
     return f"{subject}:{credit_class(tier)}"
+
+
+_PROVIDER_NAMES = {
+    "anthropic": "Anthropic",
+    "google": "Google",
+    "groq": "Groq",
+    "mistral": "Mistral",
+    "ollama": "Ollama",
+    "openai": "OpenAI",
+    "opencode": "OpenCode",
+    "openrouter": "OpenRouter",
+}
+_SUBJECT_KINDS = ("model", "provider", "key")
+
+
+@dataclass(frozen=True, slots=True)
+class WallSubject:
+    """A wall subject split into its parts; ``raw`` keeps the stored string unchanged."""
+
+    kind: Literal["model", "provider", "key", "other"]
+    name: str
+    credit: CreditClass | None = None
+    raw: str = ""
+
+
+def provider_name(provider: str) -> str:
+    """The display name of a provider id: ``openrouter`` -> ``OpenRouter``."""
+    known = _PROVIDER_NAMES.get(provider.lower())
+    if known is not None:
+        return known
+    return provider.replace("_", " ").replace("-", " ").strip().title() or provider
+
+
+def parse_wall_subject(subject: str) -> WallSubject:
+    """Split ``model:<id>``, ``provider:<name>[:paid|free]``, ``key:<alias>[:paid|free]``.
+
+    A model id may itself contain colons (``qwen2.5-coder:14b``), so only provider and key
+    subjects drop a trailing credit class.
+    """
+    kind, _, rest = subject.partition(":")
+    if kind not in _SUBJECT_KINDS or not rest:
+        return WallSubject("other", subject, raw=subject)
+    name, credit = rest, None
+    if kind in ("provider", "key"):
+        head, sep, tail = rest.rpartition(":")
+        if sep and tail in _CREDIT_CLASSES:
+            name, credit = head, tail
+    return WallSubject(cast(Any, kind), name, credit, subject)
+
+
+def wall_label(subject: str) -> str:
+    """A readable label (FU-122-4): ``provider:openrouter:paid`` -> ``OpenRouter: paid credits``."""
+    parts = parse_wall_subject(subject)
+    credits = "" if parts.credit is None else f": {parts.credit} credits"
+    if parts.kind == "provider":
+        return provider_name(parts.name) + credits
+    if parts.kind == "key":
+        return f'Key "{parts.name}"' + credits
+    if parts.kind == "model":
+        return f"Model {parts.name}"
+    return subject
 
 
 @dataclass(frozen=True, slots=True)

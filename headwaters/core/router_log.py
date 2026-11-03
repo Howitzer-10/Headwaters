@@ -34,6 +34,8 @@ class LogEntry:
     status: str  # ok | verify_failed | an error code
     latency_ms: int
     locks: Sequence[str] = ()
+    # FU-128-2: every lock in force (Private Mode plus a lock that did not narrow this scope too).
+    active_locks: Sequence[str] = ()
     requirements: Requirements | None = None
     decision: RouteDecision | None = None
     attempts: Sequence[Attempt] = ()
@@ -81,6 +83,8 @@ def write(db: Database, entry: LogEntry) -> int | None:
         scope=entry.scope,
         strategy=entry.strategy,
         locks_applied=list(entry.locks),
+        active_locks=list(entry.active_locks),
+        offload_penalty=d.breakdown.offload_penalty if d else None,
         session=entry.session,
         requirements=requirements_dict(entry.requirements),
         chosen=d.model if d else None,

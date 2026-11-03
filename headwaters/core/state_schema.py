@@ -98,5 +98,13 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         ALTER TABLE jobs ADD COLUMN error_json TEXT;
         """,
     ),
+    (
+        5,
+        "active locks and offload penalty on decisions",
+        """
+        ALTER TABLE decisions ADD COLUMN active_locks TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE decisions ADD COLUMN offload_penalty REAL;
+        """,
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
