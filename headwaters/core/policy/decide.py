@@ -126,6 +126,12 @@ def decide(req: PolicyRequest, ctx: PolicyContext) -> RouteDecision:
 
     ladder = build_ladder([k for k in kept if k.role != "premium"], req, ctx)
     if ladder:
+        tiers = tuple(dict.fromkeys(entry[0].tier for entry in ladder))
+        if len(tiers) > 1:
+            # HDW-513 (D17): say why the fallbacks alternate between tiers.
+            reasons.append(
+                f"tier fairness: {', '.join(tiers)} interleaved, one attempt each before any repeat"
+            )
         ladder = _session_leads(ladder, reasons)
         return _decision(ladder[0], ladder[1:], req, ctx, reasons)
     # Local scope serves below-floor local models (HDW-123), so an empty ladder in a local-only

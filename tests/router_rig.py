@@ -36,6 +36,7 @@ class Rig:
         secrets: SecretDetector | None = None,
         reqs: Requirements | None = None,
         key_alias_for: Callable[[str], str | None] | None = None,
+        api_key_for: Callable[[str], str | None] | None = None,
         free_limits: Sequence[FreeLimit] = (),
         clock: Callable[[], float] | None = None,
         rules_source: Callable[[], Rules] | None = None,
@@ -62,6 +63,7 @@ class Rig:
             cloud_factory=cloud_factory,
             local_factory=lambda host: self.dispatch,
             key_alias_for=key_alias_for,
+            api_key_for=api_key_for,
         )
 
         async def sleep(seconds: float) -> None:

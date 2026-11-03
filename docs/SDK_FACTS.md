@@ -92,3 +92,10 @@ that name it.
 | Unit-file quoting follows the XDG desktop-entry rules: a whole word may be wrapped in double quotes, quotes are removed, C-style escapes are supported and backslashes must be doubled (`\\`, `\"`), so a path with a space or a backslash has to be escaped, not just wrapped | official systemd docs: systemd.syntax, "Quoting" | docs as of 2026-11 | HDW-406 |
 | `systemctl enable --now <unit>` enables the unit and starts it in one command, while `enable` alone only writes the `WantedBy=` symlink and leaves starting to a second call | official systemctl docs, `enable` | docs as of 2026-11 | HDW-406 |
 | `loginctl enable-linger <user>` starts that user's manager at boot and keeps it after the last session closes; without linger a user unit stops at logout, and the manager only exists while a session does | official loginctl docs, `enable-linger` | docs as of 2026-11 | HDW-406 |
+
+## Provider authentication (HDW-513)
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| A `POST https://openrouter.ai/api/v1/chat/completions` sent with no `Authorization` header answers HTTP 401 with the body `{"error":{"message":"No cookie auth credentials found","code":401}}` - the text names a missing credential, not a bad model - so a machine with no saved OpenRouter key fails every OpenRouter model the same way, and a 401/403 from a provider must be reported as an authentication failure rather than a model-quality failure | live `Invoke-WebRequest` from this session: status 401, that exact body, with `headwaters keys list` showing `not set` for anthropic, openai and openrouter | API as of 2026-11 | HDW-513 |
+| `headwaters keys list` prints `not set` and a `-` in the `Key` column for an alias with no stored secret (the table has `Alias`, `Provider`, `Source`, `Key` columns), which is the cheap local check the router uses before spending an attempt on a provider whose credential cannot exist | same session: `uv run --frozen headwaters keys list`, three rows all `not set`; the store behind it is `headwaters/core/keys.py#KeyStore` | repo 0.1 (this worktree) | HDW-513 |

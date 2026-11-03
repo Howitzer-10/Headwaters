@@ -97,6 +97,42 @@ def no_route(
     return NoRouteError(code, message, etas=etas, suggestions=tuple(tips), rejected=rejected)
 
 
+def interleave_tiers(entries: list[Entry], tried: Sequence[TierName] = ()) -> list[Entry]:
+    """Round-robin the ladder by tier: one attempt per tier before any tier takes a second.
+
+    HDW-513 (D17). ``entries`` is already ordered by rung and, inside a rung, by score, so a
+    tier's first appearance keeps the policy's own precedence: the head of the ladder is still
+    the best candidate the previous rules chose. Only the second and later candidates of a tier
+    wait for every other available tier to take a turn.
+
+    ``tried`` is the tiers already attempted in this request, in order. The rotation starts just
+    after the last one, so a re-decision after a tier failed does not hand that tier the next
+    attempt while an untried tier is still available. Because the router removes failed models
+    and re-decides from the remaining pool, this is what guarantees the interleaving across
+    attempts rather than only inside one ladder. Deterministic: the same pool and the same
+    ``tried`` always produce the same order.
+    """
+    queues: dict[TierName, list[Entry]] = {}
+    order: list[TierName] = []
+    for entry in entries:
+        tier = entry[0].tier
+        if tier not in queues:
+            queues[tier] = []
+            order.append(tier)
+        queues[tier].append(entry)
+    if len(order) < 2:
+        return entries
+    if tried and tried[-1] in queues:
+        start = order.index(tried[-1]) + 1
+        order = order[start:] + order[:start]
+    out: list[Entry] = []
+    while any(queues[tier] for tier in order):
+        for tier in order:
+            if queues[tier]:
+                out.append(queues[tier].pop(0))
+    return out
+
+
 def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) -> list[Entry]:
     """Ordered candidates: first is the decision, the rest are fallbacks (no duplicates)."""
     rules, reqs = ctx.rules, req.requirements
@@ -141,4 +177,4 @@ def build_ladder(kept: list[Candidate], req: PolicyRequest, ctx: PolicyContext) 
         if entry[0].id not in seen:
             seen.add(entry[0].id)
             unique.append(entry)
-    return unique
+    return interleave_tiers(unique, req.tier_attempts)

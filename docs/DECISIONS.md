@@ -233,3 +233,42 @@ Phases 5-7; Stage 2 is the 11 owner steps.
 **Revisit** if the owner's evaluation concludes the product is not worth distributing. Nothing has
 been published at that point, so the plan simply stops.
 
+## D17: a request remembers its own failures, and tiers take turns
+
+**Decision.** Two rules govern every retry inside one gateway request, and they are implemented in
+`Router._recover`/`_redecide` (`headwaters/core/router.py`), `headwaters/core/router_failures.py` and
+`build_ladder`/`interleave_tiers` (`headwaters/core/policy/ladder.py`):
+
+1. **Per-request failure memory.** A model that fails in a request is not chosen again by that
+   request. The record lives on `RouteRun.failures` and is discarded with the run: this is not a
+   cooldown and it never writes a wall. Walls and backoff stay exactly as HDW-511 left them, so a
+   model excluded here is free to serve the next request (a context failure must not punish a model
+   that would work on a smaller payload). Retry-class walls (`rate_limit`, `overload`) keep their
+   model for the retry and are recorded as failed only if that retry fails too.
+2. **Tier fairness.** The ladder is emitted round-robin by tier: every tier in the ladder takes one
+   attempt before any tier takes a second. The first appearance of a tier keeps the rung and score
+   precedence the policy already decided, and the rotation starts just after the tier attempted last,
+   so re-deciding after a tier failed cannot hand that tier the next attempt while an untried tier
+   is still available. Deterministic: same pool plus same attempted tiers gives the same order. A
+   tier that is out of scope, locked or empty never appears, so fairness cannot widen the scope.
+3. **Fast-fail an unauthenticated cloud provider.** When the (cached) key store says a cloud provider
+   has no key, every model of that provider is excluded for the request instead of consuming an
+   attempt each. No network call is added to the hot path.
+4. **The terminal error is honest and bounded.** `Every allowed attempt failed.` is gone. The message
+   is a summary line, up to four attempt lines (`attempt N: model (tier, provider) - failure`), the
+   missing-key fix command when a credential is the cause, and a line naming a healthy tier that was
+   never tried. Credential-looking substrings are redacted; key material is never included.
+
+**Reason.** Live evidence (HDW-513, decisions 9-12): with no cloud key at all, four attempts all
+re-selected the same top free model, failed the same 401 four times and never reached the healthy
+local tier that had answered 90 s earlier. A trivial prompt therefore spent 21 minutes and ended in
+a message the user could not act on. Both defects are properties of the retry loop, not of the
+models.
+
+**Cost.** Fallback order between tiers changes (a second candidate of a tier now waits for the other
+tiers' first), which the policy golden tests pin explicitly. Attempt lines and reasons are longer by
+a few fixed strings.
+
+**Tickets.** HDW-513. **Revisit** if a provider grows per-model authentication (then the provider-level
+fast-fail must narrow to the models that share the credential).
+
