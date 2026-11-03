@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -227,3 +230,124 @@ def test_cli_refresh_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert "unscored, warm" in qwen
     big = next(line for line in listing.splitlines() if "vendor/big" in line)
     assert "paid" in big
+
+
+def _slow_ollama(events: list[str] | None = None) -> Any:
+    """A source that takes a moment, so the progress line must arrive before it finishes."""
+
+    def source(http: Any, host: str, patterns: Any = (), *, deadline: float | None = None) -> Any:
+        if events is not None:
+            events.append("ollama started")
+        time.sleep(0.2)
+        if events is not None:
+            events.append("ollama finished")
+        return [], []
+
+    return source
+
+
+def test_refresh_reports_progress_before_a_slow_source_answers(
+    db: Database, catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(discovery, "ollama_models", _slow_ollama(events))
+    discovery.refresh_models(
+        db,
+        Rules(),
+        catalog,
+        http=Http(routes()),
+        env={},
+        home=Path("/nohome"),
+        progress=events.append,
+    )
+    assert events[:3] == [
+        f"checking ollama at {OLLAMA}",  # printed before the source even starts
+        "ollama started",
+        "ollama finished",
+    ]
+    assert "checking opencode config" in events
+    assert "checking openrouter" in events
+
+
+def test_a_source_past_the_budget_warns_and_keeps_the_partial_result(
+    db: Database, catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refresh(db, catalog, Http(routes()))  # rows from an earlier successful refresh
+    release = threading.Event()
+
+    def stalled(*args: Any, **kwargs: Any) -> Any:
+        release.wait(30)  # a blackholed endpoint: no answer, no timeout of its own
+        return []
+
+    monkeypatch.setattr(discovery, "openrouter_models", stalled)
+    started = time.monotonic()
+    try:
+        result = discovery.refresh_models(
+            db,
+            Rules(),
+            catalog,
+            http=Http(routes()),
+            env={},
+            home=Path("/nohome"),
+            budget_s=0.25,
+        )
+    finally:
+        release.set()
+    elapsed = time.monotonic() - started
+    assert elapsed < 5  # the budget, not the stalled source, decided when this returned
+    assert any(w.startswith("openrouter:") and "budget" in w for w in result.warnings)
+    assert "openrouter" not in result.sources_ok
+    assert get_model(db, "qwen:14b") is not None  # local still refreshed
+    assert get_model(db, "vendor/big") is not None  # a silent source never deletes rows
+
+
+def test_progress_never_prints_credentials_from_an_endpoint_url(
+    db: Database, catalog: Catalog
+) -> None:
+    rules = Rules.model_validate(
+        {
+            "models": {
+                "openai_compatible": [
+                    {
+                        "name": "keyed",
+                        "base_url": "https://user:secret@b.example/v1",
+                        "models": ["m"],
+                    }
+                ]
+            }
+        }
+    )
+    events: list[str] = []
+    discovery.refresh_models(
+        db,
+        rules,
+        catalog,
+        http=Http(routes()),
+        env={},
+        home=Path("/nohome"),
+        progress=events.append,
+    )
+    assert "checking keyed at https://b.example/v1" in events
+    assert "secret" not in "\n".join(events)
+
+
+def test_cli_refresh_prints_progress_on_stderr_and_keeps_json_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HEADWATERS_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(discovery, "ollama_models", _slow_ollama())
+    monkeypatch.setattr(discovery, "UrllibHttp", lambda: Http(routes()))
+
+    result = runner.invoke(app, ["models", "refresh"])
+    assert result.exit_code == 0
+    assert "checking ollama" in result.stderr
+    assert "checking ollama" not in result.stdout
+    assert "Refreshed" in result.stdout
+
+    as_json = runner.invoke(app, ["models", "refresh", "--json"])
+    assert as_json.exit_code == 0
+    assert "checking ollama" in as_json.stderr  # progress never pollutes the JSON document
+    assert json.loads(as_json.stdout)["ok"] is True

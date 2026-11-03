@@ -307,6 +307,39 @@ def test_http_loopback_helpers() -> None:
     assert not http_mod.is_loopback_url("http://localhost.evil.com")
 
 
+def test_loopback_hostname_is_canonicalised_to_a_numeric_address() -> None:
+    assert (
+        http_mod.canonical_loopback_url("http://localhost:11434/api/show")
+        == "http://127.0.0.1:11434/api/show"
+    )
+    assert http_mod.canonical_loopback_url("http://localhost/api") == "http://127.0.0.1/api"
+    # Already numeric: unchanged (no name to resolve).
+    assert (
+        http_mod.canonical_loopback_url("http://127.0.0.1:11434/api")
+        == "http://127.0.0.1:11434/api"
+    )
+    # Not loopback, or not a loopback name: never rewritten.
+    assert http_mod.canonical_loopback_url("https://example.com/x") == "https://example.com/x"
+    assert (
+        http_mod.canonical_loopback_url("http://localhost.evil.com:80/x")
+        == "http://localhost.evil.com:80/x"
+    )
+
+
+def test_urllib_http_requests_the_numeric_loopback_but_reports_the_configured_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _patch_opener(monkeypatch, lambda r: _Resp(b'{"ok": true}'))
+    assert http_mod.UrllibHttp().request_json("GET", "http://localhost:11434/api/tags") == {
+        "ok": True
+    }
+    assert seen[0].full_url == "http://127.0.0.1:11434/api/tags"
+
+    _patch_opener(monkeypatch, lambda r: (_ for _ in ()).throw(OSError("refused")))
+    with pytest.raises(SourceError, match="localhost:11434"):
+        http_mod.UrllibHttp().request_json("GET", "http://localhost:11434/api/tags")
+
+
 def test_urllib_http_guards() -> None:
     client = http_mod.UrllibHttp()
     with pytest.raises(SourceError, match="plain http"):

@@ -413,9 +413,11 @@ uv run headwaters pick "summarise this function"
 
 Expected: `models refresh` re-discovers models from Ollama, OpenRouter, OpenCode and your own
 endpoints, and prints how many it found, how many were unscored, how many were removed and which
-sources answered. It uses the network and can take a few minutes, so let it finish. `models list` then
-shows rows, and `pick` returns a model with its fallbacks. [needs a key or Ollama]: with no source
-reachable it reports zero models and `pick` keeps answering `no_candidates`.
+sources answered. Progress lines ("checking ollama at ...") go to stderr as each source starts, so a
+slow network never looks frozen and `--json` on stdout stays parseable; a source that does not answer
+inside the 20 second discovery budget is a warning, and the run still succeeds with what it has.
+`models list` then shows rows, and `pick` returns a model with its fallbacks. [needs a key or Ollama]:
+with no source reachable it reports zero models and `pick` keeps answering `no_candidates`.
 
 ## What is not covered here, on purpose
 

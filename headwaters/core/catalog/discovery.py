@@ -5,15 +5,23 @@ and its models are simply not refreshed (they are NOT deleted, so a brief Ollama
 not wipe the picker). Models from a source that answered but no longer lists them are removed.
 Offline modes: ``airplane`` and the local-only lock block every non-loopback source; Ollama
 (loopback) still runs. No prompt data is sent anywhere.
+
+Discovery has one overall wall-clock budget (:data:`REFRESH_BUDGET_S`), so a blackholed endpoint
+costs a warning and a partial result instead of minutes of silence; a caller may pass ``progress``
+to hear which source is being read while it runs.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
+from typing import TypeVar
+from urllib.parse import urlsplit, urlunsplit
 
 from headwaters.core.catalog import updater
 from headwaters.core.catalog.http import HttpClient, SourceError, UrllibHttp
@@ -35,6 +43,8 @@ from headwaters.core.state_models import delete_models, list_models, set_score, 
 
 KV_LAST_REFRESH = "models.last_refresh"
 OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
+REFRESH_BUDGET_S = 20.0
+_T = TypeVar("_T")
 
 
 @dataclass
@@ -62,6 +72,67 @@ def network_block(rules: Rules) -> str | None:
     return None
 
 
+def _display_url(url: str) -> str:
+    """A URL that is safe to print: any ``user:password@`` part is dropped."""
+    parts = urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
+
+
+@dataclass
+class _Budget:
+    """Wall-clock budget shared by every source in one refresh (``None`` = unbounded)."""
+
+    seconds: float | None = REFRESH_BUDGET_S
+    started: float = field(default_factory=time.monotonic)
+
+    def deadline(self) -> float | None:
+        return None if self.seconds is None else self.started + self.seconds
+
+    def remaining(self) -> float | None:
+        if self.seconds is None:
+            return None
+        return max(0.0, self.seconds - (time.monotonic() - self.started))
+
+
+def _read_source(
+    name: str,
+    description: str,
+    read: Callable[[], _T],
+    budget: _Budget,
+    report: Callable[[str], None],
+) -> _T:
+    """Run one source, bounded by what is left of the budget.
+
+    The read runs on a daemon thread so a blocked connect (or anything else that ignores the
+    request timeout) cannot hold the command: when the budget runs out the caller gets
+    ``SourceError`` and a warning, and the thread is left to die with the process.
+    """
+    report(f"checking {description}")
+    box: list[_T] = []
+    failed: list[BaseException] = []
+    done = threading.Event()
+
+    def work() -> None:
+        try:
+            box.append(read())
+        except BaseException as exc:  # re-raised in the caller, so it is caught there
+            failed.append(exc)
+        finally:
+            done.set()
+
+    threading.Thread(target=work, name=f"headwaters-discovery-{name}", daemon=True).start()
+    remaining = budget.remaining()
+    if remaining is None:
+        done.wait()
+    elif not done.wait(remaining):
+        raise SourceError(f"no answer within the {budget.seconds:g}s refresh budget")
+    if failed:
+        raise failed[0]
+    return box[0]
+
+
 def _gather(
     rules: Rules,
     http: HttpClient,
@@ -70,18 +141,35 @@ def _gather(
     result: RefreshResult,
     remote_patterns: RemotePatterns = (),
     openrouter_base_url: str | None = None,
+    *,
+    budget_s: float | None = REFRESH_BUDGET_S,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, list[LiveModel]]:
     """Live models by source name. Only sources that answered appear in the result."""
     found: dict[str, list[LiveModel]] = {}
     blocked = network_block(rules)
+    budget = _Budget(budget_s)
+
+    def report(message: str) -> None:
+        if progress is not None:
+            progress(message)
 
     try:
-        models, warnings = ollama_models(http, rules.tiers.local.host, remote_patterns)
+        models, warnings = _read_source(
+            "ollama",
+            f"ollama at {rules.tiers.local.host}",
+            lambda: ollama_models(
+                http, rules.tiers.local.host, remote_patterns, deadline=budget.deadline()
+            ),
+            budget,
+            report,
+        )
         found["ollama"] = models
         result.warnings.extend(warnings)
     except SourceError as exc:
         result.warnings.append(f"ollama: {exc}")
 
+    report("checking opencode config")
     paths_ = opencode_config_paths(rules.models.opencode_config, env, home)
     oc, oc_warn = opencode_models(paths_, rules.tiers.free_cloud.opencode_free)
     # OpenCode's free-tier models answer only inside OpenCode (HTTP 403 for other clients, A-OC-3,
@@ -96,19 +184,30 @@ def _gather(
         )
 
     if blocked:
+        report(f"skipping cloud sources ({blocked})")
         result.warnings.append(f"cloud discovery skipped: {blocked}")
         return found
 
     try:
-        found["openrouter"] = openrouter_models(
-            http, env.get(OPENROUTER_KEY_ENV), openrouter_base_url
+        found["openrouter"] = _read_source(
+            "openrouter",
+            "openrouter",
+            lambda: openrouter_models(http, env.get(OPENROUTER_KEY_ENV), openrouter_base_url),
+            budget,
+            report,
         )
     except SourceError as exc:
         result.warnings.append(f"openrouter: {exc}")
     for endpoint in rules.models.openai_compatible:
         key = f"openai_compatible:{endpoint.name}"
         try:
-            found[key] = openai_compatible_models(http, endpoint, env)
+            found[key] = _read_source(
+                key,
+                f"{endpoint.name} at {_display_url(endpoint.base_url)}",
+                partial(openai_compatible_models, http, endpoint, env),
+                budget,
+                report,
+            )
         except SourceError as exc:
             result.warnings.append(f"{endpoint.name}: {exc}")
     return found
@@ -136,8 +235,14 @@ def refresh_models(
     env: Mapping[str, str] | None = None,
     home: Path | None = None,
     now: float | None = None,
+    budget_s: float | None = REFRESH_BUDGET_S,
+    progress: Callable[[str], None] | None = None,
 ) -> RefreshResult:
-    """Discover, merge and persist. Never raises because a source is down."""
+    """Discover, merge and persist. Never raises because a source is down or out of budget.
+
+    ``progress`` receives one short line as each source starts (no keys, no prompt text), so a
+    slow refresh is never silent; ``budget_s`` caps the whole gather.
+    """
     result = RefreshResult()
     stamp = time.time() if now is None else now
     live = _gather(
@@ -148,6 +253,8 @@ def refresh_models(
         result,
         remote_patterns_from(catalog),
         catalog.endpoints.openrouter_base_url,
+        budget_s=budget_s,
+        progress=progress,
     )
     result.sources_ok = sorted(live)
     flat = [m for models in live.values() for m in models]

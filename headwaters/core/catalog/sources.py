@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,8 +86,18 @@ def _arch_from_show(info: Mapping[str, Any]) -> tuple[dict[str, int] | None, int
     return None, ctx
 
 
+def _check_deadline(deadline: float | None) -> None:
+    """Stop a multi-request source once discovery has spent its budget (cooperative cancel)."""
+    if deadline is not None and time.monotonic() >= deadline:
+        raise SourceError("discovery budget exhausted before this request")
+
+
 def ollama_models(
-    http: HttpClient, host: str, remote_patterns: RemotePatterns = ()
+    http: HttpClient,
+    host: str,
+    remote_patterns: RemotePatterns = (),
+    *,
+    deadline: float | None = None,
 ) -> tuple[list[LiveModel], list[str]]:
     """Installed Ollama models plus warm state. Returns (models, warnings).
 
@@ -96,10 +107,12 @@ def ollama_models(
     if not is_loopback_url(host):
         raise SourceError(f"Ollama host {host!r} is not loopback; local discovery refuses it")
     base = host.rstrip("/")
+    _check_deadline(deadline)
     tags = _as_dict(http.request_json("GET", f"{base}/api/tags"))
     warnings: list[str] = []
     models: dict[str, LiveModel] = {}
     for item in _as_list(tags.get("models")):
+        _check_deadline(deadline)
         name = _as_dict(item).get("name") or _as_dict(item).get("model")
         if not isinstance(name, str) or not name:
             continue
@@ -136,6 +149,7 @@ def ollama_models(
         live.arch, live.ctx = _arch_from_show(_as_dict(show.get("model_info")))
         models[name] = live
     try:
+        _check_deadline(deadline)
         ps = _as_dict(http.request_json("GET", f"{base}/api/ps"))
     except SourceError as exc:
         warnings.append(f"ollama: /api/ps failed (warm state unknown): {exc}")

@@ -80,7 +80,12 @@ def register(models_app: typer.Typer) -> None:
         """Re-discover models (Ollama, OpenRouter, OpenCode, your endpoints) now."""
         rules = runtime.load_rules_or_exit()
         catalog, source = updater.load_active()
-        result = discovery.refresh_models(open_database(), rules, catalog)
+
+        def progress(message: str) -> None:
+            # Human progress goes to stderr, so ``--json`` on stdout stays parseable.
+            typer.echo(message, err=True)
+
+        result = discovery.refresh_models(open_database(), rules, catalog, progress=progress)
         if as_json:
             emit_json(
                 {
