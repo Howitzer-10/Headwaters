@@ -143,6 +143,17 @@ def test_heartbeat_interval_override() -> None:
     assert _warm(ignored, FakeHttp()).interval_s() == 900.0
 
 
+def test_numeric_keep_alive_still_arms_the_heartbeat() -> None:
+    """HDW-522: ``"120"`` is stored as ``"120s"``, so the window check and the ping body agree."""
+    rules = _rules(keep_warm_heartbeat=True, keep_alive="120")
+    assert rules.tiers.local.keep_alive == "120s"
+    assert _warm(rules, FakeHttp()).interval_s() == 60.0
+    http = FakeHttp(["qwen:14b"])
+    assert _warm(rules, http).tick().action == "pinged"
+    assert http.posts[0][2] is not None
+    assert http.posts[0][2]["keep_alive"] == "120s"
+
+
 def test_heartbeat_interval_floor_is_thirty_seconds() -> None:
     """The explicit interval honours the same 30 s floor the derived path applies (FU-518-8)."""
     tiny = _rules(keep_warm_heartbeat=True, keep_alive="30m", heartbeat_interval_s=5.0)

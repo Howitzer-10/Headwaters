@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from headwaters.core.catalog.http import SourceError
+from headwaters.core.duration import normalize_keep_alive
 from headwaters.core.hardware.state import BatteryState, GpuBusy
 from headwaters.core.keepwarm import KeepWarm, parse_duration_s
 from headwaters.core.rules import Rules
@@ -72,6 +73,39 @@ def test_parse_duration(text: str, seconds: float) -> None:
 @pytest.mark.parametrize("text", ["", "-1", "-1m", "abc", "5x", "m5", "5m junk"])
 def test_parse_duration_rejects_the_rest(text: str) -> None:
     assert parse_duration_s(text) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "wire"),
+    [
+        ("120", "120s"),
+        ("120.5", "120.5s"),
+        (" 90 ", "90s"),
+        ("+45", "45s"),
+        ("-1", "-1s"),
+        ("0", "0s"),
+        ("120s", "120s"),
+        ("30m", "30m"),
+        ("1h30m", "1h30m"),
+        ("", ""),
+        ("abc", "abc"),
+    ],
+)
+def test_normalize_keep_alive_adds_a_unit_to_a_bare_number(text: str, wire: str) -> None:
+    """HDW-522: Ollama 400s a quoted bare number, so ``120`` goes on the wire as ``120s``."""
+    assert normalize_keep_alive(text) == wire
+
+
+def test_numeric_keep_alive_is_pinged_with_a_unit() -> None:
+    """HDW-522: the rules boundary normalises, so the ping never sends a quoted number."""
+    rules = _rules(keep_alive="120")
+    assert rules.tiers.local.keep_alive == "120s"
+    http = FakeHttp(["qwen:14b"])
+    assert _warm(rules, http).tick().action == "pinged"
+    ((_, _, body),) = http.posts
+    assert body is not None
+    assert body["keep_alive"] == "120s"
+    assert _warm(rules, FakeHttp()).interval_s() == 60.0
 
 
 def test_interval_is_half_the_keep_alive_window() -> None:

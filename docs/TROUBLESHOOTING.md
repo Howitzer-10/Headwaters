@@ -49,9 +49,11 @@ out. The model has to be loaded into VRAM before it can stream: the executor all
 `executor.local_cold_first_token_s` (240 s) for that first token and
 `executor.local_warm_first_token_s` (60 s) once it is resident, so a cold call that fails is usually
 a load that is slower than 240 s, not a broken model. `local.keep_alive` (default `30m`) keeps the
-model resident between calls and `local.keep_warm_model` keeps one model warm on purpose. Check
-`headwaters models list` for what is loaded, and the GPU row in `headwaters doctor` for a card that
-is busy with something else before blaming the timeout.
+model resident between calls and `local.keep_warm_model` keeps one model warm on purpose. Give
+`keep_alive` a unit (`30m`, `120s`): Ollama rejects a quoted bare number, so a quoted `"120"` is
+stored as `120s` when the file is read, and a bare YAML number (`120`) is rejected with that hint.
+Check `headwaters models list` for what is loaded, and the GPU row in `headwaters doctor` for a card
+that is busy with something else before blaming the timeout.
 
 The keep-warm tick runs every half `keep_alive` and pings whatever Ollama already has loaded, so on
 a machine that is used regularly the model usually stays resident with nothing to configure. Three

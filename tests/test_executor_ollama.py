@@ -13,6 +13,7 @@ from headwaters.core.executor.errors import ExecutorError, LocalScopeViolation, 
 from headwaters.core.executor.ollama import OllamaBackend
 from headwaters.core.executor.ollama_convert import build_payload
 from headwaters.core.executor.types import BackendRequest, Delta, ExecOptions, ExecTarget
+from headwaters.core.rules import Rules
 
 MESSAGES = [{"role": "user", "content": "hi"}]
 
@@ -44,6 +45,16 @@ def test_payload_has_num_ctx_keep_alive_format_and_think() -> None:
     assert payload["keep_alive"] == "30m"
     assert payload["format"] == {"type": "object"}
     assert payload["think"] is True
+
+
+def test_payload_sends_a_numeric_keep_alive_with_a_unit() -> None:
+    """HDW-522: the rules boundary already stored ``"120"`` as ``"120s"``; the payload quotes it."""
+    keep_alive = Rules.model_validate({"tiers": {"local": {"keep_alive": "120"}}})
+    target = ExecTarget("qwen", "ollama", "qwen2.5-coder:14b", num_ctx=24576)
+    payload = build_payload(
+        BackendRequest(target, MESSAGES, None, ExecOptions(), keep_alive.tiers.local.keep_alive)
+    )
+    assert payload["keep_alive"] == "120s"
 
 
 def test_payload_requires_computed_num_ctx() -> None:

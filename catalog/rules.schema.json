@@ -492,6 +492,7 @@
         },
         "keep_alive": {
           "default": "30m",
+          "description": "How long Ollama keeps the model resident: a Go duration ('30m', '120s'). A bare number is stored as seconds ('120' -> '120s') because Ollama rejects a quoted number.",
           "title": "Keep Alive",
           "type": "string"
         },

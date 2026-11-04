@@ -69,6 +69,26 @@ def test_partial_file_overrides_only_named_fields(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("written", "stored"),
+    [("120", "120s"), ("0", "0s"), ("-1", "-1s"), ("30m", "30m"), ("1h30m", "1h30m")],
+)
+def test_numeric_keep_alive_gains_a_unit(tmp_path: Path, written: str, stored: str) -> None:
+    """HDW-522: Ollama 400s a quoted bare number, so ``"120"`` is stored as ``"120s"``."""
+    target = tmp_path / "rules.yaml"
+    target.write_text(f'tiers:\n  local:\n    keep_alive: "{written}"\n', encoding="utf-8")
+    assert load_rules(target).tiers.local.keep_alive == stored
+
+
+def test_bare_numeric_keep_alive_is_rejected_with_the_fix(tmp_path: Path) -> None:
+    """A YAML number never reaches Ollama; the error names the form that works (HDW-522)."""
+    target = tmp_path / "rules.yaml"
+    target.write_text("tiers:\n  local:\n    keep_alive: 120\n", encoding="utf-8")
+    with pytest.raises(ConfigError) as caught:
+        load_rules(target)
+    assert "'120s'" in str(caught.value)
+
+
+@pytest.mark.parametrize(
     ("text", "needle"),
     [
         ("default_scope: everywhere\n", "default_scope"),

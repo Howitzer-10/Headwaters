@@ -13,7 +13,7 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-from headwaters.core.duration import parse_duration_s
+from headwaters.core.duration import normalize_keep_alive, parse_duration_s
 
 Scope = Literal["auto", "free", "local", "cloud"]
 Strategy = Literal["cost_saver", "quality_first", "primary_first"]
@@ -139,7 +139,14 @@ class LocalTier(_Model):
     profile: Literal["auto", "laptop_12gb", "desktop_16gb", "custom"] = "auto"
     reserve_gb: float | None = Field(default=None, ge=0)  # None = auto-detect
     kv_cache_type: str = "q8_0"
-    keep_alive: str = "30m"
+    keep_alive: str = Field(
+        default="30m",
+        description=(
+            "How long Ollama keeps the model resident: a Go duration ('30m', '120s'). A bare "
+            "number is stored as seconds ('120' -> '120s') because Ollama rejects a quoted "
+            "number."
+        ),
+    )
     keep_warm_model: str = "auto"
     # HDW-518: the keep-warm heartbeat. The tick itself is unchanged and stays on whenever a
     # model is loaded (``keep_warm_model: auto``); what is opt-in is the heartbeat mode: a
@@ -158,12 +165,30 @@ class LocalTier(_Model):
     offload_weight_factor: float = Field(default=2.0, ge=1)
     hardware: HardwareRules = Field(default_factory=HardwareRules)
 
+    @field_validator("keep_alive", mode="before")
+    @classmethod
+    def _keep_alive_is_text(cls, value: object) -> object:
+        """HDW-522: a bare YAML number is not a form we accept; name the form that works."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return value
+        raise ValueError(
+            "tiers.local.keep_alive must be a duration string with a unit: write '120s' "
+            "(or '30m'), not a bare number of seconds"
+        )
+
+    @field_validator("keep_alive", mode="after")
+    @classmethod
+    def _keep_alive_carries_a_unit(cls, value: str) -> str:
+        """HDW-522: Ollama 400s a quoted bare number, so ``120`` is stored as ``120s``."""
+        return normalize_keep_alive(value)
+
     @model_validator(mode="after")
     def _heartbeat_fits_the_window(self) -> LocalTier:
         """D4/HDW-518: a heartbeat must ping faster than the model expires, and never clamp.
 
         ``keep_alive`` that is not a positive duration (``-1`` = stay resident, ``0`` = unload at
-        once) is not an error: the tick already skips with ``keep_alive_not_timed``.
+        once, stored as ``-1s`` / ``0s``) is not an error: the tick already skips with
+        ``keep_alive_not_timed``.
         """
         if not self.keep_warm_heartbeat:
             return self
