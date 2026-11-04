@@ -1,4 +1,4 @@
-"""HDW-404 / HDW-503: the local dashboard - the status page and its three key writes.
+"""HDW-404 / HDW-503: the local dashboard - the status page and its four key writes.
 
 Nothing here touches the network, the keyring or the user's real ``%APPDATA%``: the database is a
 ``tmp_path`` file, the page is served through the ASGI test client, the credential store is
@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
+from headwaters.control import keys as control_keys
 from headwaters.control.keys import DashboardKeys
 from headwaters.control.status_page import StatusPage, build_page, render_html
 from headwaters.core.catalog.http import SourceError
@@ -21,10 +22,10 @@ from headwaters.core.keys import STANDARD_ENV, KeyStore
 from headwaters.core.rules import RouterRules, Rules
 from headwaters.core.state import Database, open_database
 from headwaters.core.state_decisions import DecisionRow, insert_decision
-from headwaters.core.state_key_tests import get_key_test
+from headwaters.core.state_key_tests import get_key_test, record_key_test
 from headwaters.core.state_limits import record_wall
 from headwaters.gateway.server import build_status_page_app
-from tests.keys_support import ENV_SECRET, SECRET, FakeKeyring
+from tests.keys_support import ENV_SECRET, OTHER_SECRET, SECRET, FakeKeyring
 
 NOW = 1_800_000_000.0
 DASHBOARD_PORT = 4001
@@ -46,6 +47,10 @@ class FakeHttp:
         if self.error is not None:
             raise SourceError(self.error)
         return {"data": []}
+
+
+def save_form(alias: str = "openrouter", provider: str = "openrouter") -> dict[str, str]:
+    return {"csrf": CSRF, "alias": alias, "provider": provider, "secret": SECRET}
 
 
 @pytest.fixture
@@ -96,7 +101,14 @@ def client(
     actions = (
         None
         if store is None
-        else DashboardKeys(store=lambda: store, rules=lambda: live, db=db, http=http)
+        # Saving a key pings it, so a write test never reaches the network either: the fake is the
+        # default, and a test that cares about the ping passes its own.
+        else DashboardKeys(
+            store=lambda: store,
+            rules=lambda: live,
+            db=db,
+            http=http if http is not None else FakeHttp(),
+        )
     )
     return TestClient(
         build_status_page_app(render=render, keys=actions, csrf=CSRF, port=DASHBOARD_PORT),
@@ -232,7 +244,7 @@ def test_the_page_says_why_paid_scope_is_unavailable_until_a_paid_key_exists(
     assert "No paid provider has a key" not in render_html(page(db, keys=store, csrf=CSRF))
 
 
-# ------------------------------------------------- HDW-503: the three writes and their refusals
+# ------------------------------------------------------- HDW-503: the writes and their refusals
 
 
 def test_without_a_key_backend_the_page_serves_and_has_no_write_routes(db: Database) -> None:
@@ -305,6 +317,35 @@ def test_a_write_needs_the_page_token(db: Database, store: KeyStore) -> None:
         assert store.secret("nvidia") is None
 
 
+def test_every_write_route_refuses_a_missing_or_wrong_token_and_a_foreign_host(
+    db: Database, store: KeyStore
+) -> None:
+    store.save("openrouter", SECRET)
+    paths = ("/keys/set", "/keys/remove", "/keys/test", "/keys/test-all")
+    with client(db, store=store) as http:
+        for path in paths:
+            missing = http.post(path, data={"alias": "openrouter"})
+            assert missing.status_code == 403, path
+            assert missing.json()["error"]["code"] == "bad_csrf", path
+            wrong = http.post(path, data={"csrf": "not-the-token", "alias": "openrouter"})
+            assert wrong.status_code == 403, path
+            assert wrong.json()["error"]["code"] == "bad_csrf", path
+            foreign = http.post(
+                path,
+                data={"csrf": CSRF, "alias": "openrouter"},
+                headers={"Host": "evil.example.com"},
+            )
+            assert foreign.status_code == 403, path
+            assert foreign.json()["error"]["code"] == "bad_host", path
+            elsewhere = http.post(
+                path,
+                data={"csrf": CSRF, "alias": "openrouter"},
+                headers={"Origin": "http://evil.example.com"},
+            )
+            assert elsewhere.status_code == 403, path
+            assert elsewhere.json()["error"]["code"] == "bad_origin", path
+
+
 def test_a_write_only_accepts_a_small_form(db: Database, store: KeyStore) -> None:
     with client(db, store=store) as http:
         json_body = http.post("/keys/set", json={"csrf": CSRF, "alias": "nvidia", "secret": SECRET})
@@ -324,6 +365,7 @@ def test_a_get_to_a_write_path_is_not_allowed(db: Database, store: KeyStore) -> 
         assert http.get("/keys/set").status_code == 405
         assert http.put("/keys/remove", data={"csrf": CSRF}).status_code == 405
         assert http.request("OPTIONS", "/keys/test").status_code == 405
+        assert http.get("/keys/test-all").status_code == 405
 
 
 def test_saving_a_key_shows_it_masked_and_never_its_prefix(db: Database, store: KeyStore) -> None:
@@ -336,6 +378,10 @@ def test_saving_a_key_shows_it_masked_and_never_its_prefix(db: Database, store: 
         assert saved.status_code == 303
         assert saved.headers["location"] == "/?section=keys#keys-nvidia"
         assert store.secret("nvidia") == SECRET
+        # Saving tests the key, so the row comes back with an answer instead of "never tested".
+        row = get_key_test(db, "nvidia")
+        assert row is not None
+        assert SECRET not in row.detail
         html = http.get("/?section=keys").text
         assert "<code>nvidia</code>" in html
         assert "credential store" in html
@@ -343,6 +389,102 @@ def test_saving_a_key_shows_it_masked_and_never_its_prefix(db: Database, store: 
         assert SECRET[:8] not in html  # no prefix of the key, not even four characters
         assert SECRET[:-4] not in html
         assert SECRET not in html
+
+
+def test_saving_a_key_tests_it_at_once_and_the_row_shows_the_fresh_answer(
+    db: Database, store: KeyStore
+) -> None:
+    fake = FakeHttp()
+    with client(db, store=store, http=fake) as http:
+        saved = http.post("/keys/set", data=save_form(), follow_redirects=False)
+        assert saved.status_code == 303
+        assert saved.headers["location"] == "/?section=keys#keys-openrouter"
+        assert fake.urls == ["https://openrouter.ai/api/v1/key"]  # the same ping as Test
+        row = get_key_test(db, "openrouter")
+        assert row is not None
+        assert row.status == "ok"
+        html = http.get("/?section=keys").text
+        assert '<span class="status ok">ok</span>' in html
+        assert SECRET not in html
+
+
+def test_a_failed_ping_does_not_fail_the_save(db: Database, store: KeyStore) -> None:
+    fake = FakeHttp(error="HTTP 401 from openrouter.ai")
+    with client(db, store=store, http=fake) as http:
+        saved = http.post("/keys/set", data=save_form(), follow_redirects=False)
+        assert saved.status_code == 303  # saving and testing are separate outcomes
+        assert saved.headers["location"] == "/?section=keys#keys-openrouter"
+        assert store.secret("openrouter") == SECRET  # the key is saved and stays saved
+        row = get_key_test(db, "openrouter")
+        assert row is not None
+        assert row.status == "unauthorized"
+        html = http.get("/?section=keys").text
+        assert '<span class="status bad">unauthorized</span>' in html
+        assert "HTTP 401" in html  # the host and code, never the key
+        assert SECRET not in html
+
+
+def test_saving_a_key_replaces_the_last_answer_instead_of_forgetting_it(
+    db: Database, store: KeyStore
+) -> None:
+    rejected = FakeHttp(error="HTTP 401 from openrouter.ai")
+    with client(db, store=store, http=rejected) as http:
+        http.post("/keys/set", data=save_form(), follow_redirects=False)
+    first = get_key_test(db, "openrouter")
+    assert first is not None
+    assert first.status == "unauthorized"
+    with client(db, store=store, http=FakeHttp()) as http:
+        http.post("/keys/set", data=save_form(), follow_redirects=False)
+    second = get_key_test(db, "openrouter")
+    assert second is not None
+    assert second.status == "ok"  # the new key's answer, not the old one dropped
+    assert second.ts >= first.ts
+
+
+def test_saving_a_key_while_blocked_records_blocked_and_sends_nothing(
+    db: Database, store: KeyStore
+) -> None:
+    for rules in (Rules(airplane=True), Rules(private_lock=True), Rules(default_scope="local")):
+        fake = FakeHttp()
+        with client(db, store=store, rules=rules, http=fake) as http:
+            saved = http.post("/keys/set", data=save_form(), follow_redirects=False)
+            assert saved.status_code == 303
+        assert fake.urls == []  # the network block sends nothing at all
+        assert store.secret("openrouter") == SECRET
+        row = get_key_test(db, "openrouter")
+        assert row is not None
+        assert row.status == "blocked"
+        assert SECRET not in row.detail
+
+
+@pytest.mark.parametrize(
+    ("status", "css"),
+    [
+        ("ok", "ok"),
+        ("unauthorized", "bad"),
+        ("http_error", "bad"),
+        ("unreachable", "bad"),
+        ("blocked", "warn"),
+        ("unsupported", "warn"),
+    ],
+)
+def test_each_status_renders_with_its_colour_class_and_its_word(
+    db: Database, store: KeyStore, status: str, css: str
+) -> None:
+    store.save("openrouter", SECRET)
+    record_key_test(db, "openrouter", status, "a host and an HTTP code", now=NOW)
+    html = render_html(page(db, keys=store), section="keys")
+    assert f'<span class="status {css}">{status}</span>' in html
+    assert "a host and an HTTP code" in html
+
+
+def test_a_key_that_was_never_tested_has_a_neutral_indicator(db: Database, store: KeyStore) -> None:
+    store.save("openrouter", SECRET)
+    html = render_html(page(db, keys=store), section="keys")
+    assert '<span class="status idle">never tested</span>' in html
+    # The colours are variables next to --line and --muted, not per-element hex.
+    assert "--ok:" in html
+    assert "--bad:" in html
 
 
 def test_removing_a_key_takes_it_off_the_page(db: Database, store: KeyStore) -> None:
@@ -410,6 +552,94 @@ def test_a_failed_test_is_recorded_and_never_echoes_the_key(db: Database, store:
         html = http.get("/?section=keys").text
         assert "unauthorized" in html
         assert SECRET not in html
+
+
+def test_test_all_tests_every_saved_key_and_leaves_the_rest_alone(
+    db: Database, store: KeyStore
+) -> None:
+    store.save("openrouter", SECRET)
+    store.save("anthropic", OTHER_SECRET)
+    fake = FakeHttp()
+    with client(db, store=store, http=fake) as http:
+        tested = http.post("/keys/test-all", data={"csrf": CSRF}, follow_redirects=False)
+        assert tested.status_code == 303
+        assert tested.headers["location"] == "/?section=keys"  # no single section to jump to
+        assert sorted(fake.urls) == [
+            "https://api.anthropic.com/v1/models",
+            "https://openrouter.ai/api/v1/key",
+        ]
+        saved = get_key_test(db, "openrouter")
+        assert saved is not None
+        assert saved.status == "ok"
+        also = get_key_test(db, "anthropic")
+        assert also is not None
+        assert also.status == "ok"
+        # A provider with no key was not contacted and did not get an answer recorded.
+        assert get_key_test(db, "openai") is None
+        assert get_key_test(db, "nvidia") is None
+        html = http.get("/?section=keys").text
+        assert html.count('<span class="status ok">ok</span>') == 2
+        assert SECRET not in html
+        assert OTHER_SECRET not in html
+
+
+def test_test_all_asks_the_one_ping_path_for_every_alias_in_one_call(
+    db: Database, store: KeyStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.save("openrouter", SECRET)
+    store.save("anthropic", OTHER_SECRET)
+    calls: list[list[str]] = []
+    real = control_keys.check_and_record
+
+    def spy(store_: KeyStore, rules_: Rules, db_: Database | None = None, **kw: Any) -> list[Any]:
+        calls.append(list(kw.get("aliases") or ()))
+        return real(store_, rules_, db_, **kw)
+
+    monkeypatch.setattr(control_keys, "check_and_record", spy)
+    with client(db, store=store, http=FakeHttp()) as http:
+        tested = http.post("/keys/test-all", data={"csrf": CSRF}, follow_redirects=False)
+        assert tested.status_code == 303
+    assert len(calls) == 1  # one call for the whole page, not one per key
+    assert sorted(calls[0]) == ["anthropic", "openrouter"]
+
+
+def test_test_all_sends_nothing_while_the_private_lock_is_on(db: Database, store: KeyStore) -> None:
+    store.save("openrouter", SECRET)
+    fake = FakeHttp()
+    locked = Rules(private_lock=True)
+    with client(db, store=store, rules=locked, http=fake) as http:
+        tested = http.post("/keys/test-all", data={"csrf": CSRF}, follow_redirects=False)
+        assert tested.status_code == 303
+    assert fake.urls == []
+    row = get_key_test(db, "openrouter")
+    assert row is not None
+    assert row.status == "blocked"
+    html = render_html(page(db, rules=locked, keys=store), section="keys")
+    assert '<span class="status warn">blocked</span>' in html
+
+
+def test_test_all_with_no_saved_key_comes_back_as_a_sentence(db: Database, store: KeyStore) -> None:
+    with client(db, store=store) as http:
+        nothing = http.post("/keys/test-all", data={"csrf": CSRF}, follow_redirects=False)
+        assert nothing.status_code == 400
+        assert "there is no saved key to test" in nothing.text
+
+
+def test_the_test_all_button_carries_the_token_and_stays_clear_of_the_row_actions(
+    db: Database, store: KeyStore
+) -> None:
+    empty = render_html(page(db, keys=store, csrf=CSRF), section="keys")
+    assert 'action="/keys/test-all"' not in empty  # nothing saved, so nothing to test
+    store.save("openrouter", SECRET)
+    html = render_html(page(db, keys=store, csrf=CSRF), section="keys")
+    form = (
+        '<form method="post" action="/keys/test-all">'
+        f'<input type="hidden" name="csrf" value="{CSRF}">'
+        '<button type="submit">Test all saved keys</button>'
+    )
+    assert form in html
+    assert html.index('action="/keys/test-all"') < html.index('<details id="keys-')  # above them
+    assert '<td><form method="post" action="/keys/test-all"' not in html  # never a row action
 
 
 def test_a_refused_write_comes_back_as_the_page_with_a_sentence(

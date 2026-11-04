@@ -6,6 +6,10 @@ Anthropic and OpenAI, ``GET {base_url}/models`` on a user-configured endpoint. A
 known metadata endpoint is reported ``unsupported`` instead of being called blindly. A provider
 registered in ``catalog.providers`` (HDW-514) names its own ``metadata_url``, or none.
 
+The dashboard calls the same path (``DashboardKeys``): saving a key pings it at once, so the row
+comes back with a live answer, and one POST can re-test every saved key. A saved key is never
+rolled back because its ping failed - the key stays and the row carries the status.
+
 Results carry a status word and a detail that are safe to show and to log: the key appears in
 neither, and a failed request keeps only the host and the HTTP code from ``SourceError``.
 
@@ -22,7 +26,7 @@ from dataclasses import dataclass
 from headwaters.core.catalog.discovery import network_block
 from headwaters.core.catalog.http import HttpClient, SourceError, UrllibHttp
 from headwaters.core.catalog.schema import Endpoints
-from headwaters.core.keys import KeyStore, KeyStoreError
+from headwaters.core.keys import NOT_SET, KeyStore, KeyStoreError
 from headwaters.core.logging import get_logger
 from headwaters.core.providers import Registry, default_registry
 from headwaters.core.rules import Rules
@@ -191,13 +195,14 @@ def check_and_record(
 
 @dataclass
 class DashboardKeys:
-    """The dashboard's whole write surface (HDW-503): save, remove and test - and nothing else.
+    """The dashboard's whole write surface (HDW-503): save, remove, test one key, test every key.
 
     The store and the rules are read per call (production passes ``Daemon.key_store``, which
     builds a store over the *live* rules), so a rules change is seen by the next click. Each call
-    returns the provider whose section the page comes back to; a refusal raises ``KeyStoreError``
-    with a sentence that is safe to show and never holds a key or an environment-variable name.
-    ``http`` and ``openrouter_base`` exist so a test never reaches the network.
+    returns the provider whose section the page comes back to (``test_all`` returns ``""``: no one
+    section is the target); a refusal raises ``KeyStoreError`` with a sentence that is safe to show
+    and never holds a key or an environment-variable name. ``http`` and ``openrouter_base`` exist
+    so a test never reaches the network.
     """
 
     store: Callable[[], KeyStore]
@@ -207,11 +212,36 @@ class DashboardKeys:
     openrouter_base: str | None = None
 
     def save(self, alias: str, provider: str, secret: str) -> str:
+        """Store a key, then ask the provider about it, so the page comes back with a live answer.
+
+        Saving and testing are separate outcomes: the key is saved before the ping runs, and a
+        ping that fails records its own status (``unauthorized``, ``http_error``, ``unreachable``,
+        or ``blocked`` when the network block applies) without failing the save. The old answer is
+        cleared first so a run that records nothing cannot leave the previous key's result beside
+        the new key.
+        """
         store = self.store()
         canonical = self._provider(store, provider.strip() or alias)
         info = store.save(alias.strip() or canonical, secret, provider=canonical)
-        clear_key_test(self.db, info.alias)  # a new key has not been tested yet
+        clear_key_test(self.db, info.alias)
+        try:
+            self._record(store, [info.alias])
+        except Exception:  # the person asked for the key to be saved, not for the network to be up
+            _log.warning("key saved, but the test on save could not run", exc_info=True)
         return info.provider
+
+    def test_all(self) -> str:
+        """Test every saved key in one run; ``""`` because there is no section to come back to.
+
+        ``check_and_record`` takes the whole alias sequence, so this is one call for the whole
+        page: the same ping and the same recording as the CLI's ``keys test``.
+        """
+        store = self.store()
+        aliases = [row.alias for row in store.entries() if row.source != NOT_SET]
+        if not aliases:
+            raise KeyStoreError("there is no saved key to test")
+        self._record(store, aliases)
+        return ""
 
     def remove(self, alias: str) -> str:
         """Remove a stored key. A key that only comes from the environment stays: the page says so.
@@ -230,17 +260,21 @@ class DashboardKeys:
     def test(self, alias: str) -> str:
         store = self.store()
         name = self._alias(store, alias)
-        results = check_and_record(
+        results = self._record(store, [name])
+        if not results:
+            raise KeyStoreError(f"there is no key to test for {name}")
+        return results[0].provider
+
+    def _record(self, store: KeyStore, aliases: Sequence[str]) -> list[PingResult]:
+        """The one ping-and-record path (HDW-401): ``check_and_record`` over the live rules."""
+        return check_and_record(
             store,
             self.rules(),
             self.db,
             http=self.http,
             openrouter_base=self.openrouter_base,
-            aliases=[name],
+            aliases=aliases,
         )
-        if not results:
-            raise KeyStoreError(f"there is no key to test for {name}")
-        return results[0].provider
 
     @staticmethod
     def _provider(store: KeyStore, typed: str) -> str:

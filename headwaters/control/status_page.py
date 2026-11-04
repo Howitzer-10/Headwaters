@@ -6,8 +6,8 @@ rules, project rule, feature registry, the shared SQLite state and the credentia
 test can build one from real walls, real decision rows and a fake keyring), ``render_html`` is
 pure text.
 
-Who may change things, and how (HDW-503). This page has exactly three writes - save a key, remove
-a key, test a key - and they are the whole reason it is no longer read-only:
+Who may change things, and how (HDW-503). This page has exactly four writes - save a key, remove
+a key, test a key, test every saved key - and they are the whole reason it is no longer read-only:
 
 - the dashboard has no bearer token, because a browser opens it from a bookmark with nothing but a
   URL. So the page carries a CSRF token instead: random per daemon start, held in memory only
@@ -298,7 +298,11 @@ def build_page(
 
 
 _CSS = """
-:root { color-scheme: light dark; --line: #8884; --muted: #8a8a8a; }
+:root { color-scheme: light dark; --line: #8884; --muted: #8a8a8a;
+        --ok: #14742f; --bad: #b00020; --warn: #8a5a00; }
+@media (prefers-color-scheme: dark) {
+  :root { --ok: #63d68f; --bad: #ff8f8f; --warn: #e8c36a; }
+}
 body { font: 15px/1.45 "Segoe UI", system-ui, sans-serif; margin: 0 auto; max-width: 60rem;
        padding: 1.5rem; }
 h1 { font-size: 1.4rem; margin: 0; }
@@ -312,6 +316,11 @@ th { font-weight: 600; }
 td.reasons, span.reasons { font-size: .8rem; color: var(--muted); }
 code { font-size: .85rem; }
 .on::before { content: "on"; } .off::before { content: "off"; }
+span.status::before { content: "\\25CF"; margin-right: .35em; }
+span.status.ok { color: var(--ok); }
+span.status.bad { color: var(--bad); }
+span.status.warn { color: var(--warn); }
+span.status.idle { color: var(--muted); }
 p.error { color: #b00020; font-weight: 600; }
 form { margin: .35rem 0; }
 td form, td input { display: inline-block; margin-right: .3rem; }
@@ -442,11 +451,31 @@ def _provider_state(group: PageProvider) -> str:
 
 
 def _provider_test(group: PageProvider) -> str:
+    """The provider's latest answer, as HTML: the coloured word, never the colour alone."""
     tested = [key for key in group.keys if key.status is not None]
     if not tested:
-        return "never tested"
+        return _status("never tested", None)
     latest = max(tested, key=lambda key: key.tested_at or 0.0)
-    return f"last test {latest.status}"
+    return _status(f"last test {latest.status}", latest.status)
+
+
+# The status word -> the colour beside it. Green is an answer, red is a key to fix, amber is "not
+# checked by design" (blocked, unsupported), muted is "never tested". Strings, not imports: this
+# module does not import ``control.keys`` (D14).
+_STATUS_CLASS = {
+    "ok": "ok",
+    "unauthorized": "bad",
+    "http_error": "bad",
+    "unreachable": "bad",
+    "blocked": "warn",
+    "unsupported": "warn",
+}
+
+
+def _status(word: str, status: str | None) -> str:
+    """``word`` with a coloured dot. The word stays, so a screenshot reads without colour."""
+    css = "idle" if status is None else _STATUS_CLASS.get(status, "warn")
+    return f'<span class="status {css}">{_e(word)}</span>'
 
 
 def _csrf_field(page: StatusPage) -> str:
@@ -455,9 +484,9 @@ def _csrf_field(page: StatusPage) -> str:
 
 def _tested(key: PageKey) -> str:
     if key.status is None:
-        return "never tested"
+        return _status("never tested", None)
     detail = f' <span class="reasons">{_e(key.detail)}</span>' if key.detail else ""
-    return f"{_e(key.status)} · {_e(_stamp(key.tested_at))}{detail}"
+    return f"{_status(key.status, key.status)} · {_e(_stamp(key.tested_at))}{detail}"
 
 
 def _key_actions(page: StatusPage, key: PageKey) -> str:
@@ -503,7 +532,7 @@ def _provider_note(group: PageProvider) -> str:
 def _provider_block(page: StatusPage, group: PageProvider) -> str:
     summary = (
         f"<strong>{_e(group.name)}</strong> · {_e(group.access)} · "
-        f"{_e(_provider_state(group))} · {_e(_provider_test(group))}"
+        f"{_e(_provider_state(group))} · {_provider_test(group)}"
     )
     head = f'<details id="keys-{_e(group.name)}"><summary>{summary}</summary>'
     body = ""
@@ -540,6 +569,18 @@ def _add_key_form(page: StatusPage) -> str:
     )
 
 
+def _test_all_form(page: StatusPage) -> str:
+    """One POST for every saved key, above the provider blocks and clear of the per-row actions."""
+    if not any(key.source != "not set" for group in page.keys for key in group.keys):
+        return ""
+    return (
+        '<form method="post" action="/keys/test-all">'
+        + _csrf_field(page)
+        + '<button type="submit">Test all saved keys</button>'
+        + '<span class="muted"> one cheap metadata request per saved key</span></form>'
+    )
+
+
 def _keys_section(page: StatusPage) -> str:
     if not page.keys:
         return ""
@@ -556,12 +597,13 @@ def _keys_section(page: StatusPage) -> str:
             "enable it.</p>"
         )
     out.append(_add_key_form(page))
+    out.append(_test_all_form(page))
     out.extend(_provider_block(page, group) for group in page.keys)
     return "".join(out)
 
 
 def render_html(page: StatusPage, *, section: str | None = None, error: str | None = None) -> str:
-    """One self-contained page: no scripts, no external assets, and only the keys' three writes.
+    """One self-contained page: no scripts, no external assets, and only the keys' four writes.
 
     ``section`` reorders the page (``keys`` puts the Keys section first) and ``error`` is the
     sentence the daemon shows when a write was refused. Both are decided by the caller: this
@@ -600,5 +642,5 @@ def _editing_note(page: StatusPage) -> str:
         return '<p class="muted">This page shows local state and changes nothing.</p>'
     return (
         '<p class="muted">This page shows local state. The Keys section can save, replace, remove '
-        "and test a key; nothing else here changes anything.</p>"
+        "and test a key, or test every saved key; nothing else here changes anything.</p>"
     )

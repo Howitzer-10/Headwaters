@@ -50,9 +50,14 @@ HEALTH_PATH = "/health"
 SCOPE_PATH = "/v1/scope"
 KEYS_PATH = "/v1/keys"
 STATUS_PAGE_PATHS = ("/", "/index.html")
-# The dashboard's three writes (HDW-503): path -> the backend call it makes. Nothing else is a
+# The dashboard's four writes (HDW-503): path -> the backend call it makes. Nothing else is a
 # write, and a JSON body is never accepted: a cross-site page can post a form, not read one.
-KEYS_PATHS: dict[str, str] = {"/keys/set": "save", "/keys/remove": "remove", "/keys/test": "test"}
+KEYS_PATHS: dict[str, str] = {
+    "/keys/set": "save",
+    "/keys/remove": "remove",
+    "/keys/test": "test",
+    "/keys/test-all": "test_all",
+}
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
 MAX_FORM_BYTES = 8 * 1024
 KEYS_SECTION = "keys"
@@ -69,7 +74,7 @@ ScopeWriter = Callable[[str, object], Mapping[str, Any]]
 
 
 class KeysActions(Protocol):
-    """What the dashboard needs from the keys backend: exactly three calls, no other writes."""
+    """What the dashboard needs from the keys backend: exactly four calls, no other writes."""
 
     def save(self, alias: str, provider: str, secret: str) -> str:
         """Store a key; returns the provider whose section the page comes back to."""
@@ -81,6 +86,10 @@ class KeysActions(Protocol):
 
     def test(self, alias: str) -> str:
         """Test one key; returns the provider whose section the page comes back to."""
+        ...
+
+    def test_all(self) -> str:
+        """Test every saved key; returns "" - no one provider section is the target."""
         ...
 
 
@@ -303,7 +312,9 @@ class _KeysRoute:
             return await self._again(
                 500, "the change could not be completed; the daemon log has the error"
             )
-        target = f"/?section={KEYS_SECTION}#keys-{quote(provider, safe='')}"
+        target = f"/?section={KEYS_SECTION}"
+        if provider:
+            target += f"#keys-{quote(provider, safe='')}"
         return RedirectResponse(target, status_code=303)
 
     def _token_ok(self, given: str) -> bool:
@@ -317,6 +328,8 @@ class _KeysRoute:
             return self._keys.save(alias, _first(form, "provider"), _first(form, "secret"))
         if self._action == "remove":
             return self._keys.remove(_first(form, "alias"))
+        if self._action == "test_all":
+            return self._keys.test_all()
         return self._keys.test(_first(form, "alias"))
 
     async def _again(self, status: int, message: str) -> HTMLResponse:
@@ -331,7 +344,7 @@ def build_status_page_app(
     csrf: str = "",
     port: int | None = None,
 ) -> ASGIApp:
-    """The dashboard: the page on ``GET /`` plus its three key writes on ``POST /keys/*`` (HDW-503).
+    """The dashboard: the page on ``GET /`` plus its four key writes on ``POST /keys/*`` (HDW-503).
 
     ``render(section, error)`` returns the whole HTML body: ``section`` is ``"keys"`` when the
     request asked for that section first (``?section=keys``) and ``error`` is a sentence to show
