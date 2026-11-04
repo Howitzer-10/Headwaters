@@ -56,16 +56,21 @@ def _populate(install: Install) -> None:
     (install.roaming / "rules.yaml").write_text("", encoding="utf-8")
 
 
-def test_the_default_plan_removes_the_task_and_the_runtime_only(tmp_path: Path) -> None:
+def test_the_default_plan_removes_the_tasks_and_the_runtime_only(tmp_path: Path) -> None:
     install = _install(tmp_path)
 
     result = plan(install)
 
     assert [(step.kind, step.owner) for step in result.steps] == [
         (KIND_TASK, OWNER_INSTALLER),
+        (KIND_TASK, OWNER_INSTALLER),
         (KIND_TREE, OWNER_INSTALLER),
     ]
-    assert result.steps[1].target == str(install.runtime)
+    assert [step.target for step in result.steps][:2] == [
+        uninstall.TASK_PATH,
+        uninstall.WATCHDOG_TASK_PATH,
+    ]
+    assert result.steps[2].target == str(install.runtime)
     assert str(install.local) in result.kept
     assert str(install.roaming) in result.kept
     assert result.optional == ()
@@ -77,15 +82,16 @@ def test_state_and_keys_are_opt_in(tmp_path: Path) -> None:
     result = plan(install, Options(remove_state=True, remove_keys=True))
 
     kinds = [step.kind for step in result.steps]
-    assert kinds == [KIND_TASK, KIND_TREE, KIND_TREE, KIND_KEYS]
+    assert kinds == [KIND_TASK, KIND_TASK, KIND_TREE, KIND_TREE, KIND_KEYS]
     assert [step.owner for step in result.steps] == [
+        OWNER_INSTALLER,
         OWNER_INSTALLER,
         OWNER_INSTALLER,
         OWNER_PYTHON,
         OWNER_PYTHON,
     ]
-    assert [step.target for step in result.steps][1] == str(install.local)
-    assert [step.target for step in result.steps][2] == str(install.roaming)
+    assert [step.target for step in result.steps][2] == str(install.local)
+    assert [step.target for step in result.steps][3] == str(install.roaming)
     assert result.kept == ()
 
 

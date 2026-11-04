@@ -187,3 +187,104 @@ def test_main_status_prints_the_state(
 
     assert autostart.main(["--status"], runner=fake_runner(1, "")) == 0
     assert capsys.readouterr().out.strip() == autostart.STATUS_ABSENT
+
+
+# ------------------------------------ the repeating watchdog task (HDW-521)
+
+
+def test_the_watchdog_task_repeats_every_five_minutes_and_runs_the_watchdog(
+    tmp_path: Path,
+) -> None:
+    install = _install(tmp_path)
+
+    root = ET.fromstring(autostart.watchdog_task_xml(user="WS\\ana", command=install.cli))
+
+    assert root.findtext(f"{NS}RegistrationInfo/{NS}URI") == "\\Headwaters Watchdog"
+    repetition = root.findtext(f"{NS}Triggers/{NS}TimeTrigger/{NS}Repetition/{NS}Interval")
+    assert repetition == "PT5M"
+    assert root.find(f"{NS}Triggers/{NS}LogonTrigger") is None
+    action = root.find(f"{NS}Actions/{NS}Exec")
+    assert action is not None
+    assert action.findtext(f"{NS}Command") == str(install.cli)
+    assert action.findtext(f"{NS}Arguments") == "watchdog"
+    settings = root.find(f"{NS}Settings")
+    assert settings is not None
+    assert settings.findtext(f"{NS}MultipleInstancesPolicy") == "IgnoreNew"
+    assert settings.findtext(f"{NS}ExecutionTimeLimit") == "PT2M"
+    assert settings.findtext(f"{NS}StartWhenAvailable") == "true"
+    assert settings.findtext(f"{NS}DisallowStartIfOnBatteries") == "false"
+    principal = root.find(f"{NS}Principals/{NS}Principal")
+    assert principal is not None
+    assert principal.findtext(f"{NS}RunLevel") == "LeastPrivilege"
+    assert principal.findtext(f"{NS}LogonType") == "InteractiveToken"
+
+
+def test_an_unknown_schedule_is_a_programming_error(tmp_path: Path) -> None:
+    install = _install(tmp_path)
+
+    with pytest.raises(ValueError, match="unknown schedule"):
+        autostart.task_xml(user="ana", command=install.cli, schedule="weekly")
+
+
+def test_the_watchdog_is_its_own_task(tmp_path: Path) -> None:
+    steps = autostart.watchdog_create_steps(tmp_path / "watchdog.xml")
+
+    assert [list(step.argv) for step in steps] == [
+        [
+            "schtasks",
+            "/Create",
+            "/TN",
+            "\\Headwaters Watchdog",
+            "/XML",
+            str(tmp_path / "watchdog.xml"),
+            "/F",
+        ]
+    ]
+
+
+def test_install_registers_the_logon_task_then_the_watchdog(tmp_path: Path) -> None:
+    install = _install(tmp_path)
+    calls: list[list[str]] = []
+
+    steps = autostart.install_steps(install, user="WS\\ana")
+
+    assert [step.argv[3] for step in steps] == ["\\Headwaters", "\\Headwaters Watchdog"]
+    assert install.autostart_xml.exists()
+    assert install.watchdog_xml.exists()
+    assert autostart.apply(steps, runner=fake_runner(calls=calls)) == 0
+    assert [call[3] for call in calls] == ["\\Headwaters", "\\Headwaters Watchdog"]
+
+
+def test_delete_and_the_toggle_cover_both_tasks() -> None:
+    assert [step.argv[3] for step in autostart.delete_steps()] == [
+        "\\Headwaters",
+        "\\Headwaters Watchdog",
+    ]
+    assert [step.argv[3] for step in autostart.enable_steps()] == [
+        "\\Headwaters",
+        "\\Headwaters Watchdog",
+    ]
+    assert [step.argv[3] for step in autostart.disable_steps()] == [
+        "\\Headwaters",
+        "\\Headwaters Watchdog",
+    ]
+
+
+def test_status_can_be_asked_about_the_watchdog() -> None:
+    calls: list[list[str]] = []
+
+    assert (
+        autostart.status(
+            runner=fake_runner(0, _settings_xml(True), calls), name="Headwaters Watchdog"
+        )
+        == autostart.STATUS_ENABLED
+    )
+    assert calls[0][3] == "\\Headwaters Watchdog"
+
+
+def test_a_task_that_was_never_created_reads_as_absent() -> None:
+    missing = (
+        'ERROR: The system cannot find the file specified.\nThe task "Headwaters" does not exist.'
+    )
+
+    assert autostart.status(runner=fake_runner(0, missing)) == autostart.STATUS_ABSENT

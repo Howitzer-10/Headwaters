@@ -97,6 +97,10 @@ class Install:
         return self.runtime / "autostart.xml"
 
     @property
+    def watchdog_xml(self) -> Path:
+        return self.runtime / "watchdog.xml"
+
+    @property
     def cache(self) -> Path:
         return self.local / "Cache"
 

@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from headwaters.core import paths
+from headwaters.core import daemon_hold, paths
 from headwaters.core.daemon_client import DaemonClient, DaemonError, find_running
 from headwaters.core.daemon_info import DaemonInfo, lock_path, read_info, remove_info
 
@@ -150,7 +150,13 @@ def start_daemon(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> ControlResult:
-    """Start the daemon in the background and wait until it answers ``/health``."""
+    """Start the daemon in the background and wait until it answers ``/health``.
+
+    Any explicit start clears the watchdog's "deliberately stopped" mark (HDW-521): a person
+    running ``start``, a tray restart and the at-logon task all arrive here, and all of them
+    want the daemon running.
+    """
+    daemon_hold.clear()
     running = find()
     if running is not None:
         return ControlResult("already_running", "The daemon is already running.", running.info)
@@ -242,24 +248,35 @@ def stop_daemon(
 
     With ``force``, a daemon that does not answer, refuses, or outlasts the timeout is killed by
     the pid in ``daemon.json`` (FU-201-10).
+
+    A stop the daemon confirms leaves the watchdog's "deliberately stopped" mark (HDW-521), so the
+    repeating task does not start the daemon again a few minutes later. A refused or failed stop
+    records nothing: the daemon is still there, and the user can try again.
     """
 
+    def done(result: ControlResult) -> ControlResult:
+        if result.ok:
+            daemon_hold.hold(result.outcome)
+        return result
+
     def forced(info: DaemonInfo) -> ControlResult:
-        return _force_stop(
-            info, kill=kill, alive=alive, timeout_s=timeout_s, sleep=sleep, clock=clock
+        return done(
+            _force_stop(info, kill=kill, alive=alive, timeout_s=timeout_s, sleep=sleep, clock=clock)
         )
 
     client = find()
     if client is None:
         stale = read_info()
         if stale is None:
-            return ControlResult("not_running", "The daemon is not running.")
+            return done(ControlResult("not_running", "The daemon is not running."))
         if not alive(stale.pid):
             remove_info(stale.pid)
-            return ControlResult("stale_cleaned", "No daemon was running; removed a stale file.")
+            return done(
+                ControlResult("stale_cleaned", "No daemon was running; removed a stale file.")
+            )
         if force:
             return forced(stale)
-        return ControlResult("not_running", "The daemon is not running.")
+        return done(ControlResult("not_running", "The daemon is not running."))
     info = client.info
     try:
         client.shutdown()
@@ -270,7 +287,7 @@ def stop_daemon(
     deadline = clock() + timeout_s
     while clock() < deadline:
         if not alive(info.pid) and read_info() is None:
-            return ControlResult("stopped", "The daemon has stopped.", info)
+            return done(ControlResult("stopped", "The daemon has stopped.", info))
         sleep(0.2)
     if force:
         return forced(info)

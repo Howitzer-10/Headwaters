@@ -521,3 +521,54 @@ def test_elsewhere_the_daemon_gets_a_new_session_and_no_windows_flags(
     daemon_control._spawn_detached(daemon_control.daemon_command())
     assert fake.calls[0]["start_new_session"] is True
     assert "creationflags" not in fake.calls[0]
+
+
+# ------------------------- the mark a deliberate stop leaves for the watchdog (HDW-521)
+
+
+class _Found:
+    """A DaemonClient stand-in that answers a shutdown like the real one."""
+
+    info = INFO
+    stopped = False
+
+    def shutdown(self) -> dict[str, Any]:
+        _Found.stopped = True
+        return {"ok": True}
+
+
+def test_a_confirmed_stop_leaves_the_watchdog_hold() -> None:
+    from headwaters.core import daemon_hold
+
+    assert not daemon_hold.is_held()
+
+    result = stop_daemon(find=lambda: _Found(), alive=lambda pid: False)  # type: ignore[arg-type,return-value]
+
+    assert result.outcome == "stopped"
+    assert daemon_hold.is_held()
+    assert '"outcome": "stopped"' in daemon_hold.hold_path().read_text(encoding="utf-8")
+
+
+def test_a_refused_stop_leaves_no_hold_so_the_watchdog_keeps_trying() -> None:
+    from headwaters.core import daemon_hold
+
+    class Refusing(_Found):
+        def shutdown(self) -> dict[str, Any]:
+            raise DaemonError("HTTP 401")
+
+    assert stop_daemon(find=lambda: Refusing()).outcome == "failed"  # type: ignore[arg-type,return-value]
+    assert not daemon_hold.is_held()
+
+
+def test_start_clears_the_hold() -> None:
+    from headwaters.core import daemon_hold
+
+    daemon_hold.hold()
+    assert daemon_hold.is_held()
+
+    spawned: list[Any] = []
+    result = start_daemon(find=lambda: _Found(), spawn=lambda argv: spawned.append(argv))  # type: ignore[arg-type,return-value]
+
+    assert result.outcome == "already_running"
+    assert not daemon_hold.is_held()
+    assert spawned == []

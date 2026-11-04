@@ -13,6 +13,7 @@ from headwaters.cli.output import EXIT_FAILED, emit_json
 from headwaters.core.daemon_client import DaemonError, find_running
 from headwaters.core.daemon_control import ControlResult, start_daemon, stop_daemon
 from headwaters.core.daemon_info import DaemonInfo
+from headwaters.core.daemon_watchdog import tick
 
 
 def _info_payload(info: DaemonInfo | None) -> dict[str, object] | None:
@@ -104,3 +105,21 @@ def register(app: typer.Typer) -> None:
             line = f"Keep-warm: {keep_warm.get('action')} ({keep_warm.get('reason')})"
             expires = keep_warm.get("expires_at")
             typer.echo(f"{line} until={expires}" if expires else line)
+
+    @app.command("watchdog")
+    def watchdog(
+        as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
+    ) -> None:
+        """One watchdog tick: start the daemon if it has died. The repeating task runs this.
+
+        It does nothing when the daemon is running, and nothing when a deliberate
+        ``headwaters stop`` is in force. Exit 1 only when the daemon could not be started, so
+        Task Scheduler records a failed run instead of a silent one.
+        """
+        result = tick()
+        if as_json:
+            emit_json({"ok": result.ok, "action": result.action, "message": result.message})
+        else:
+            typer.echo(result.message, err=not result.ok)
+        if not result.ok:
+            raise typer.Exit(EXIT_FAILED)

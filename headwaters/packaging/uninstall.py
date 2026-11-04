@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from headwaters.packaging.autostart import TASK_PATH
+from headwaters.packaging.autostart import TASK_PATH, WATCHDOG_TASK_PATH
 from headwaters.packaging.layout import Install, is_inside
 
 OWNER_INSTALLER = "installer"
@@ -89,6 +89,14 @@ def plan(install: Install, options: Options | None = None) -> Plan:
                 kind=KIND_TASK,
                 target=TASK_PATH,
                 why="the at-logon task would restart a program that is gone",
+                owner=OWNER_INSTALLER,
+            )
+        )
+        steps.append(
+            Step(
+                kind=KIND_TASK,
+                target=WATCHDOG_TASK_PATH,
+                why="the watchdog would restart a program that is gone",
                 owner=OWNER_INSTALLER,
             )
         )
