@@ -31,6 +31,10 @@ CANONICAL = [
     "pollinations",
     "opencode",
     "opencode-go",
+    "gemini",
+    "groq",
+    "cerebras",
+    "cohere",
     "kilo",
     "ollama",
 ]

@@ -109,8 +109,76 @@
     }
   ],
   "free_limits": [
-    {"provider": "openrouter", "model": null, "rpm": 20, "rpd": 50, "verify": true},
-    {"provider": "nvidia", "model": null, "rpm": 40, "rpd": null, "verify": true}
+    {
+      "provider": "openrouter", "model": null, "verify": true,
+      "licence": "commercial_ok",
+      "source_url": "https://openrouter.ai/docs/api-reference/limits",
+      "note": "Free model ids are limited per key: 20 requests per minute, 50 per day, and 1000 per day once the account has bought 10 USD of credits in total.",
+      "limits": [
+        {"metric": "requests", "max": 20, "per": "minute", "scope": "key", "verify": true},
+        {"metric": "requests", "max": 50, "per": "day", "scope": "key", "verify": true},
+        {"metric": "requests", "max": 1000, "per": "day", "scope": "key", "verify": false,
+         "condition": {"fact": "account_topup_usd_total", "op": ">=", "value": 10},
+         "note": "P9: the docs describe the higher daily tier for accounts that have topped up, but the threshold is rendered by the page script and was not in the fetched HTML."}
+      ]
+    },
+    {
+      "provider": "nvidia", "model": null, "verify": true,
+      "licence": "unstated",
+      "source_url": "https://build.nvidia.com/api/runtime/content/help-center-faq.yaml",
+      "note": "40 requests per minute on most models, counted against the key rather than the model (HDW-519: the old row counted per model, which is the legacy reading).",
+      "limits": [
+        {"metric": "requests", "max": 40, "per": "minute", "scope": "key", "verify": true}
+      ]
+    },
+    {
+      "provider": "mistral", "model": null, "verify": false,
+      "licence": "commercial_ok",
+      "source_url": "https://docs.mistral.ai/deployment/laplateforme/tier/",
+      "note": "The free Experiment plan allows 1 billion tokens per month and 500 thousand tokens per minute per key. Both clauses are tokens, so both are inert here (only requests are counted) and both are unverified: P2/P3/P4 had no MISTRAL_API_KEY in the environment.",
+      "limits": [
+        {"metric": "tokens", "max": 500000, "per": "minute", "scope": "key",
+         "tokens": "input+output", "verify": false, "note": "P5: page fetched, figures not re-readable from the HTML."},
+        {"metric": "tokens", "max": 1000000000, "per": "month", "scope": "key",
+         "tokens": "input+output", "verify": false, "note": "P5 as above."}
+      ]
+    },
+    {
+      "provider": "groq", "model": null, "verify": false,
+      "licence": "commercial_ok",
+      "source_url": "https://console.groq.com/docs/rate-limits",
+      "note": "Free-plan limits are per organisation and per model. Every number here is unverified: P5 fetched the page but the table is client-rendered, and P2/P4 had no GROQ_API_KEY in the environment.",
+      "limits": [
+        {"metric": "requests", "max": 30, "per": "minute", "scope": "organisation",
+         "verify": false, "note": "P5"},
+        {"metric": "requests", "max": 1000, "per": "day", "scope": "organisation",
+         "verify": false, "note": "P5"},
+        {"metric": "tokens", "max": 6000, "per": "minute", "scope": "organisation",
+         "tokens": "input+output", "verify": false, "note": "P5"}
+      ]
+    },
+    {
+      "provider": "cohere", "model": null, "verify": false,
+      "licence": "non_commercial_only",
+      "source_url": "https://docs.cohere.com/docs/rate-limits",
+      "note": "A trial key is limited per key and its terms restrict use to non-commercial evaluation. Values are unverified: P5 fetched the page but it no longer states the trial terms in the HTML, and P2/P4 had no COHERE_API_KEY in the environment.",
+      "limits": [
+        {"metric": "requests", "max": 20, "per": "minute", "scope": "key",
+         "verify": false, "note": "P5"},
+        {"metric": "requests", "max": 1000, "per": "month", "scope": "key",
+         "verify": false, "note": "P5"}
+      ]
+    },
+    {
+      "provider": "cloudflare", "model": null, "verify": false,
+      "licence": "commercial_ok",
+      "source_url": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
+      "note": "Workers AI gives every account 10000 neurons per day (P5 found 'neurons per day' and '10,000' on the pricing page). There is no provider row yet: the docs address the account inside the URL, so the row waits for base_url_vars (HDW-519 deviation 2). This entry records the allowance without a route.",
+      "limits": [
+        {"metric": "neurons", "max": 10000, "per": "day", "scope": "account",
+         "verify": false, "note": "P5"}
+      ]
+    }
   ],
   "wall_patterns": [
     {"provider": "*", "status_codes": [429], "body_regex": null, "kind": "rate_limit", "scope": "model", "verify": true, "source": "RFC 9110 / provider error docs: 429 is rate limiting", "checked": "2026-11-01"},
@@ -171,7 +239,8 @@
       "name": "nvidia", "title": "NVIDIA NIM (build.nvidia.com)", "env_var": "NVIDIA_API_KEY",
       "base_url": "https://integrate.api.nvidia.com/v1", "auth_style": "bearer",
       "metadata_url": null, "models_path": "/models", "tier": "free_cloud",
-      "honor_free_markers": false, "key_required": true,
+      "honor_free_markers": false, "charges_money": false, "free_access": "all",
+      "key_required": true,
       "skip_id_pattern": "(?i)(embed|rerank|reward|guard|safety)",
       "retains_data": true,
       "free_notes": "Free to prototype with, up to 40 requests per minute on most models; trial terms apply.",
@@ -182,7 +251,8 @@
       "name": "huggingface", "title": "Hugging Face Inference Providers", "env_var": "HF_TOKEN",
       "base_url": "https://router.huggingface.co/v1", "auth_style": "bearer",
       "metadata_url": "https://huggingface.co/api/whoami-v2", "models_path": "/models",
-      "tier": "paid", "honor_free_markers": true, "key_required": true,
+      "tier": "paid", "honor_free_markers": true, "charges_money": true, "free_access": "marked",
+      "key_required": true,
       "skip_id_pattern": null, "retains_data": null,
       "free_notes": "Free accounts have no included credits; only models a provider marks is_free count as free.",
       "source_url": "https://huggingface.co/docs/inference-providers/index",
@@ -192,9 +262,10 @@
       "name": "mistral", "title": "Mistral La Plateforme", "env_var": "MISTRAL_API_KEY",
       "base_url": "https://api.mistral.ai/v1", "auth_style": "bearer",
       "metadata_url": "https://api.mistral.ai/v1/models", "models_path": "/models",
-      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "tier": "paid", "honor_free_markers": false, "charges_money": true, "free_access": "plan",
+      "key_required": true,
       "skip_id_pattern": null, "retains_data": null,
-      "free_notes": "A free mode exists, but nothing in the API tells a free key from a paid one, so every model counts as paid.",
+      "free_notes": "The free Experiment plan is a plan, not a model marking: the API does not tell a free key from a paid one, so no model counts as free on every account. An account on the free plan still gets free requests.",
       "source_url": "https://docs.mistral.ai/api/",
       "checked": "2026-11-03", "verify": true
     },
@@ -202,7 +273,8 @@
       "name": "pollinations", "title": "Pollinations", "env_var": "POLLINATIONS_API_KEY",
       "base_url": "https://gen.pollinations.ai/v1", "auth_style": "bearer",
       "metadata_url": null, "models_path": "/models",
-      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "tier": "paid", "honor_free_markers": false, "charges_money": true, "free_access": "none",
+      "key_required": true,
       "skip_id_pattern": null, "retains_data": null,
       "free_notes": "Spend is metered in Pollen and the docs name no keyless generation, so every model counts as paid.",
       "source_url": "https://gen.pollinations.ai/llms.txt",
@@ -212,7 +284,8 @@
       "name": "kilo", "title": "Kilo Gateway", "env_var": "KILO_API_KEY",
       "base_url": "https://ai-gateway.kilo.ai/api/v1", "auth_style": "bearer",
       "metadata_url": null, "models_path": "/models",
-      "tier": "paid", "honor_free_markers": true, "key_required": false,
+      "tier": "paid", "honor_free_markers": true, "charges_money": true, "free_access": "marked",
+      "key_required": false,
       "skip_id_pattern": null, "retains_data": null,
       "free_notes": "Models marked :free or isFree work without a key (200 requests per hour per IP); the rest need a key.",
       "source_url": "https://kilo.ai/docs/gateway/api-reference",
@@ -223,7 +296,8 @@
       "base_url": "https://opencode.ai/inference/openai/v1", "auth_style": "bearer",
       "metadata_url": "https://opencode.ai/inference/v1/models", "models_path": "/models",
       "models_endpoint": "https://opencode.ai/inference/v1/models",
-      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "tier": "paid", "honor_free_markers": false, "charges_money": true, "free_access": "none",
+      "key_required": true,
       "skip_id_pattern": "(?i)-free$", "retains_data": null,
       "free_notes": "Pay as you go (paid tier by subscription/credits, not a Headwaters entitlement). Nine -free ids are listed at cost 0, but they are app-only: calling one from here returns HTTP 429 FreeUsageLimitError (\"Free usage limit reached. Free models work in OpenCode\") with or without a key, so they are refused and every callable model is paid. The HTTP 403 seen when probing was Cloudflare rejecting a generic HTTP-library user agent (error code 1010), not an auth gate; this client now sends its own product user agent.",
       "source_url": "https://opencode.ai/docs/zen/",
@@ -234,12 +308,57 @@
       "base_url": "https://opencode.ai/inference/go/openai/v1", "auth_style": "bearer",
       "metadata_url": "https://opencode.ai/inference/go/v1/models", "models_path": "/models",
       "models_endpoint": "https://opencode.ai/inference/go/v1/models",
-      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "tier": "paid", "honor_free_markers": false, "charges_money": true, "free_access": "none",
+      "key_required": true,
       "skip_id_pattern": null, "retains_data": null,
       "session_header": "x-opencode-session",
       "free_notes": "The Go plan is a subscription (Go, Go Plus, Go Teams) - paid money, though Headwaters has no entitlement system to check, so the key is the only gate. Beam Free and Iceman Contributor Free are included in it at no per-call price; the plan itself is paid, so no model here counts as free. Every call must carry a stable per-conversation id in the x-opencode-session header or it is refused with HTTP 400 MissingSessionID; Headwaters sends the router's session key.",
       "source_url": "https://opencode.ai/docs/go/",
       "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "gemini", "title": "Google Gemini API (OpenAI compatibility)", "env_var": "GEMINI_API_KEY",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models",
+      "tier": "free_cloud", "honor_free_markers": false, "charges_money": true, "free_access": "plan",
+      "key_required": true, "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "The free tier is a plan on the API key, not a marking on a model: an AI Studio key has free requests per model per day, a billing-enabled key is charged per token.",
+      "source_url": "https://ai.google.dev/gemini-api/docs/openai",
+      "checked": "2026-11-03", "verify": false,
+      "note": "P1: POST /v1beta/openai/chat/completions answers 400 model-not-specified, so the compatibility base is live, but GET /v1beta/openai/models is 404 and the native GET /v1beta/models wants its own auth style; discovery cannot list this provider until a listing adapter lands (P3 failed, P2/P4 had no key in the environment)."
+    },
+    {
+      "name": "groq", "title": "GroqCloud", "env_var": "GROQ_API_KEY",
+      "base_url": "https://api.groq.com/openai/v1", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models",
+      "tier": "free_cloud", "honor_free_markers": false, "charges_money": true, "free_access": "plan",
+      "key_required": true, "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "Every model is callable on the free plan, at the organisation's lower per-model rate limits; a paid plan raises those limits rather than unlocking models.",
+      "source_url": "https://console.groq.com/docs/rate-limits",
+      "checked": "2026-11-03", "verify": false,
+      "note": "P1: GET /openai/v1/models answers 401 Invalid API Key, so the base and the listing path exist; P2/P3/P4 could not authenticate (no GROQ_API_KEY in the environment) and P5 found the limit table client-rendered, so the plan and the allowances are unverified."
+    },
+    {
+      "name": "cerebras", "title": "Cerebras Inference", "env_var": "CEREBRAS_API_KEY",
+      "base_url": "https://api.cerebras.ai/v1", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models",
+      "tier": "free_cloud", "honor_free_markers": false, "charges_money": true, "free_access": "plan",
+      "key_required": true, "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "The free tier is a plan on the account: a rate-limited daily token allowance with no card, and a paid tier for higher limits.",
+      "source_url": "https://inference-docs.cerebras.ai/support/pricing",
+      "checked": "2026-11-03", "verify": false,
+      "note": "P1: GET /v1/models answers 403 Not authenticated, so the base and the listing path exist; P2/P3/P4 could not authenticate (no CEREBRAS_API_KEY in the environment), so the plan and the allowances are unverified."
+    },
+    {
+      "name": "cohere", "title": "Cohere Compatibility API", "env_var": "COHERE_API_KEY",
+      "base_url": "https://api.cohere.ai/compatibility/v1", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models",
+      "tier": "free_cloud", "honor_free_markers": false, "charges_money": true, "free_access": "plan",
+      "key_required": true, "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "A trial key is a free plan with per-key limits and non-commercial terms; a production key is charged.",
+      "source_url": "https://docs.cohere.com/docs/rate-limits",
+      "checked": "2026-11-03", "verify": false,
+      "note": "P1: GET /compatibility/v1/models answers 401 no api key supplied, so the compatibility base lists models (the packet's native-listing note is superseded); P2/P3/P4 could not authenticate (no COHERE_API_KEY in the environment), so the plan, the licence and the allowances are unverified."
     }
   ],
   "secret_patterns": [

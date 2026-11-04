@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from headwaters.core.catalog.schema import FreeAccess, format_access, labels_for_tier
 from headwaters.core.providers import Registry, default_registry
 from headwaters.core.rules import Rules
 
@@ -145,11 +146,26 @@ class ProviderInfo:
     """One provider as a person sees it: the plain name, whether it needs a key, its tier.
 
     The environment variable behind a provider is deliberately not here: it is a machine detail.
+    HDW-519 adds the split pair and ``access``, the one formatted label; ``tier`` stays because
+    it is the routing vocabulary (``paid``/``free_cloud``/``local``) the status page reads.
     """
 
     name: str
     key_required: bool
     tier: str  # "paid" | "free_cloud" | "local"
+    charges_money: bool = True
+    free_access: FreeAccess = "none"
+
+    @property
+    def access(self) -> str:
+        """The one formatted label (D1.5): no surface formats its own."""
+        return format_access(self.charges_money, self.free_access)
+
+
+def _builtin_info(name: str, key_required: bool, tier: str) -> ProviderInfo:
+    """A provider wired in code, labelled through the same derivation as a catalog row."""
+    labels = labels_for_tier("paid" if tier == "paid" else "free_cloud")
+    return ProviderInfo(name, key_required, tier, labels.charges_money, labels.free_access)
 
 
 class KeyStore:
@@ -189,14 +205,21 @@ class KeyStore:
         """
         found: dict[str, ProviderInfo] = {}
         for name in STANDARD_ENV:
-            found[name] = ProviderInfo(name, True, "paid")
+            found[name] = _builtin_info(name, True, "paid")
         for entry in self._providers():
-            found[entry.name] = ProviderInfo(entry.name, entry.key_required, entry.tier)
+            labels = entry.labels()
+            found[entry.name] = ProviderInfo(
+                entry.name,
+                entry.key_required,
+                entry.tier,
+                labels.charges_money,
+                labels.free_access,
+            )
         for endpoint in self._rules.models.openai_compatible:
             needs_key = bool(endpoint.api_key_env)
-            found[endpoint.name] = ProviderInfo(endpoint.name, needs_key, "free_cloud")
+            found[endpoint.name] = _builtin_info(endpoint.name, needs_key, "free_cloud")
         for name, tier in _KEYLESS:
-            found.setdefault(name, ProviderInfo(name, False, tier))
+            found.setdefault(name, _builtin_info(name, False, tier))
         return list(found.values())
 
     def provider_name(self, text: str) -> str | None:

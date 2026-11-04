@@ -110,6 +110,7 @@ class PageProvider:
     name: str
     key_required: bool
     tier: str  # "paid" | "free_cloud" | "local" | "other" (an alias whose provider left)
+    access: str  # the one formatted label (HDW-519, D1.5): never built on this page
     keys: Sequence[PageKey]
 
 
@@ -212,10 +213,19 @@ def _key_groups(store: KeyStore, tested: dict[str, KeyTestRow]) -> list[PageProv
             )
         )
     groups = [
-        PageProvider(info.name, info.key_required, info.tier, tuple(found.pop(info.name, ())))
+        PageProvider(
+            name=info.name,
+            key_required=info.key_required,
+            tier=info.tier,
+            access=info.access,
+            keys=tuple(found.pop(info.name, ())),
+        )
         for info in store.providers()
     ]
-    groups += [PageProvider(name, True, "other", tuple(rows)) for name, rows in found.items()]
+    groups += [
+        PageProvider(name, True, "other", "not in this catalog", tuple(rows))
+        for name, rows in found.items()
+    ]
     return groups
 
 
@@ -420,10 +430,6 @@ def _features_section(page: StatusPage) -> str:
     )
 
 
-def _tier_words(tier: str) -> str:
-    return {"paid": "paid", "free_cloud": "free cloud", "local": "local"}.get(tier, "other")
-
-
 def _provider_state(group: PageProvider) -> str:
     if not group.key_required:
         return "no key needed"
@@ -496,7 +502,7 @@ def _provider_note(group: PageProvider) -> str:
 
 def _provider_block(page: StatusPage, group: PageProvider) -> str:
     summary = (
-        f"<strong>{_e(group.name)}</strong> · {_e(_tier_words(group.tier))} · "
+        f"<strong>{_e(group.name)}</strong> · {_e(group.access)} · "
         f"{_e(_provider_state(group))} · {_e(_provider_test(group))}"
     )
     head = f'<details id="keys-{_e(group.name)}"><summary>{summary}</summary>'

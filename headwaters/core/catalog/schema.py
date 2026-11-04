@@ -7,6 +7,7 @@ never in code. Unknown keys are errors so typos are reported. Scores use a 0..1 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -83,12 +84,88 @@ class ModelEntry(_Model):
         return self
 
 
+LimitMetric = Literal["requests", "tokens", "neurons", "usd"]
+LimitWindow = Literal["minute", "hour", "day", "month"]
+LimitScope = Literal["model", "key", "user", "organisation", "account", "ip"]
+LimitLicence = Literal["unstated", "commercial_ok", "non_commercial_only"]
+# A closed set: a fact belongs here only when something can observe it. Add a member with a test.
+LimitFact = Literal["account_topup_usd_total"]
+LimitTokenCount = Literal["input+output", "output"]
+
+
+class LimitCondition(_Model):
+    """A condition on an *extra* allowance: when it holds the clause is added, never removed."""
+
+    fact: LimitFact
+    op: Literal[">=", ">", "=="]
+    value: float
+
+    def holds(self, facts: Mapping[str, float] | None) -> bool:
+        """Whether the fact was observed and clears the condition (an unknown fact does not)."""
+        if facts is None or self.fact not in facts:
+            return False
+        seen = facts[self.fact]
+        if self.op == ">=":
+            return seen >= self.value
+        if self.op == ">":
+            return seen > self.value
+        return seen == self.value
+
+
+class LimitClause(_Model):
+    """One allowance: a metric, a cap, a window and the subject it is counted against (D5).
+
+    Only ``metric: "requests"`` is counted (``quotas``); ``tokens``, ``neurons`` and ``usd`` are
+    stored, validated and inert, because nothing in this codebase accounts them. Rate limits are
+    advisory, not enforced: a counted request ranks a model down, it never refuses a call.
+    """
+
+    metric: LimitMetric
+    max: float = Field(gt=0)
+    per: LimitWindow
+    scope: LimitScope
+    tokens: LimitTokenCount | None = None
+    condition: LimitCondition | None = None
+    verify: bool = False
+    note: str | None = None
+
+    def applies(self, facts: Mapping[str, float] | None = None) -> bool:
+        return self.condition is None or self.condition.holds(facts)
+
+
 class FreeLimit(_Model):
+    """A provider's free allowance. ``rpm``/``rpd`` are the legacy spelling (D5 rule 1).
+
+    Rate limits are advisory, not enforced. ``limits`` empty means "legacy row: read rpm/rpd";
+    ``licence`` is documentation only, because no request carries a commercial-use intent.
+    """
+
     provider: str = Field(min_length=1)
     model: str | None = None
     rpm: int | None = Field(default=None, gt=0)
     rpd: int | None = Field(default=None, gt=0)
     verify: bool = False
+    limits: list[LimitClause] = Field(default_factory=list)
+    licence: LimitLicence = "unstated"
+    source_url: str | None = Field(default=None, pattern=r"^https://\S+$")
+    note: str | None = None
+
+    def clauses(self, facts: Mapping[str, float] | None = None) -> list[LimitClause]:
+        """The allowances that apply now: the explicit clauses, else ``rpm``/``rpd``.
+
+        A legacy row resolves to ``scope: model`` because today's counter subject *is* the
+        model: the conversion preserves behaviour, it does not bless it (D5 rule 1). A
+        conditional clause is dropped while its fact is unknown, so it can only add allowance.
+        """
+        return [c for c in (self.limits or self._legacy_clauses()) if c.applies(facts)]
+
+    def _legacy_clauses(self) -> list[LimitClause]:
+        out: list[LimitClause] = []
+        if self.rpm is not None:
+            out.append(LimitClause(metric="requests", max=self.rpm, per="minute", scope="model"))
+        if self.rpd is not None:
+            out.append(LimitClause(metric="requests", max=self.rpd, per="day", scope="model"))
+        return out
 
 
 WallKind = Literal["rate_limit", "exhausted", "overloaded", "context", "other"]
@@ -151,6 +228,49 @@ class Endpoints(_Model):
 
 
 ProviderTier = Literal["free_cloud", "paid"]
+# HDW-519/D1: ``paid`` answered two questions at once. These are the two answers, and they are
+# labels rather than tier names: no tier name is added, removed or renamed by this split.
+FreeAccess = Literal["none", "marked", "all", "plan"]
+
+
+class ProviderLabels(_Model):
+    """The split pair: whether money may change hands, and how a free path exists."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    charges_money: bool
+    free_access: FreeAccess
+
+
+def labels_for_tier(tier: ProviderTier, honor_free_markers: bool = False) -> ProviderLabels:
+    """Today's reading of one ``tier`` (plus markers), kept as the derivation for old rows.
+
+    An unmigrated catalog is legal, not broken (D2): both fields absent derives exactly today's
+    behaviour, so discovery, ``ProviderInfo`` and quota counting do not move.
+    """
+    if tier == "free_cloud":
+        return ProviderLabels(charges_money=False, free_access="all")
+    markers = "marked" if honor_free_markers else "none"
+    return ProviderLabels(charges_money=True, free_access=markers)
+
+
+FREE_TO_USE = "free to use"
+SELLS_USAGE = "sells usage"
+SELLS_MARKED = "sells usage \u00b7 free models marked"
+SELLS_PLAN = "sells usage \u00b7 free on the free plan"
+
+
+def format_access(charges_money: bool, free_access: FreeAccess) -> str:
+    """The one label formatter (D1.5, D18): every surface prints this string, not its own."""
+    if not charges_money:
+        return FREE_TO_USE
+    if free_access == "marked":
+        return SELLS_MARKED
+    if free_access == "plan":
+        return SELLS_PLAN
+    return SELLS_USAGE
+
+
 # Names the router already uses for providers that are wired in code (or never routed).
 # ``opencode`` left this set in HDW-515: it is a catalog row now (Console, key required).
 RESERVED_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "ollama"})
@@ -162,7 +282,10 @@ class ProviderEntry(_Model):
     Adding a provider is a catalog entry plus a test: the key store, ``keys test``, discovery and
     the executor all read this row. ``tier`` is what an unmarked model of the provider costs:
     ``paid`` keeps every model out of the free scope unless the provider's own listing marks it
-    free and ``honor_free_markers`` is on. Every row names its docs page and the day it was read.
+    free and ``honor_free_markers`` is on. HDW-519 splits that one word into ``charges_money``
+    and ``free_access``, which ``labels()`` reads and ``format_access`` renders; ``tier`` stays
+    as the derivation fallback and the routing vocabulary. Every row names its docs page and the
+    day it was read.
     """
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
@@ -178,6 +301,10 @@ class ProviderEntry(_Model):
     models_endpoint: str | None = Field(default=None, pattern=r"^https://\S+$")
     tier: ProviderTier
     honor_free_markers: bool = False
+    # HDW-519/D1: the fact ``tier`` alone could not state, so a reviewer read "paid" as "no free
+    # path". Absent means "derive from tier" (D2); the seed states both on every row.
+    charges_money: bool | None = None
+    free_access: FreeAccess | None = None
     key_required: bool = True
     skip_id_pattern: str | None = None
     # HDW-515 amendment: a provider that routes a call by conversation requires this header on
@@ -190,11 +317,22 @@ class ProviderEntry(_Model):
     source_url: str = Field(pattern=r"^https://\S+$")
     checked: str = Field(pattern=_DATE)
     verify: bool = False
+    # D4: a row that could not be verified says which probe could not be run, so a reader knows
+    # the difference between "checked and wrong" and "not checked".
+    note: str | None = None
 
     @field_validator("skip_id_pattern")
     @classmethod
     def _skip_is_regex(cls, value: str | None) -> str | None:
         return value if value is None else _check_regex(value)
+
+    def labels(self) -> ProviderLabels:
+        """The split pair: stated by the row, else derived from ``tier`` exactly as before (D2)."""
+        charges = self.tier == "paid" if self.charges_money is None else self.charges_money
+        access = self.free_access
+        if access is None:
+            access = labels_for_tier(self.tier, self.honor_free_markers).free_access
+        return ProviderLabels(charges_money=charges, free_access=access)
 
     @property
     def models_url(self) -> str:

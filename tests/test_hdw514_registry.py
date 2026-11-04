@@ -29,6 +29,11 @@ EXPECTED = {
     # HDW-515: two products of one company, one variable, two endpoints, both paid.
     "opencode": ("OPENCODE_API_KEY", "paid"),
     "opencode-go": ("OPENCODE_API_KEY", "paid"),
+    # HDW-519: four free-plan providers, registered unverified until a key can confirm them.
+    "gemini": ("GEMINI_API_KEY", "free_cloud"),
+    "groq": ("GROQ_API_KEY", "free_cloud"),
+    "cerebras": ("CEREBRAS_API_KEY", "free_cloud"),
+    "cohere": ("COHERE_API_KEY", "free_cloud"),
 }
 
 
@@ -59,7 +64,9 @@ def store(registry: Registry, **env: str) -> KeyStore:
 def test_seed_registers_every_ticket_provider_with_a_tier() -> None:
     registry = Registry.from_catalog(load_catalog(SEED_PATH))
     assert {p.name: (p.env_var, p.tier) for p in registry} == EXPECTED
-    assert all(p.base_url.startswith("https://") and p.verify for p in registry)
+    # HDW-519 rows record `verify: false` plus a note naming the probe that could not be run.
+    assert all(p.base_url.startswith("https://") for p in registry)
+    assert all(p.verify for p in registry if p.name not in {"gemini", "groq", "cerebras", "cohere"})
 
 
 def test_no_paid_provider_is_declared_free_cloud_by_accident() -> None:

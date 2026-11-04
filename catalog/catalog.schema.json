@@ -190,7 +190,25 @@
     },
     "FreeLimit": {
       "additionalProperties": false,
+      "description": "A provider's free allowance. ``rpm``/``rpd`` are the legacy spelling (D5 rule 1).\n\nRate limits are advisory, not enforced. ``limits`` empty means \"legacy row: read rpm/rpd\";\n``licence`` is documentation only, because no request carries a commercial-use intent.",
       "properties": {
+        "licence": {
+          "default": "unstated",
+          "enum": [
+            "unstated",
+            "commercial_ok",
+            "non_commercial_only"
+          ],
+          "title": "Licence",
+          "type": "string"
+        },
+        "limits": {
+          "items": {
+            "$ref": "#/$defs/LimitClause"
+          },
+          "title": "Limits",
+          "type": "array"
+        },
         "model": {
           "anyOf": [
             {
@@ -202,6 +220,18 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
         },
         "provider": {
           "minLength": 1,
@@ -233,6 +263,19 @@
           ],
           "default": null,
           "title": "Rpm"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "pattern": "^https://\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
         },
         "verify": {
           "default": false,
@@ -305,6 +348,132 @@
         "vram_gb"
       ],
       "title": "GpuProfile",
+      "type": "object"
+    },
+    "LimitClause": {
+      "additionalProperties": false,
+      "description": "One allowance: a metric, a cap, a window and the subject it is counted against (D5).\n\nOnly ``metric: \"requests\"`` is counted (``quotas``); ``tokens``, ``neurons`` and ``usd`` are\nstored, validated and inert, because nothing in this codebase accounts them. Rate limits are\nadvisory, not enforced: a counted request ranks a model down, it never refuses a call.",
+      "properties": {
+        "condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LimitCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max": {
+          "exclusiveMinimum": 0,
+          "title": "Max",
+          "type": "number"
+        },
+        "metric": {
+          "enum": [
+            "requests",
+            "tokens",
+            "neurons",
+            "usd"
+          ],
+          "title": "Metric",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "per": {
+          "enum": [
+            "minute",
+            "hour",
+            "day",
+            "month"
+          ],
+          "title": "Per",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "model",
+            "key",
+            "user",
+            "organisation",
+            "account",
+            "ip"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "enum": [
+                "input+output",
+                "output"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens"
+        },
+        "verify": {
+          "default": false,
+          "title": "Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "metric",
+        "max",
+        "per",
+        "scope"
+      ],
+      "title": "LimitClause",
+      "type": "object"
+    },
+    "LimitCondition": {
+      "additionalProperties": false,
+      "description": "A condition on an *extra* allowance: when it holds the clause is added, never removed.",
+      "properties": {
+        "fact": {
+          "const": "account_topup_usd_total",
+          "title": "Fact",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            ">=",
+            ">",
+            "=="
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "fact",
+        "op",
+        "value"
+      ],
+      "title": "LimitCondition",
       "type": "object"
     },
     "ModelEntry": {
@@ -532,7 +701,7 @@
     },
     "ProviderEntry": {
       "additionalProperties": false,
-      "description": "One OpenAI-compatible cloud provider, registered as data (HDW-514).\n\nAdding a provider is a catalog entry plus a test: the key store, ``keys test``, discovery and\nthe executor all read this row. ``tier`` is what an unmarked model of the provider costs:\n``paid`` keeps every model out of the free scope unless the provider's own listing marks it\nfree and ``honor_free_markers`` is on. Every row names its docs page and the day it was read.",
+      "description": "One OpenAI-compatible cloud provider, registered as data (HDW-514).\n\nAdding a provider is a catalog entry plus a test: the key store, ``keys test``, discovery and\nthe executor all read this row. ``tier`` is what an unmarked model of the provider costs:\n``paid`` keeps every model out of the free scope unless the provider's own listing marks it\nfree and ``honor_free_markers`` is on. HDW-519 splits that one word into ``charges_money``\nand ``free_access``, which ``labels()`` reads and ``format_access`` renders; ``tier`` stays\nas the derivation fallback and the routing vocabulary. Every row names its docs page and the\nday it was read.",
       "properties": {
         "auth_style": {
           "const": "bearer",
@@ -545,6 +714,18 @@
           "title": "Base Url",
           "type": "string"
         },
+        "charges_money": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Charges Money"
+        },
         "checked": {
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
           "title": "Checked",
@@ -554,6 +735,24 @@
           "pattern": "^[A-Z][A-Z0-9_]*$",
           "title": "Env Var",
           "type": "string"
+        },
+        "free_access": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "marked",
+                "all",
+                "plan"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Access"
         },
         "free_notes": {
           "anyOf": [
@@ -613,6 +812,18 @@
           "pattern": "^[a-z][a-z0-9_-]*$",
           "title": "Name",
           "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
         },
         "retains_data": {
           "anyOf": [

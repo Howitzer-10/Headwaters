@@ -128,11 +128,13 @@ def test_huggingface_is_paid_unless_the_listing_marks_a_provider_free() -> None:
     assert found["huggingface/org/paid-model"].price_in is None
 
 
-def test_mistral_is_paid_and_embedding_models_are_skipped() -> None:
+def test_mistral_free_plan_models_are_free_and_embeddings_are_skipped() -> None:
     found = models("mistral")
     assert list(found) == ["mistral/mistral-small-latest"]
     model = found["mistral/mistral-small-latest"]
-    assert (model.tier, model.tools_ok) == ("paid", True)
+    # HDW-519 (owner-approved): mistral moved from `free_access: none` to `plan`, so a model on
+    # its free Experiment plan routes as free_cloud instead of paid.
+    assert (model.tier, model.tools_ok) == ("free_cloud", True)
 
 
 def test_pollinations_is_paid_and_image_generators_are_skipped() -> None:
@@ -172,7 +174,7 @@ def test_free_cloud_tier_survives_the_merge_and_paid_stays_paid() -> None:
     flat = [*models("nvidia").values(), *models("mistral").values()]
     rows = {r.row.id: r.row for r in merge_models(flat, SEED, Rules(), 100.0)}
     assert rows["nvidia/meta/llama-3.1-8b-instruct"].tier == "free_cloud"
-    assert rows["mistral/mistral-small-latest"].tier == "paid"
+    assert rows["mistral/mistral-small-latest"].tier == "free_cloud"
 
 
 # ---------------------------------------------------------------- discovery

@@ -330,10 +330,16 @@ def _any_true(values: list[Any]) -> bool:
 
 
 def _registry_tier(entry: ProviderEntry, item: Mapping[str, Any], providers: list[Any]) -> LiveTier:
-    """The provider's own tier, lifted to free only by a marker its listing carries."""
-    if entry.tier == "free_cloud":
+    """The provider's own tier, lifted to free by ``free_access`` (HDW-519, D1).
+
+    ``all`` and ``plan`` route identically today: ``plan`` means "free if your key is on the
+    free plan", and nothing here can read a key's plan. ``marked`` keeps the listing test that
+    ``honor_free_markers`` always performed.
+    """
+    access = entry.labels().free_access
+    if access in ("all", "plan"):
         return "free_cloud"
-    if not entry.honor_free_markers:
+    if access == "none":
         return "paid"
     model_id = str(item.get("id", ""))
     marked = (

@@ -11,7 +11,10 @@ shared SQLite ``walls`` table, keeps rpm/rpd counters per free model in ``quotas
   provider or key are split by credit class: ``provider:openrouter:paid`` stops only paid models,
   ``provider:openrouter:free`` (free-tier daily cap) only free ones.
 * ``overloaded``: ``walls.overloaded_max_retries`` short retries, then cascade and cool down.
-* rpm/rpd limits come from catalog ``free_limits``; soft-exhausted at ``walls.soft_exhaust_pct``.
+* ``free_limits`` clauses (HDW-519) give the metric (``requests``, ``tokens``, …), the window
+  (``minute``/``day``/``month``) and the scope that names the subject to count. Only ``requests``
+  is counted today; the other metrics are documentation. Soft-exhausted at
+  ``walls.soft_exhaust_pct``.
 
 Subjects are namespaced (``model:``, ``provider:``, ``key:``) so a model id can never collide with
 a provider or key alias. Only counts and timestamps are stored: never prompts, outputs or keys.
@@ -21,7 +24,7 @@ from __future__ import annotations
 
 import random
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
@@ -44,6 +47,25 @@ _CREDIT_CLASSES: tuple[CreditClass, ...] = ("paid", "free")
 _TRANSIENT_KINDS = ("rate_limit", "overloaded")
 _RPM = "rpm:"
 _RPD = "rpd:"
+_LIMIT_WINDOW_FORMAT: dict[str, str] = {
+    "minute": "%Y-%m-%dT%H:%M",
+    "hour": "%Y-%m-%dT%H",
+    "day": "%Y-%m-%d",
+    "month": "%Y-%m",
+}
+# ``requests``/minute and ``requests``/day keep the window names an older build wrote, so the
+# counters already in the database (and the MCP quota view) keep reading the same rows.
+_LEGACY_WINDOW_PREFIX: dict[tuple[str, str], str] = {
+    ("requests", "minute"): _RPM,
+    ("requests", "day"): _RPD,
+}
+
+
+def quota_window(metric: str, per: str, now: float) -> tuple[str, str]:
+    """``(prefix, window)`` for one clause's time bucket (HDW-519)."""
+    prefix = _LEGACY_WINDOW_PREFIX.get((metric, per), f"{metric}:{per}:")
+    return prefix, prefix + datetime.fromtimestamp(now, UTC).strftime(_LIMIT_WINDOW_FORMAT[per])
+
 
 __all__ = [
     "Availability",
@@ -215,6 +237,7 @@ class QuotaTracker:
         *,
         clock: Callable[[], float] | None = None,
         rng: random.Random | None = None,
+        facts: Mapping[str, float] | None = None,
     ) -> None:
         self._db = db
         # A provider is read on every use, so an edit to `walls:` applies without a restart.
@@ -225,6 +248,9 @@ class QuotaTracker:
         # Looked up per call (not bound) so a patched ``time.time`` (freezegun) is honoured.
         self._clock: Callable[[], float] = clock or (lambda: time.time())
         self._rng = rng or random.Random()  # jitter only, not security
+        # Account facts a conditional clause may read (HDW-519, D5). Unknown -> the clause is
+        # dropped, so a condition can only ever add an allowance.
+        self._facts = facts
 
     @property
     def _walls(self) -> WallsRules:
@@ -306,7 +332,7 @@ class QuotaTracker:
         if key:
             subjects.append(key_subject(key))
         state_limits.clear_walls(self._db, subjects, _TRANSIENT_KINDS)
-        self.count_request(model, provider)
+        self.count_request(model, provider, key)
 
     # --------------------------------------------------------------- counters
 
@@ -328,37 +354,65 @@ class QuotaTracker:
         return fallback
 
     @staticmethod
-    def _windows(now: float) -> tuple[str, str]:
-        moment = datetime.fromtimestamp(now, UTC)
-        return _RPM + moment.strftime("%Y-%m-%dT%H:%M"), _RPD + moment.strftime("%Y-%m-%d")
+    def _quota_subject(scope: str, model: str, provider: str, key: str | None) -> str:
+        """The counting subject a clause's ``scope`` names (D5 rule 3).
 
-    def count_request(self, model: str, provider: str) -> None:
-        """Count one request against the model's rpm/rpd (no-op without a catalog limit).
+        ``model`` is today's subject. ``organisation``/``account``/``ip`` use the provider name:
+        no organisation id or client ip exists in discovery, so the provider is the closest
+        observable subject (a documented approximation). ``key``/``user`` fall back to the
+        provider when the caller knows no alias (the router passes none today).
+        """
+        if scope == "model":
+            return model_subject(model)
+        if scope in ("key", "user"):
+            return key_subject(key) if key else provider_subject(provider)
+        return provider_subject(provider)
 
-        The router counts every request that reached the provider: successes and 429s.
+    def _allowances(
+        self, model: str, provider: str, key: str | None, now: float
+    ) -> dict[tuple[str, str, str], float]:
+        """``{(metric, window, subject): cap}`` for the clauses that apply now.
+
+        Within one group the most permissive applicable clause governs (D5 rule 2), which is how
+        a 50/day clause and a conditional 1000/day clause coexist after a top-up.
         """
         limit = self._limit_for(model, provider)
         if limit is None:
-            return
-        subject = model_subject(model)
-        rpm_window, rpd_window = self._windows(self._clock())
-        pct = self._walls.soft_exhaust_pct / 100
-        for prefix, window, cap in ((_RPM, rpm_window, limit.rpm), (_RPD, rpd_window, limit.rpd)):
+            return {}
+        best: dict[tuple[str, str, str], float] = {}
+        for clause in limit.clauses(self._facts):
+            subject = self._quota_subject(clause.scope, model, provider, key)
+            group = (clause.metric, clause.per, subject)
+            best[group] = max(clause.max, best.get(group, 0.0))
+        return best
+
+    def count_request(self, model: str, provider: str, key: str | None = None) -> None:
+        """Count one request against the allowances that apply (advisory: it never refuses).
+
+        The router counts every request that reached the provider: successes and 429s. Only
+        ``metric: requests`` is counted; ``tokens``, ``neurons`` and ``usd`` clauses are stored
+        and inert, because nothing here accounts them.
+        """
+        now = self._clock()
+        for (metric, per, subject), cap in self._allowances(model, provider, key, now).items():
+            if metric != "requests":
+                continue
+            prefix, window = quota_window(metric, per, now)
             row = state_limits.add_quota_usage(self._db, subject, window)
-            soft = cap is not None and row.count >= cap * pct
-            state_limits.set_quota_limit(self._db, subject, window, limit=cap, soft_exhausted=soft)
+            soft = row.count >= cap * self._walls.soft_exhaust_pct / 100
+            state_limits.set_quota_limit(
+                self._db, subject, window, limit=int(cap), soft_exhausted=soft
+            )
             state_limits.prune_quota_windows(self._db, subject, prefix, window)
 
-    def _is_soft(self, model: str, provider: str, now: float) -> bool:
-        limit = self._limit_for(model, provider)
-        if limit is None:
-            return False
-        subject = model_subject(model)
-        rpm_window, rpd_window = self._windows(now)
+    def _is_soft(self, model: str, provider: str, now: float, key: str | None = None) -> bool:
         pct = self._walls.soft_exhaust_pct / 100
-        for window, cap in ((rpm_window, limit.rpm), (rpd_window, limit.rpd)):
+        for (metric, per, subject), cap in self._allowances(model, provider, key, now).items():
+            if metric != "requests":
+                continue
+            _, window = quota_window(metric, per, now)
             row = state_limits.get_quota(self._db, subject, window)
-            if cap is not None and row is not None and row.count >= cap * pct:
+            if row is not None and row.count >= cap * pct:
                 return True
         return False
 
@@ -389,7 +443,9 @@ class QuotaTracker:
         if cooling:
             last = max(cooling, key=lambda r: r.until or 0.0)
             return Availability("cooldown", max(0.0, (last.until or 0.0) - now), last.subject)
-        return Availability("soft") if self._is_soft(model, provider, now) else Availability("ok")
+        return (
+            Availability("soft") if self._is_soft(model, provider, now, key) else Availability("ok")
+        )
 
     # ------------------------------------------------------------ key polling
 
