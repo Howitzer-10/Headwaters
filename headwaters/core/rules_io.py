@@ -73,12 +73,60 @@ def load_rules(path: Path | None = None) -> Rules:
 _HEADER = (
     "# Headwaters rules. Edit and save: changes apply without a restart.\n"
     "# An invalid edit is reported and the last good settings stay active.\n"
+    "#\n"
+    "# Only settings you choose are written below. A setting you leave out keeps the\n"
+    "# installed version's default, so a later release can change that default instead of\n"
+    "# this file pinning the old value. To choose one, copy its line from the reference,\n"
+    "# remove the leading '# ' and keep the nesting. Quote a word YAML reads as a boolean\n"
+    '# (off, on, yes, no): write "off", never bare off.\n'
+)
+
+_REFERENCE = (
+    "#\n"
+    "# Reference (example values; the live defaults are in catalog/rules.schema.json):\n"
+    "#\n"
+    "#   default_scope: auto                 # auto | free | local | cloud\n"
+    "#   strategy: cost_saver                # cost_saver | quality_first | primary_first\n"
+    "#   private_lock: false                 # no cloud egress while on\n"
+    "#   airplane: false\n"
+    "#   verify: agentic                     # always | agentic | off\n"
+    '#   advice: "off"                       # "off" | inline | header_only\n'
+    "#   secrets:\n"
+    "#     action: local                     # local | refuse | off\n"
+    "#   tiers:\n"
+    "#     local:\n"
+    "#       host: http://localhost:11434\n"
+    "#       keep_alive: 30m                 # Go duration; Ollama unloads after this\n"
+    '#       keep_warm_model: "off"          # "off" | auto | <model name>\n'
+    "#       keep_warm_heartbeat: false\n"
+    "#     paid:\n"
+    "#       models: []\n"
+    "#   budget:\n"
+    "#     paid_daily_usd: 5.0\n"
+    "#   gateway:\n"
+    "#     port: 4000\n"
+    "#   dashboard:\n"
+    "#     port: 4001\n"
+    "#   models:\n"
+    "#     aliases: {}                       # gpt-4o: headwaters/free\n"
+    "#   workspace:\n"
+    "#     roots: []                         # folders the file tools may reach\n"
+    "#   features: {}                        # <feature>: true\n"
 )
 
 
 def render_rules(rules: Rules) -> str:
-    body = yaml.safe_dump(rules.model_dump(mode="json"), sort_keys=False, allow_unicode=True)
-    return _HEADER + body
+    """File text for ``rules``: only the settings it actually chose.
+
+    ``exclude_defaults`` is what makes a default change reach an install (D21): a field left at
+    its default is not written, so the file does not pin it. The reference in the header keeps
+    the file a usable starting point without persisting a single default.
+    """
+    chosen = rules.model_dump(mode="json", exclude_defaults=True)
+    if not chosen:
+        return _HEADER + _REFERENCE
+    body = yaml.safe_dump(chosen, sort_keys=False, allow_unicode=True)
+    return _HEADER + _REFERENCE + "\n" + body
 
 
 def ensure_rules_file(path: Path | None = None) -> Path:

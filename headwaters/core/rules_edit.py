@@ -54,6 +54,9 @@ def _replace_line(text: str, key: str, rendered: str, target: Path) -> str:
     if re.search(rf"^{name}[ \t]*:", text, re.MULTILINE):
         raise ConfigError(target, [f"cannot edit '{key}' automatically; change it in the file"])
     separator = "" if not text or text.endswith("\n") else "\n"
+    body = text.rstrip("\n")
+    if body and body.splitlines()[-1].lstrip().startswith("#"):
+        separator += "\n"
     return f"{text}{separator}{key}: {rendered}\n"
 
 

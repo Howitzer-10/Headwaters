@@ -1,16 +1,19 @@
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import yaml
 
-from headwaters.core.rules import Rules
+from headwaters.core.rules import LocalTier, Rules, TiersRules
 from headwaters.core.rules_io import (
     SCHEMA_RELATIVE_PATH,
     ConfigError,
     ensure_rules_file,
     load_rules,
     main,
+    read_yaml_mapping,
+    render_rules,
     schema_json,
 )
 
@@ -151,4 +154,57 @@ def test_schema_cli_write_and_check(tmp_path: Path, capsys: pytest.CaptureFixtur
 def test_default_file_content_is_plain_yaml(tmp_path: Path) -> None:
     target = tmp_path / "rules.yaml"
     ensure_rules_file(target)
-    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == 1
+    text = target.read_text(encoding="utf-8")
+    assert yaml.safe_load(text) is None, "a default is not a choice, so nothing is written"
+    assert load_rules(target) == Rules()
+
+
+def test_generated_file_pins_no_default(tmp_path: Path) -> None:
+    """D21: a default written out is a default pinned, so a later release cannot change it."""
+    target = tmp_path / "rules.yaml"
+    ensure_rules_file(target)
+    assert read_yaml_mapping(target) == {}, "the file chooses nothing, so it pins nothing"
+    text = target.read_text(encoding="utf-8")
+    assert "keep_warm_model: auto" not in text
+
+
+def test_generated_file_still_names_the_fields_a_person_edits(tmp_path: Path) -> None:
+    """A usable starting point: the reference names the settings, commented out."""
+    target = tmp_path / "rules.yaml"
+    ensure_rules_file(target)
+    text = target.read_text(encoding="utf-8")
+    for needle in ("#   default_scope:", "#       keep_warm_model:", "#     port: 4000"):
+        assert needle in text, needle
+
+
+def test_the_reference_writes_words_that_yaml_reads_as_booleans_quoted() -> None:
+    """``off`` unquoted is YAML ``false``, and every field that accepts it is typed ``str``."""
+    text = render_rules(Rules())
+    assert '#       keep_warm_model: "off"' in text
+    assert '#   advice: "off"' in text
+
+
+class _NextRelease(Rules):
+    """A later release whose default moved: the D21 shape, with ``advice`` instead."""
+
+    advice: Literal["off", "inline", "header_only"] = "inline"
+
+
+def test_a_changed_default_reaches_a_file_written_by_an_older_version(tmp_path: Path) -> None:
+    target = tmp_path / "rules.yaml"
+    ensure_rules_file(target)
+    assert load_rules(target).advice == "off"
+    updated = _NextRelease.model_validate(read_yaml_mapping(target))
+    assert updated.advice == "inline"
+
+
+def test_an_explicit_value_is_written_and_read_back(tmp_path: Path) -> None:
+    chosen = Rules(tiers=TiersRules(local=LocalTier(keep_warm_model="auto")))
+    text = render_rules(chosen)
+    assert "keep_warm_model: auto" in text
+    target = tmp_path / "rules.yaml"
+    target.write_text(text, encoding="utf-8", newline="\n")
+    assert read_yaml_mapping(target) == {"tiers": {"local": {"keep_warm_model": "auto"}}}
+    loaded = load_rules(target)
+    assert loaded.tiers.local.keep_warm_model == "auto"
+    assert loaded == chosen

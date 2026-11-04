@@ -251,7 +251,8 @@ logs. It does not touch host configs, which are restored by `uninstall`, or your
 the Credential Manager.
 
 To also start from default rules, delete `%APPDATA%\Headwaters\rules.yaml` and run
-`uv run headwaters doctor` again; it is recreated with the defaults.
+`uv run headwaters doctor` again; it is recreated as a comment-only reference, so every default
+applies until you choose a setting.
 
 Do not delete `%APPDATA%\Headwaters\rules.yaml` casually: it is the file that holds your scope, the
 Private lock and the ports.

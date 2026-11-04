@@ -23,6 +23,16 @@ def test_creates_the_default_file_on_first_use(tmp_path: Path) -> None:
     assert load_rules(target).default_scope == "local"
 
 
+def test_first_use_writes_the_choice_after_the_reference_block(tmp_path: Path) -> None:
+    """The generated file is comments only, so an appended choice needs its own blank line."""
+    target = tmp_path / "rules.yaml"
+    set_setting("default_scope", "local", target)
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert lines[-1] == "default_scope: local"
+    assert lines[-2] == ""
+    assert lines[-3].startswith("#")
+
+
 def test_replaces_the_value_and_keeps_comment_and_neighbours(tmp_path: Path) -> None:
     target = _write(tmp_path / "rules.yaml", "# top\ndefault_scope: auto  # why\nairplane: true\n")
     set_setting("default_scope", "free", target)
