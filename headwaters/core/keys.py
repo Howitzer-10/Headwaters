@@ -35,6 +35,7 @@ from headwaters.core.rules import Rules
 __all__ = [
     "CACHE_TTL_S",
     "SHORT_FORMS",
+    "SOURCES",
     "STANDARD_ENV",
     "KeyInfo",
     "KeyStore",
@@ -42,6 +43,7 @@ __all__ = [
     "ProviderInfo",
     "default_backend",
     "mask",
+    "provider_items",
     "tail_mask",
 ]
 
@@ -70,6 +72,10 @@ _KEYLESS = (("ollama", "local"),)
 # so metadata and resolved values are cached briefly. Saving or removing a key clears its own
 # entry at once; another process's change is picked up within this window.
 CACHE_TTL_S = 2.0
+
+# Where a key came from, as a surface may say it. No value, no variable name: the source only.
+NOT_SET = "not set"
+SOURCES = ("credential store", "environment", NOT_SET)
 
 
 class KeyStoreError(RuntimeError):
@@ -410,7 +416,7 @@ class KeyStore:
         elif value:
             source = "environment"
         else:
-            source = "not set"
+            source = NOT_SET
         return KeyInfo(record.alias, record.provider, record.env_var, source, mask(value))
 
     def _backend_or_default(self) -> KeyringBackendLike | None:
@@ -489,3 +495,29 @@ class KeyStore:
         }
         self._set(_INDEX_USER, json.dumps(payload, sort_keys=True))
         self._index_cache = (time.monotonic(), dict(records))
+
+
+def provider_items(store: KeyStore) -> list[dict[str, str]]:
+    """``provider``, ``alias`` and ``source`` for every provider, in registry order (HDW-504).
+
+    This is what ``GET /v1/keys`` carries and all the tray reads: the same plain names
+    ``providers()`` gives the CLI and the dashboard, with no environment variable, no masked
+    value and no secret. One row per provider; a saved alias that holds a key wins over the
+    provider's own default alias, so a provider a call can already reach never says ``not set``.
+    """
+    best: dict[str, KeyInfo] = {}
+    for info in store.entries():
+        current = best.get(info.provider)
+        if current is None or (current.source == NOT_SET and info.source != NOT_SET):
+            best[info.provider] = info
+    items: list[dict[str, str]] = []
+    for provider in store.providers():
+        info = best.get(provider.name)
+        items.append(
+            {
+                "provider": provider.name,
+                "alias": provider.name if info is None else info.alias,
+                "source": NOT_SET if info is None else info.source,
+            }
+        )
+    return items

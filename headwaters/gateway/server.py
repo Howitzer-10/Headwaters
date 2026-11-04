@@ -31,6 +31,8 @@ from headwaters.core.catalog.http import is_loopback_host
 from headwaters.core.keys import KeyStoreError
 
 __all__ = [
+    "KEYS_PATH",
+    "SCOPE_PATH",
     "GuardedApp",
     "HttpServer",
     "KeysActions",
@@ -43,6 +45,10 @@ __all__ = [
 ]
 
 HEALTH_PATH = "/health"
+# The tray's two endpoints (HDW-504). Both are internal-API routes: the bearer token is required
+# exactly as for ``/v1/status``, and the daemon passes the work in as callables.
+SCOPE_PATH = "/v1/scope"
+KEYS_PATH = "/v1/keys"
 STATUS_PAGE_PATHS = ("/", "/index.html")
 # The dashboard's three writes (HDW-503): path -> the backend call it makes. Nothing else is a
 # write, and a JSON body is never accepted: a cross-site page can post a form, not read one.
@@ -57,6 +63,9 @@ PAGE_FAILED = (
 GRACE_S = 5
 
 JsonProvider = Callable[[], Mapping[str, Any]]
+# ``POST /v1/scope``: writes one editable setting, then reads the value the daemon really has
+# (HDW-504). Returns the reply body; ``ok`` is false with a ``reason`` when the daemon refused.
+ScopeWriter = Callable[[str, object], Mapping[str, Any]]
 
 
 class KeysActions(Protocol):
@@ -356,11 +365,16 @@ def build_app(
     status: JsonProvider,
     on_shutdown: Callable[[], None],
     on_reload: JsonProvider | None = None,
+    on_scope: ScopeWriter | None = None,
+    on_keys: JsonProvider | None = None,
     mcp_app: ASGIApp | None = None,
     mcp_lifespan: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> ASGIApp:
     """The daemon's ASGI app. ``health`` is public; ``status``, reload and shutdown need the
-    token. ``on_reload`` re-reads rules.yaml now and returns the live switches (HDW-148)."""
+    token. ``on_reload`` re-reads rules.yaml now and returns the live switches (HDW-148).
+    ``on_scope`` writes one editable setting and reports the value in force, and ``on_keys``
+    lists the providers with where each key came from, for the tray (HDW-504); both are refused
+    with 501 when the daemon was built without them."""
 
     async def get_health(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, **health()})
@@ -383,10 +397,54 @@ def build_app(
             return JSONResponse({"ok": False, "error": {"code": "reload_failed"}}, status_code=500)
         return JSONResponse({"ok": True, **reply})
 
+    async def post_scope(request: Request) -> JSONResponse:
+        if on_scope is None:
+            return JSONResponse({"ok": False, "error": {"code": "not_supported"}}, status_code=501)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        key = body.get("key") if isinstance(body, dict) else None
+        value = body.get("value") if isinstance(body, dict) else None
+        if not isinstance(key, str) or not isinstance(value, str | bool):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": 'send {"key": "default_scope"|"private_lock", "value": ...}',
+                    },
+                },
+                status_code=400,
+            )
+        # The write parses and rewrites rules.yaml and may rebuild the engine: off the loop.
+        try:
+            reply = await asyncio.to_thread(on_scope, key, value)
+        except ValueError as exc:  # not a setting a surface may edit
+            return JSONResponse({"ok": False, "key": key, "reason": str(exc)}, status_code=400)
+        except Exception:
+            return JSONResponse(
+                {"ok": False, "key": key, "reason": "the daemon could not write rules.yaml"},
+                status_code=500,
+            )
+        return JSONResponse(dict(reply), status_code=200 if reply.get("ok") else 409)
+
+    async def get_keys(request: Request) -> JSONResponse:
+        if on_keys is None:
+            return JSONResponse({"ok": False, "error": {"code": "not_supported"}}, status_code=501)
+        # The alias index lives in the credential store: a blocking read, so off the loop.
+        try:
+            reply = await asyncio.to_thread(on_keys)
+        except Exception:
+            return JSONResponse({"ok": False, "error": {"code": "keys_failed"}}, status_code=500)
+        return JSONResponse({"ok": True, **reply})
+
     routes: list[Route | Mount] = [
         Route(HEALTH_PATH, get_health, methods=["GET"]),
         Route("/v1/status", get_status, methods=["GET"]),
         Route("/v1/reload", post_reload, methods=["POST"]),
+        Route(SCOPE_PATH, post_scope, methods=["POST"]),
+        Route(KEYS_PATH, get_keys, methods=["GET"]),
         Route("/v1/shutdown", post_shutdown, methods=["POST"]),
     ]
     if mcp_app is not None:

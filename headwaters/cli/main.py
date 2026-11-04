@@ -22,6 +22,7 @@ from headwaters.cli import (
     cmd_release,
     cmd_scope,
     cmd_status,
+    cmd_tray,
 )
 from headwaters.cli.output import emit_json
 from headwaters.core.stdio import configure_utf8
@@ -77,6 +78,7 @@ cmd_install.register(app)
 cmd_release.register(app)
 cmd_scope.register(app)
 cmd_features.register(app)
+cmd_tray.register(app)
 cmd_models.register(models_app)
 cmd_catalog.register(catalog_app)
 cmd_keys.register(keys_app)

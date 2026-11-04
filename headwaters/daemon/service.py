@@ -17,7 +17,7 @@ from typing import Any
 import headwaters
 from headwaters.control.keys import DashboardKeys
 from headwaters.control.status_page import build_page, render_html
-from headwaters.core import netports
+from headwaters.core import netports, rules_edit
 from headwaters.core.catalog import discovery, updater
 from headwaters.core.catalog.http import UrllibHttp
 from headwaters.core.daemon_info import DaemonInfo, DaemonPorts, write_info
@@ -25,14 +25,17 @@ from headwaters.core.engine import Engine, build_engine
 from headwaters.core.features import FeatureRegistry, discover_features
 from headwaters.core.keepwarm import KeepWarm, KeepWarmResult, describe
 from headwaters.core.key_poll import KeyPollResult, poll_paid_walls
-from headwaters.core.keys import KeyStore
+from headwaters.core.keys import NOT_SET, KeyStore, provider_items
 from headwaters.core.logging import get_logger
 from headwaters.core.project_config import ProjectConfig, load_project_config
 from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import Router
 from headwaters.core.rules import Rules, RulesProvider
 from headwaters.core.state import Database
-from headwaters.core.state_decisions import latest_decision_ts
+from headwaters.core.state_decisions import get_outcome, latest_decision_ts, recent_decisions
+from headwaters.core.state_limits import active_walls
+from headwaters.core.state_models import get_model, list_models
+from headwaters.features import tray as tray_feature
 from headwaters.gateway.openai_routes import build_gateway_app
 from headwaters.gateway.server import HttpServer, build_app, build_status_page_app
 from headwaters.mcp.endpoint import build_endpoint
@@ -126,6 +129,10 @@ class Daemon:
     # manager while it holds the build lock).
     _built_with: Rules | None = None
     _build_lock: threading.Lock = field(default_factory=threading.Lock)
+    # The tray child this daemon started (HDW-504), or None. It is never waited on and never
+    # killed on shutdown: a tray with no daemon is a normal red icon, and that is what lets the
+    # tray restart the daemon.
+    tray_child: Any = None
 
     @property
     def live_rules(self) -> Rules:
@@ -191,6 +198,98 @@ class Daemon:
             )
         return reply
 
+    def set_setting_now(self, key: str, value: bool | str) -> dict[str, Any]:
+        """``POST /v1/scope``: write one editable setting, then report what is really in force.
+
+        The write goes through ``rules_edit.set_setting`` -- the function ``headwaters scope``
+        and the MCP ``headwaters_scope`` tool already call -- and is followed by the same
+        reload-and-report path as ``POST /v1/reload``. So the tray, the CLI and the dashboard
+        cannot disagree about what "scope is local" means: all of them read this answer.
+        """
+        previous, written = rules_edit.set_setting(key, value)
+        report = self.reload_now()
+        # A key this reply does not carry (``strategy``) cannot be confirmed against the live
+        # rules here; the file was validated before it was written, so it is taken as written.
+        live = report.get(key, written)
+        applied = bool(report.get("applied")) and live == written
+        reply: dict[str, Any] = {
+            "ok": applied,
+            "key": key,
+            "value": written,
+            "previous": previous,
+            "default_scope": report.get("default_scope"),
+            "private_lock": report.get("private_lock"),
+            "airplane": report.get("airplane"),
+            "applied": bool(report.get("applied")),
+        }
+        if not applied:
+            reply["reason"] = str(report.get("error") or "the daemon kept its previous value")
+        return reply
+
+    def keys_payload(self) -> dict[str, Any]:
+        """``GET /v1/keys``: every provider with its alias and where the key came from.
+
+        ``provider``, ``alias`` and ``source`` only: no environment variable, no masked value
+        and no secret leaves the daemon for a surface to show (HDW-504, D18).
+        """
+        return {"providers": provider_items(self.key_store)}
+
+    def tray_status(self) -> dict[str, Any]:
+        """The ``tray`` block of ``/v1/status``: everything the icon and the menu show."""
+        rules = self.live_rules
+        store = self.key_store
+        rows = recent_decisions(self.db, limit=1)
+        latest = rows[0] if rows else None
+        outcome = get_outcome(self.db, latest.id) if latest is not None else None
+        tier = None
+        if latest is not None:
+            model = get_model(self.db, latest.chosen)
+            tier = None if model is None else model.tier
+        warm = next((model.id for model in list_models(self.db) if model.warm), None)
+        try:
+            keys_set = sum(1 for info in store.entries() if info.source != NOT_SET)
+        except Exception:  # a locked or broken store must not break /v1/status
+            _log.warning("could not read the credential store", exc_info=True)
+            keys_set = 0
+        return {
+            "scope": rules.default_scope,
+            # Private Mode and Airplane both mean "nothing leaves this machine", so either one
+            # makes the scope local; the purple lock is what says Private Mode itself.
+            "effective_scope": (
+                "local" if rules.private_lock or rules.airplane else rules.default_scope
+            ),
+            "tier": tier,
+            "warm_model": warm,
+            "walls": [wall.kind for wall in active_walls(self.db)],
+            "last_status": None if outcome is None else outcome.status,
+            "below_floor": bool(latest.below_floor) if latest is not None else False,
+            "keys_set": keys_set,
+            "anonymous_provider": any(not p.key_required for p in store.providers()),
+        }
+
+    def start_tray(self, launcher: Callable[[], Any] | None = None) -> Any:
+        """Start the tray as this daemon's child when the ``tray`` feature flag is on (HDW-504).
+
+        The logon task already runs ``headwaters start``, so a daemon that starts the tray means
+        the one existing toggle (``features: {tray: true}``) controls both and no second
+        scheduled task is added. Never raises: a tray that will not start must not stop the
+        daemon. Returns the child, or None when the tray is off or unsupported here.
+        """
+        if launcher is None:
+            if os.name != "nt":
+                return None  # the notification-area backend exists on Windows only
+            if os.environ.get(tray_feature.TEST_ENV):
+                return None  # a test process must never leave a real icon behind
+            if not self.live_rules.features.get(tray_feature.FEATURE_ID, tray_feature.DEFAULT):
+                return None
+            launcher = tray_feature.spawn_child
+        try:
+            self.tray_child = launcher()
+        except Exception:  # a tray problem is not a daemon fault
+            _log.warning("could not start the tray", exc_info=True)
+            return None
+        return self.tray_child
+
     def live_engine(self) -> Engine | None:
         """The engine a new request should use. Reading the rules first picks up an edit of
         rules.yaml and, through the rebuild hook, swaps in the engine built for it, so the
@@ -242,6 +341,7 @@ class Daemon:
                 else {"action": warm.action, "reason": warm.reason, "expires_at": warm.expires_at}
             ),
             "last_refresh": self.last_refresh,
+            "tray": self.tray_status(),
         }
 
     def info(self) -> DaemonInfo:
@@ -410,6 +510,8 @@ class Daemon:
             status=self.status,
             on_shutdown=self.request_stop,
             on_reload=self.reload_now,
+            on_scope=self.set_setting_now,
+            on_keys=self.keys_payload,
             mcp_app=endpoint.app,
             mcp_lifespan=endpoint.lifespan,
         )
@@ -434,6 +536,7 @@ class Daemon:
             self._dashboard_server = HttpServer(page, self.dashboard_sock)
             servers.append(self._dashboard_server)
         serving = [asyncio.create_task(server.serve()) for server in servers]
+        self.start_tray()
         tasks = [
             asyncio.create_task(self._announce(serving, servers)),
             asyncio.create_task(self._every(self.refresh_interval, self.refresh_once)),
