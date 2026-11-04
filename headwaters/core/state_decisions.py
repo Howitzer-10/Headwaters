@@ -94,6 +94,20 @@ def recent_decisions(db: Database, limit: int = 50) -> list[DecisionRow]:
         return [_decision(r) for r in rows]
 
 
+def latest_decision_ts(db: Database) -> float | None:
+    """Epoch seconds of the most recent routed request, or ``None`` when none was ever routed.
+
+    HDW-518: the keep-warm idle backoff needs "when did this device last do real work", and every
+    routed request already writes one ``decisions`` row (indexed on ``ts``), so nothing new is
+    recorded. It is any tier's request, not only local ones: a cloud request still means the person
+    is at the machine.
+    """
+    with db.read() as c:
+        row = c.execute("SELECT MAX(ts) FROM decisions").fetchone()
+    value = row[0] if row is not None else None
+    return float(value) if value is not None else None
+
+
 @dataclass(frozen=True)
 class OutcomeRow:
     decision_id: int

@@ -101,4 +101,6 @@ def register(app: typer.Typer) -> None:
         typer.echo(f"Ports: gateway {ports.get('gateway')}, dashboard {ports.get('dashboard')}")
         keep_warm = status.get("keep_warm")
         if keep_warm:
-            typer.echo(f"Keep-warm: {keep_warm.get('action')} ({keep_warm.get('reason')})")
+            line = f"Keep-warm: {keep_warm.get('action')} ({keep_warm.get('reason')})"
+            expires = keep_warm.get("expires_at")
+            typer.echo(f"{line} until={expires}" if expires else line)

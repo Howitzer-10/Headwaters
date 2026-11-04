@@ -23,7 +23,7 @@ from headwaters.core.catalog.http import UrllibHttp
 from headwaters.core.daemon_info import DaemonInfo, DaemonPorts, write_info
 from headwaters.core.engine import Engine, build_engine
 from headwaters.core.features import FeatureRegistry, discover_features
-from headwaters.core.keepwarm import KeepWarm, KeepWarmResult
+from headwaters.core.keepwarm import KeepWarm, KeepWarmResult, describe
 from headwaters.core.key_poll import KeyPollResult, poll_paid_walls
 from headwaters.core.keys import KeyStore
 from headwaters.core.logging import get_logger
@@ -32,6 +32,7 @@ from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import Router
 from headwaters.core.rules import Rules, RulesProvider
 from headwaters.core.state import Database
+from headwaters.core.state_decisions import latest_decision_ts
 from headwaters.gateway.openai_routes import build_gateway_app
 from headwaters.gateway.server import HttpServer, build_app, build_status_page_app
 from headwaters.mcp.endpoint import build_endpoint
@@ -235,7 +236,11 @@ class Daemon:
             "private_lock": rules.private_lock,
             "airplane": rules.airplane,
             "catalog": catalog,
-            "keep_warm": None if warm is None else {"action": warm.action, "reason": warm.reason},
+            "keep_warm": (
+                None
+                if warm is None
+                else {"action": warm.action, "reason": warm.reason, "expires_at": warm.expires_at}
+            ),
             "last_refresh": self.last_refresh,
         }
 
@@ -271,9 +276,16 @@ class Daemon:
             UrllibHttp(timeout=KEEP_WARM_TIMEOUT_S),
             remote_patterns=engine.remote_patterns if engine is not None else (),
             hardware=engine.hardware if engine is not None else (lambda: None),
+            last_request=lambda: latest_decision_ts(self.db),
         )
         result = warm.tick()
-        self.last_keep_warm = result
+        previous, self.last_keep_warm = self.last_keep_warm, result
+        # One line per state change, not per tick: the interval is minutes and the tick is quiet.
+        if previous is None or (previous.action, previous.reason) != (result.action, result.reason):
+            _log.info(
+                describe(result, warm.interval_s()),
+                extra={"action": result.action, "reason": result.reason},
+            )
         return result
 
     def key_poll_once(self) -> KeyPollResult:

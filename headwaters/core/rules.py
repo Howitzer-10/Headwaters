@@ -11,7 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+
+from headwaters.core.duration import parse_duration_s
 
 Scope = Literal["auto", "free", "local", "cloud"]
 Strategy = Literal["cost_saver", "quality_first", "primary_first"]
@@ -139,6 +141,13 @@ class LocalTier(_Model):
     kv_cache_type: str = "q8_0"
     keep_alive: str = "30m"
     keep_warm_model: str = "auto"
+    # HDW-518: the keep-warm heartbeat. The tick itself is unchanged and stays on whenever a
+    # model is loaded (``keep_warm_model: auto``); what is opt-in is the heartbeat mode: a
+    # configurable interval, idle backoff, and a ``/api/ps`` ``expires_at`` on the result.
+    # ``0`` means derive the interval (``keep_alive``/2) / never back off.
+    keep_warm_heartbeat: bool = False
+    heartbeat_interval_s: float = Field(default=0.0, ge=0)
+    heartbeat_idle_backoff_s: float = Field(default=0.0, ge=0)
     classifier: ClassifierRules = Field(default_factory=ClassifierRules)
     on_battery: Literal["prefer_cloud", "normal", "local_only"] = "prefer_cloud"
     # Fit math (HDW-138): num_ctx steps, VRAM overhead, and how far weights may spill.
@@ -148,6 +157,31 @@ class LocalTier(_Model):
     overhead_gb: float = Field(default=1.0, ge=0)
     offload_weight_factor: float = Field(default=2.0, ge=1)
     hardware: HardwareRules = Field(default_factory=HardwareRules)
+
+    @model_validator(mode="after")
+    def _heartbeat_fits_the_window(self) -> LocalTier:
+        """D4/HDW-518: a heartbeat must ping faster than the model expires, and never clamp.
+
+        ``keep_alive`` that is not a positive duration (``-1`` = stay resident, ``0`` = unload at
+        once) is not an error: the tick already skips with ``keep_alive_not_timed``.
+        """
+        if not self.keep_warm_heartbeat:
+            return self
+        window = parse_duration_s(self.keep_alive)
+        if window is None or window <= 0:
+            return self
+        if window <= 60:
+            raise ValueError(
+                "tiers.local.keep_warm_heartbeat needs keep_alive > 60s "
+                f"(keep_alive is {self.keep_alive!r}): raise keep_alive or turn the heartbeat off"
+            )
+        if self.heartbeat_interval_s and self.heartbeat_interval_s >= window:
+            raise ValueError(
+                "tiers.local.heartbeat_interval_s must be shorter than tiers.local.keep_alive "
+                f"({self.heartbeat_interval_s:g}s is not under {window:g}s): lower the interval "
+                "or raise keep_alive"
+            )
+        return self
 
 
 class TiersRules(_Model):

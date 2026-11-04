@@ -160,3 +160,17 @@ logged or committed; only status codes and bodies are quoted). These rows supers
 | --- | --- | --- | --- |
 | A `POST https://openrouter.ai/api/v1/chat/completions` sent with no `Authorization` header answers HTTP 401 with the body `{"error":{"message":"No cookie auth credentials found","code":401}}` - the text names a missing credential, not a bad model - so a machine with no saved OpenRouter key fails every OpenRouter model the same way, and a 401/403 from a provider must be reported as an authentication failure rather than a model-quality failure | live `Invoke-WebRequest` from this session: status 401, that exact body, with `headwaters keys list` showing `not set` for anthropic, openai and openrouter | API as of 2026-11 | HDW-513 |
 | `headwaters keys list` prints `not set` and a `-` in the `Key` column for an alias with no stored secret (the table has `Alias`, `Provider`, `Source`, `Key` columns), which is the cheap local check the router uses before spending an attempt on a provider whose credential cannot exist | same session: `uv run --frozen headwaters keys list`, three rows all `not set`; the store behind it is `headwaters/core/keys.py#KeyStore` | repo 0.1 (this worktree) | HDW-513 |
+
+## Ollama keep-alive (HDW-518)
+
+Probes run against the local daemon at `http://127.0.0.1:11434`, Ollama 0.40.13, model `qwen3.5:4b`
+(9.4 GB VRAM), 2026-11-03. Nothing here is read from Ollama source; it is what the server did.
+
+| Fact | Verified by | Version | Ticket |
+| --- | --- | --- | --- |
+| `POST /api/chat` with `{"model": m, "messages": [], "stream": false, "keep_alive": "30m"}` loads a cold model and returns `done_reason: "load"` with `message.content` empty: no prompt text is sent and nothing is generated, so it is a usable keep-warm ping | live probe P1: cold model, 10.9 s, `done_reason` `load`, `content` `""` | 0.40.13 | HDW-518 |
+| `keep_alive` on `/api/chat` arms the model's `expires_at` in `/api/ps` at ping time + the window (`"30m"` on a fresh load gave exactly +1800 s) | live probe P1 | 0.40.13 | HDW-518 |
+| A second ping re-arms the timer: `expires_at` moved forward by exactly the time between the two pings (5 s and 12 s apart in two probes), so one ping per window keeps a model resident indefinitely | live probes P2, P4 | 0.40.13 | HDW-518 |
+| `keep_alive` accepts a Go duration string (`"30m"` to +1800 s, `"10m"` to +600 s, `"25s"` to +25 s) with no cap observed, and a JSON **number** as seconds (`120` to +120 s). A numeric **string** (`"120"`) is rejected: HTTP 400 `{"error":"time: missing unit in duration \"120\""}` - a bare number must be sent unquoted | live probes P3, P3b | 0.40.13 | HDW-518 |
+| The window is a cliff, not a thrash: a `"15s"` window dropped the model from `/api/ps` between 10 s and 15 s after the ping, a ping 1 s before the deadline re-armed in 8.6 ms, and a ping after the model had gone paid a cold reload of 6107 ms (`done_reason: "load"`) - two orders of magnitude, so a heartbeat interval close to the window is the failure mode to reject, not to clamp | live probes P4, P4b, P4c | 0.40.13 | HDW-518 |
+| `/api/ps` `expires_at` is an RFC 3339 stamp with the local offset (`2026-11-03T20:04:24.8249404-05:00`), not a bare epoch, so a client parsing it must accept the offset rather than assume UTC | live probes P1, P4c | 0.40.13 | HDW-518 |

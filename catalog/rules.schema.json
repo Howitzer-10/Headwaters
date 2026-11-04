@@ -473,6 +473,18 @@
         "hardware": {
           "$ref": "#/$defs/HardwareRules"
         },
+        "heartbeat_idle_backoff_s": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Heartbeat Idle Backoff S",
+          "type": "number"
+        },
+        "heartbeat_interval_s": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Heartbeat Interval S",
+          "type": "number"
+        },
         "host": {
           "default": "http://localhost:11434",
           "title": "Host",
@@ -482,6 +494,11 @@
           "default": "30m",
           "title": "Keep Alive",
           "type": "string"
+        },
+        "keep_warm_heartbeat": {
+          "default": false,
+          "title": "Keep Warm Heartbeat",
+          "type": "boolean"
         },
         "keep_warm_model": {
           "default": "auto",

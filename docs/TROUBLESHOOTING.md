@@ -53,6 +53,27 @@ model resident between calls and `local.keep_warm_model` keeps one model warm on
 `headwaters models list` for what is loaded, and the GPU row in `headwaters doctor` for a card that
 is busy with something else before blaming the timeout.
 
+The keep-warm tick runs every half `keep_alive` and pings whatever Ollama already has loaded, so on
+a machine that is used regularly the model usually stays resident with nothing to configure. Three
+keys make that a deliberate heartbeat; all are off by default, and off means the tick behaves
+exactly as it did before HDW-518:
+
+- `local.keep_warm_heartbeat: true` turns the heartbeat on: the interval below, the idle backoff,
+  and the `expires_at` the daemon logs after a successful ping.
+- `local.heartbeat_interval_s` is the literal interval in seconds (`0` = derive it from
+  `keep_alive`, as before). It must be shorter than `keep_alive`, and `keep_alive` must be longer
+  than 60 s while the heartbeat is on: rules that break either are rejected when the file is read,
+  never clamped, because a ping that lands after the window costs a full cold reload.
+- `local.heartbeat_idle_backoff_s` pauses the heartbeat once nothing has been routed for that many
+  seconds (`0` = never pause). It is a pause, not a shutdown: the next request resumes it. A machine
+  that has never routed a request counts as idle.
+
+A ping cannot evict the model a request is using. With `keep_warm_model: auto` only loaded models
+are re-armed; with a named model the ping is skipped while a different model is loaded, because a
+12 GB card has room for one. That also means a named model is loaded on an empty device, which is
+the one case the tick warms a cold model; `auto` never loads one, since nothing records the model
+last used.
+
 ## Model-name mismatch
 
 A request is answered by a model nobody asked for, or the provider returns "model not found". Any
