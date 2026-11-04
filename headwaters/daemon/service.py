@@ -46,6 +46,9 @@ __all__ = ["Daemon", "pick_ports", "run_in_daemon_thread"]
 
 KEEP_WARM_TIMEOUT_S = 120.0
 KEY_POLL_TIMEOUT_S = 15.0
+# How long after a spawn the daemon looks for a tray that died on its first tick, and how often.
+TRAY_START_GRACE_S = 1.0
+TRAY_POLL_INTERVAL_S = 0.05
 _log = get_logger("daemon")
 
 
@@ -288,7 +291,40 @@ class Daemon:
         except Exception:  # a tray problem is not a daemon fault
             _log.warning("could not start the tray", exc_info=True)
             return None
+        self._report_tray_death(self.tray_child)
         return self.tray_child
+
+    @staticmethod
+    def _report_tray_death(child: Any) -> None:
+        """Say so when the tray dies right after starting, with the tail of its own log.
+
+        A tray that exits in its first second used to be invisible: the daemon held a dead
+        ``Popen`` and logged nothing, so no icon and no symptom ever met. Still never raises.
+        """
+        poll = getattr(child, "poll", None)
+        if not callable(poll):
+            return
+        try:
+            deadline = time.monotonic() + TRAY_START_GRACE_S
+            while poll() is None and time.monotonic() < deadline:
+                time.sleep(TRAY_POLL_INTERVAL_S)
+            code = poll()
+        except Exception:  # a stand-in child must not cost the daemon anything
+            return
+        if code is None:
+            return
+        tail = tray_feature.log_tail()
+        detail = f"\n{tail}" if tail else ""
+        if code == 0:
+            # The instance lock is the ordinary reason: another tray already holds the icon.
+            _log.info("the tray exited at once (exit 0); a tray may already be running%s", detail)
+        else:
+            _log.warning(
+                "the tray exited at once (exit %s), so no icon will show; see %s%s",
+                code,
+                tray_feature.log_path(),
+                detail,
+            )
 
     def live_engine(self) -> Engine | None:
         """The engine a new request should use. Reading the rules first picks up an edit of

@@ -158,6 +158,20 @@ class FakeItem:
         return self.action(icon, self) if callable(self.action) else None
 
 
+class StrictItem(FakeItem):
+    """``pystray.MenuItem`` as it really behaves: ``checked`` must be None or a callable.
+
+    ``pystray._base._assert_callable`` raises ``ValueError`` for a bare bool, and ``True`` is
+    exactly what crashed the tray on every launch (HDW-504).
+    """
+
+    def __init__(self, text: str, action: Any, **options: Any) -> None:
+        checked = options.get("checked")
+        if checked is not None and not callable(checked):
+            raise ValueError(checked)
+        super().__init__(text, action, **options)
+
+
 class FakeMenu(tuple):
     """``pystray.Menu`` holds its items and is iterable (not a tuple, and with no length), so
     this is iterable too and nothing may rely on more. A submenu is an item whose action is a
@@ -219,8 +233,115 @@ def test_the_scope_submenu_is_every_scope_checked_on_the_current_one() -> None:
     submenu = fake_menu(TrayState(daemon_up=True, scope="local"), _NoActions())[1].action
     assert isinstance(submenu, FakeMenu)
     assert [child.text for child in submenu] == list(SCOPES)
-    assert [child.options["checked"] for child in submenu] == [scope == "local" for scope in SCOPES]
+    assert [child.options["checked"](None) for child in submenu] == [
+        scope == "local" for scope in SCOPES
+    ]
     assert all(child.options["radio"] for child in submenu)
+
+
+def test_build_menu_passes_pystray_a_callable_for_a_checked_item_never_a_bool() -> None:
+    # ``menu_entries`` still returns plain data; only the pystray call gets a callable.
+    entries = menu_entries(TrayState(daemon_up=True, scope="local"), _NoActions())
+    assert entries[2].checked is False  # the data seam stays a bool
+    built = build_menu(entries, menuitem=FakeItem, menu=FakeMenu)
+    scope_items = built[1].action
+    assert isinstance(scope_items, FakeMenu)
+    for child in scope_items:
+        assert callable(child.options["checked"])
+        assert not isinstance(child.options["checked"], bool)
+    assert built[2].options["checked"](None) is False
+
+
+def test_a_pystray_that_rejects_a_non_callable_checked_no_longer_sees_one() -> None:
+    # The crash: pystray raised ValueError(True) on the scope submenu at every launch.
+    entries = menu_entries(TrayState(daemon_up=True, scope="local"), _NoActions())
+    built = build_menu(entries, menuitem=StrictItem, menu=FakeMenu)
+    submenu = built[1].action
+    assert isinstance(submenu, FakeMenu)
+    assert [child.options["checked"](None) for child in submenu] == [
+        scope == "local" for scope in SCOPES
+    ]
+    # A checked Private Mode is the other ``True`` pystray used to reject.
+    on = menu_entries(TrayState(daemon_up=True, private_lock=True), _NoActions())
+    built_on = build_menu(on, menuitem=StrictItem, menu=FakeMenu)
+    assert built_on[2].options["checked"](None) is True
+    # An entry with no checked state still passes None, as it always did.
+    assert built[5].options["checked"] is None
+
+
+# --------------------------------------------------------------------------- staying alive
+
+
+def test_spawn_child_sends_the_childs_stderr_to_a_capped_state_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tray that dies at once used to be DEVNULL, which is why nobody could say why.
+    from headwaters.features import tray as tray_feature
+
+    monkeypatch.setenv(paths.HOME_ENV_VAR, str(tmp_path))
+    tray_feature.log_path().parent.mkdir(parents=True)
+    tray_feature.log_path().write_bytes(b"x" * (tray_feature.TRAY_LOG_MAX_BYTES + 1))
+    seen: dict[str, Any] = {}
+
+    class FakePopen:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            seen.update(kwargs)
+            seen["argv"] = args[0]
+
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr(tray_feature.subprocess, "Popen", FakePopen)
+    tray_feature.spawn_child()
+
+    assert seen["argv"] == tray_feature.command()
+    assert seen["stdin"] is tray_feature.subprocess.DEVNULL
+    assert seen["stdout"] is tray_feature.subprocess.DEVNULL
+    assert seen["stderr"] is not tray_feature.subprocess.DEVNULL
+    assert seen["stderr"].name == str(tray_feature.log_path())
+    assert seen["stderr"].closed  # the child keeps its own handle; the parent closes its copy
+    assert tray_feature.log_path().stat().st_size == 0  # truncated before this run writes
+
+
+def test_a_tray_that_dies_at_once_is_logged_with_the_tail_of_its_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from headwaters.daemon import service
+    from headwaters.features import tray as tray_feature
+
+    warnings: list[str] = []
+    monkeypatch.setattr(tray_feature, "log_tail", lambda: "ValueError: True")
+    monkeypatch.setattr(service._log, "warning", lambda msg, *args: warnings.append(msg % args))
+    monkeypatch.setattr(service, "TRAY_START_GRACE_S", 0.2)
+
+    class DeadChild:
+        def poll(self) -> int:
+            return 1
+
+    service.Daemon._report_tray_death(DeadChild())
+
+    assert len(warnings) == 1
+    assert "exited at once" in warnings[0]
+    assert "ValueError: True" in warnings[0]
+    assert str(tray_feature.log_path()) in warnings[0]
+
+
+def test_the_disable_switch_still_stops_the_tray(monkeypatch: pytest.MonkeyPatch) -> None:
+    from headwaters.features import tray as tray_feature
+
+    monkeypatch.setenv(tray_feature.DISABLE_ENV, "1")
+    assert tray_feature.run() == 0
+
+
+def test_a_test_process_never_starts_a_real_tray(monkeypatch: pytest.MonkeyPatch) -> None:
+    # PYTEST_CURRENT_TEST is the daemon's guard; it returns before reading rules or spawning.
+    from headwaters.daemon.service import Daemon
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/test_hdw504_tray.py::a_case (call)")
+    daemon = Daemon.__new__(Daemon)
+    daemon.tray_child = None
+    assert daemon.start_tray() is None
+    assert daemon.tray_child is None
 
 
 def test_a_missing_daemon_disables_the_switches_but_not_quit() -> None:

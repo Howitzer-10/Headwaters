@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
+from typing import IO
 
 from headwaters.core.features import FeatureRegistry, FeatureSpec
 from headwaters.core.plugins import CURRENT_API_VERSION
@@ -26,6 +28,8 @@ __all__ = [
     "TITLE",
     "TraySurface",
     "command",
+    "log_path",
+    "log_tail",
     "register",
     "run",
     "spawn_child",
@@ -39,6 +43,11 @@ DEFAULT = True
 DISABLE_ENV = "HEADWATERS_NO_TRAY"
 # A test process must never leave a real icon behind, and the daemon honours this too.
 TEST_ENV = "PYTEST_CURRENT_TEST"
+# The child's stderr goes here: a tray that dies at once leaves its traceback where the daemon,
+# and a person, can read it instead of vanishing into DEVNULL.
+TRAY_LOG_NAME = "tray.log"
+TRAY_LOG_MAX_BYTES = 8192
+TRAY_LOG_TAIL_CHARS = 2000
 
 FEATURE_SPEC = FeatureSpec(
     id=FEATURE_ID,
@@ -78,20 +87,58 @@ def command() -> list[str]:
 
 
 def spawn_child() -> subprocess.Popen[bytes]:
-    """Start the tray with no console, no pipes and nobody waiting on it (HDW-504)."""
+    """Start the tray with no console and nobody waiting on it (HDW-504).
+
+    The child's stderr goes to ``state_dir()/tray.log`` instead of DEVNULL: a tray that dies on
+    its first tick used to leave no trace at all, and the daemon could only say nothing.
+    """
     flags = 0
     if os.name == "nt":
         # The daemon is usually started by the logon task: a child with a console window would
         # flash one on every logon.
         flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return subprocess.Popen(
-        command(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=flags,
-        close_fds=True,
-    )
+    log = _open_log()
+    try:
+        return subprocess.Popen(
+            command(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=log,
+            creationflags=flags,
+            close_fds=True,
+        )
+    finally:
+        # The child holds its own copy of the handle; this one has done its work.
+        log.close()
+
+
+def log_path() -> Path:
+    """Where the tray child's stderr goes: beside ``tray.lock``, in the state dir."""
+    from headwaters.core import paths
+
+    return paths.state_dir() / TRAY_LOG_NAME
+
+
+def log_tail(limit: int = TRAY_LOG_TAIL_CHARS) -> str:
+    """The last few KB of that log, for the warning the daemon writes when the tray dies."""
+    try:
+        text = log_path().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-limit:].strip()
+
+
+def _open_log() -> IO[bytes]:
+    """The log handle, truncated once it passes a few KB; DEVNULL if it cannot be opened."""
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > TRAY_LOG_MAX_BYTES:
+            # One run's crash is what matters: do not grow a file nobody reads.
+            path.write_bytes(b"")
+        return path.open("ab")
+    except OSError:
+        return open(os.devnull, "wb")  # closed by the caller's finally
 
 
 def run() -> int:

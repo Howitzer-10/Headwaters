@@ -137,13 +137,29 @@ def build_menu(
             menuitem(
                 entry.text,
                 None if entry.action is None else _bind(entry.action),
-                checked=entry.checked,
+                checked=_checked(entry.checked),
                 radio=entry.radio,
                 default=entry.default,
                 enabled=entry.enabled,
             )
         )
     return menu(*built)
+
+
+def _checked(value: bool | None) -> Callable[[Any], bool] | None:
+    """``checked`` as pystray demands it: None or a callable, never a bare bool (HDW-504).
+
+    ``pystray.MenuItem`` rejects anything but None or a callable, and ``True`` raises. A menu
+    rebuilt on every refresh needs the current value, so the callable answers with the value this
+    reading of the daemon produced.
+    """
+    if value is None:
+        return None
+
+    def current(_item: Any) -> bool:
+        return value
+
+    return current
 
 
 def _bind(action: Callable[[], None]) -> Callable[[Any, Any], None]:
