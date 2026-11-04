@@ -208,3 +208,52 @@ def test_an_explicit_value_is_written_and_read_back(tmp_path: Path) -> None:
     loaded = load_rules(target)
     assert loaded.tiers.local.keep_warm_model == "auto"
     assert loaded == chosen
+
+
+@pytest.mark.parametrize("written", ["off", "false", "no"])
+def test_unquoted_yaml_false_disables_keep_warm(tmp_path: Path, written: str) -> None:
+    """D21: YAML reads bare ``off``/``no``/``false`` as a boolean, not as the word."""
+    target = tmp_path / "rules.yaml"
+    target.write_text(f"tiers:\n  local:\n    keep_warm_model: {written}\n", encoding="utf-8")
+    assert load_rules(target).tiers.local.keep_warm_model == "off"
+
+
+@pytest.mark.parametrize("written", ["on", "true", "yes"])
+def test_unquoted_yaml_true_means_keep_warm(tmp_path: Path, written: str) -> None:
+    """``on`` means keep warm; ``auto`` says that without inventing a model name."""
+    target = tmp_path / "rules.yaml"
+    target.write_text(f"tiers:\n  local:\n    keep_warm_model: {written}\n", encoding="utf-8")
+    assert load_rules(target).tiers.local.keep_warm_model == "auto"
+
+
+@pytest.mark.parametrize("chosen", ["off", "auto", "qwen3:8b"])
+def test_a_quoted_value_is_still_written_verbatim(tmp_path: Path, chosen: str) -> None:
+    """The documented form (quoted) is untouched by the boolean mapping."""
+    target = tmp_path / "rules.yaml"
+    target.write_text(f'tiers:\n  local:\n    keep_warm_model: "{chosen}"\n', encoding="utf-8")
+    assert load_rules(target).tiers.local.keep_warm_model == chosen
+
+
+@pytest.mark.parametrize("chosen", ["off", "auto", "qwen3:8b"])
+def test_a_yaml_round_trip_keeps_the_value(tmp_path: Path, chosen: str) -> None:
+    """A dump-and-read cycle must not flip the default: ``off`` comes back unquoted."""
+    rules = Rules(tiers=TiersRules(local=LocalTier(keep_warm_model=chosen)))
+    target = tmp_path / "rules.yaml"
+    target.write_text(yaml.safe_dump(rules.model_dump(), sort_keys=False), encoding="utf-8")
+    assert load_rules(target).tiers.local.keep_warm_model == chosen
+
+
+def test_a_non_text_non_boolean_keep_warm_model_still_fails(tmp_path: Path) -> None:
+    """Tolerating YAML's booleans must not turn the field into a catch-all."""
+    target = tmp_path / "rules.yaml"
+    target.write_text("tiers:\n  local:\n    keep_warm_model: 3\n", encoding="utf-8")
+    with pytest.raises(ConfigError) as caught:
+        load_rules(target)
+    assert any("keep_warm_model" in p for p in caught.value.problems)
+
+
+def test_schema_still_declares_keep_warm_model_as_a_string() -> None:
+    """``catalog/rules.schema.json`` is a contract: the loader tolerates, the schema does not."""
+    field = json.loads(schema_json())["$defs"]["LocalTier"]["properties"]["keep_warm_model"]
+    assert field["type"] == "string"
+    assert field["default"] == "off"

@@ -179,6 +179,19 @@ class LocalTier(_Model):
             "(or '30m'), not a bare number of seconds"
         )
 
+    @field_validator("keep_warm_model", mode="before")
+    @classmethod
+    def _keep_warm_model_accepts_yaml_booleans(cls, value: object) -> object:
+        """D21: a bare ``off``/``on`` is YAML ``false``/``true``, not text; say what was meant.
+
+        ``off`` has exactly one meaning, so ``false`` (``off``, ``no``) disables the tick.
+        ``on`` means "keep warm", and ``auto`` is the only spelling that says so without
+        inventing a model name, so ``true`` (``on``, ``yes``) selects it.
+        """
+        if not isinstance(value, bool):
+            return value
+        return "off" if value is False else "auto"
+
     @field_validator("keep_alive", mode="after")
     @classmethod
     def _keep_alive_carries_a_unit(cls, value: str) -> str:
