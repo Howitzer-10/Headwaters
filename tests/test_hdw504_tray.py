@@ -767,7 +767,7 @@ def test_a_long_report_is_clipped_for_the_dialog_but_recorded_whole() -> None:
     assert app.toasts == [report]
 
 
-def test_the_doctor_payload_drops_skips_and_sorts_optional_last() -> None:
+def test_the_doctor_payload_drops_skips_and_sorts_notes_last() -> None:
     window = FakeWindow()
     report = Report(
         checks=(
@@ -793,9 +793,15 @@ def test_the_doctor_payload_drops_skips_and_sorts_optional_last() -> None:
     assert app.wait_for_action()
     (view,) = window.calls
     assert [entry.id for entry in view.entries] == ["ollama", "git"]
-    assert [entry.title for entry in view.needs_doing] == ["Ollama"]
-    assert [entry.detail for entry in view.needs_doing] == ["Ollama is not running."]
-    assert [entry.fix for entry in view.needs_doing] == ["Start Ollama, then choose Doctor again."]
+    # The window gets the plain words, not the check's own diagnostic strings.
+    assert [entry.title for entry in view.needs_doing] == ["Ollama isn't running"]
+    assert [entry.detail for entry in view.needs_doing] == [
+        "Headwaters uses Ollama to run models on this computer, and it isn't answering."
+    ]
+    assert [entry.fix for entry in view.needs_doing] == [
+        "Install and start Ollama, then reopen Doctor."
+    ]
+    assert [entry.id for entry in view.developer] == ["git"]
 
 
 def test_restart_runs_on_a_worker_thread_and_opens_its_own_dialog() -> None:
