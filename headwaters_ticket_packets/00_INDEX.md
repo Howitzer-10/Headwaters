@@ -99,6 +99,7 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-507 | VS Code extension: status bar, commands, publishing ★ | Sonnet | v3.2 §E1 | 1.5 |
 | HDW-508 | Opt-in usage report, feedback, survey ★ | Sonnet | v3.5 §D2, v3.5 §D4 | 1.7 |
 | HDW-509 | Beta 0.2 review gate | Opus | Full design + phase diff (attach) | 1.2 |
+| HDW-512 | Tool capability truth, live overrides, honest pull hint, gateway footer | Sonnet | HDW-512.md | 1.3 |
 | HDW-601 | Repo context engine A: symbol index ★ | Sonnet | v3.4 §D | 1.4 |
 | HDW-602 | Context engine B: embeddings and packing ★ | Sonnet | v3.4 §D | 1.5 |
 | HDW-603 | Analyzer layer 2: embedding kNN ★ | Sonnet | v3.4 §C | 1.5 |

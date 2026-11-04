@@ -41,6 +41,8 @@ def suggestions_for(
     """
     tips: list[Suggestion] = []
     if below_floor and chosen.is_local and is_local_only(req, ctx):
+        # The hint names nothing when every recommended model is already installed (HDW-512):
+        # the generic advice survives, the dishonest "pull <the model you just picked>" does not.
         tips.append(
             Suggestion("pull_model", _pull_text("Pull a larger local model", ctx.pull_hint))
         )
@@ -87,10 +89,24 @@ def no_route(
                 "set_context", "Set the model's context size in rules.yaml (models.overrides)."
             )
         )
+    wants_tools = bool(req.requirements.hard.tools)
     if any(x.startswith("no_fit_") for x in codes) and "local" in req.scope.tiers:
-        tips.append(Suggestion("pull_model", _pull_text("Pull a local model", pull_hint)))
+        # A tool request carries JSON schemas, which take context a smaller model has not got:
+        # say so instead of pretending a bigger pull is always the answer (HDW-512).
+        base = (
+            "Pull a smaller local model that fits your GPU with tool schemas"
+            if wants_tools
+            else "Pull a local model"
+        )
+        tips.append(Suggestion("pull_model", _pull_text(base, pull_hint)))
     elif "no_vision" in codes and "local" in req.scope.tiers and pull_hint:
         tips.append(Suggestion("pull_model", _pull_text("Pull a local vision model", pull_hint)))
+    elif "no_tools" in codes and "local" in req.scope.tiers and pull_hint:
+        tips.append(
+            Suggestion(
+                "pull_model", _pull_text("Pull a local model that supports tool calls", pull_hint)
+            )
+        )
     if codes & {"no_vision", "no_tools", "no_json"}:
         tips.append(Suggestion("add_capable_model", "No model supports what this needs."))
     if req.scope.local_only and not req.scope.active_locks:

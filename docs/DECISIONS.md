@@ -18,8 +18,9 @@
 | D14 | Daemon packages: **`headwaters.gateway` owns the HTTP server** (the only package allowed to import `fastapi`, `starlette` and `uvicorn`), **`headwaters.mcp` owns the MCP SDK** and hands its streamable-HTTP app out as a plain ASGI callable, and a new **`headwaters.daemon` is the composition root** that wires core, gateway and mcp into one process. Nothing imports `headwaters.daemon`; the CLI starts it as a child process. The internal API and health endpoint live in `gateway/server.py`, not under `headwaters/mcp/`. | Decided (2026-10-31, HDW-201) |
 | D15 | Beta tester promise: **everyone on the beta tester list gets Headwaters Pro free if a free/Pro split ships at 1.0.** HDW-407's packet offers free Pro or a discount for testers; the free option is chosen, the discount is not promised, and the list itself is a release-gate owner step. | Decided (2026-11-10, HDW-407) |
 | D18 | Provider identity: **every surface (CLI, dashboard page, tray menu) reads one registry of plain, lowercase provider names, and a person is never shown an underlying environment variable name.** The registry is `KeyStore.providers()`; it currently holds `anthropic`, `openai`, `openrouter`, `nvidia`, `huggingface`, `mistral`, `pollinations`, `opencode`, `opencode-go` and keyless `ollama` (whatever `providers()` returns is the list; this branch's registry also carries a `kilo` row from the catalog work, FU-503-2), and a provider added there appears on every surface without a second list. `HF_TOKEN` and `NVIDIA_API_KEY` are internal mappings, accepted as input at most, and never printed. No surface keeps its own provider list or label, and `keys set` rejects an unknown name. Why: a person thinks in products, not environment variables, and two surfaces drifting on naming is a support burden. Implemented by HDW-514 (registry owner), HDW-503 (dashboard) and HDW-504 (tray). | Decided (owner, HDW-503 / 504 / 514 packets) |
+| D20 | Behaviour over advertisement: **a capability is recorded from an observed tool call, not from what the provider advertises**; `models.overrides` in `rules.yaml` is applied **last**, after catalog and scoring; the gateway answer footer is **opt-in and off by default**. | Decided (2026-11-03, HDW-512) |
 
-Numbering note: this table stops at D15 on this branch, while the detail sections run to D16. D17 is claimed independently by two unmerged branches (HDW-512's answer footer and HDW-513's tier interleaving); this entry skips it and keeps the D18 number its packets use, so whoever merges those branches renumbers one of them.
+Numbering note: D16 has a detail section only. D17 is HDW-513's retry rule, D18 is the provider registry and D20 is HDW-512's behaviour-over-advertisement rule; D19 arrives with the paid-vocabulary doc. The two branches that claimed D17 for different decisions are merged, and this session gave the older one (HDW-512) the number its consolidation uses.
 
 ## Deferred tickets (do not build)
 
@@ -274,4 +275,48 @@ a few fixed strings.
 
 **Tickets.** HDW-513. **Revisit** if a provider grows per-model authentication (then the provider-level
 fast-fail must narrow to the models that share the credential).
+
+## D20 detail: observed capabilities, user overrides, opt-in footer
+
+**Decision.** Three rules came out of one defect: Cline showed a raw
+`{"name": "skills", "arguments": {"skill": "test"}}` block instead of an answer. `qwen2.5-coder:14b`
+advertises `completion`, `tools` and `insert` on this Ollama version, `POST /api/chat` with a tools
+array answers `tool_calls: null` and the call as `content` text, and the router had chosen it because
+`tools_ok` came from that advertisement.
+
+1. **A capability is what a model did, not what it says.** `tools_ok` is written only by a bounded
+   probe — `headwaters models verify-tools`, or `models refresh --verify-tools` — that offers one
+   synthetic tool and requires a structured `tool_calls` entry naming that tool with empty content.
+   The observation is stored in `capability_probes` and read at candidate-build time, so a later
+   refresh that re-advertises the capability cannot undo it. The probe runs on an explicit command,
+   never in a request path, because it loads a model; an unreachable model, a refusal by the private
+   lock or airplane mode, and an answer cut off at the token cap record nothing, so no model becomes
+   `tools_ok` without an observation and none is refused on no evidence.
+2. **The user has the last word.** `models.overrides` (`tier`, `scores`, `tools_ok`, `json_ok`,
+   `ctx`) is applied to the candidate list after the catalog and the scoring pass, as the
+   `ModelOverride` docstring always promised, and the existing rules watcher makes an edit take
+   effect without a daemon restart. An override the schema rejects fails the file with a clear
+   error rather than being silently ignored.
+3. **The footer is opt-in and it is body text.** `gateway.footer.enabled` defaults to `false`: the
+   line naming the model, tier, tokens, cost and latency changes the assistant content, so no
+   existing client or test sees extra text until it is asked for. When it is on it is appended to the
+   content of a non-streaming answer, emitted as a final content delta for a streaming one, never
+   added to a `tool_calls` finish or an error response, and never counted in `usage`.
+
+**Reason.** The router's promise is that a request lands on a model that can serve it. An advertised
+capability cannot keep that promise (a vendor's capability list is a statement about a version, not
+about this build on this hardware), while an observation can. The overrides exist so that when the
+observation is wrong the owner can correct it without waiting for a Headwaters release, and the
+footer answers the owner's requirement — say what answered, and leave room for cost detail — without
+breaking the clients that already parse the body.
+
+**Cost.** A probe loads a model, so its first answer is slow and it must stay off the request path;
+until someone runs it, `tools_ok` is still the advertisement. An override outlives the reason it was
+added: removing one needs `headwaters models refresh` to restore what discovery finds. A body footer
+becomes part of the conversation history a host may echo back as context, which is why the default is
+off and why a header (`X-Headwaters-Model`) is the invisible alternative when that matters; a paid
+answer's `cost` is priced from the catalog and reads `unknown` when the catalog has no price, so it is
+a routing-cost hint, not a bill.
+
+**Tickets.** HDW-512. The composition-honest error text stays HDW-511's.
 

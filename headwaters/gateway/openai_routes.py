@@ -29,7 +29,6 @@ from starlette.types import ASGIApp
 
 from headwaters.core.executor.types import ExecOptions, ExecResult, ToolCall
 from headwaters.core.logging import get_logger
-from headwaters.core.policy.types import RouteDecision
 from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
 from headwaters.core.router_verify import schema_of
 from headwaters.core.rules import Rules
@@ -41,6 +40,7 @@ from headwaters.gateway.anthropic_routes import (
     count_tokens,
     messages,
 )
+from headwaters.gateway.footer import footer_text, with_footer
 from headwaters.gateway.models import card, find, listed
 from headwaters.gateway.server import HEALTH_PATH, GuardedApp
 from headwaters.gateway.shared import (
@@ -51,11 +51,9 @@ from headwaters.gateway.shared import (
     SUGGESTION_HEADER,
     VERIFY_HEADER,
     RouterLike,
-    advice_note,
     error_details,
+    headwaters_meta,
     meta_headers,
-    suggestion_code,
-    verify_status,
 )
 
 __all__ = [
@@ -162,7 +160,7 @@ async def _chat(
         _log.exception("gateway chat failed")
         return error_response(500, "internal_error", "The gateway could not serve the request.")
     return JSONResponse(
-        _completion(result),
+        _completion(result, live_rules),
         headers=meta_headers(result.decision, live_rules, result=result),
     )
 
@@ -263,12 +261,17 @@ async def _chunks(
         status, code, message, advice = error_details(failure)
         yield _sse({"error": _error_body(status, code, message, advice)})
     else:
+        line = footer_text(result, rules)  # HDW-512: one last content delta, then the finish
+        if line:
+            body = result.result.content if result is not None else ""
+            text = f"\n\n{line}" if body else line
+            yield _sse(_chunk(completion_id, created, model, {"content": text}))
         done = _chunk(completion_id, created, model, None)
         done["choices"][0]["finish_reason"] = _finish_reason(result.result if result else None)
         if decision is not None:
             # The streamed answer is checked after the fact, so the result arrives here: this is
             # the only place a client learns the verification outcome of a streamed answer.
-            done["headwaters"] = _headwaters_meta(decision, result, rules)
+            done["headwaters"] = headwaters_meta(decision, result, rules)
         yield _sse(done)
         if include_usage and result is not None:
             yield _sse(
@@ -281,9 +284,10 @@ async def _chunks(
     yield "data: [DONE]\n\n"
 
 
-def _completion(result: RouteResult) -> dict[str, Any]:
-    """The OpenAI body, unchanged: the routing facts live in the headers (FU-123-2)."""
-    message: dict[str, Any] = {"role": "assistant", "content": result.result.content or ""}
+def _completion(result: RouteResult, rules: Rules) -> dict[str, Any]:
+    """The OpenAI body: the routing facts live in the headers, plus the opt-in footer (HDW-512)."""
+    content = with_footer(result.result.content or "", result, rules)
+    message: dict[str, Any] = {"role": "assistant", "content": content}
     if result.result.tool_calls:
         message["tool_calls"] = [_tool_json(call) for call in result.result.tool_calls]
     return {
@@ -319,24 +323,6 @@ async def _chain(first: RouteEvent, rest: AsyncIterator[RouteEvent]) -> AsyncIte
     yield first
     async for event in rest:
         yield event
-
-
-def _headwaters_meta(
-    decision: RouteDecision, result: RouteResult | None, rules: Rules
-) -> dict[str, Any]:
-    """The same facts as the routing headers, for a body that scrolls headers out of reach."""
-    return {
-        "model": decision.model,
-        "tier": decision.tier,
-        "scope": str(decision.scope.scope),
-        "reason": decision.rung,
-        "below_floor": decision.below_floor,
-        "suggestion": suggestion_code(decision),
-        "verify_status": verify_status(decision, result, pending=False),
-        "advice": advice_note(decision, result, rules, pending=False)
-        if rules.advice == "inline"
-        else None,
-    }
 
 
 def _usage(result: ExecResult) -> dict[str, int]:

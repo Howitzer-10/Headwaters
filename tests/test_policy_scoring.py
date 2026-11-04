@@ -135,6 +135,10 @@ class _Req:
         local_only = False
         active_locks = ()
 
+    class requirements:
+        class hard:
+            tools = False
+
 
 def test_filter_headroom_comes_from_rules() -> None:
     rules = Rules(scoring=ScoringRules(ctx_headroom=2.0))

@@ -279,6 +279,33 @@
       "title": "FloorsRules",
       "type": "object"
     },
+    "FooterRules": {
+      "additionalProperties": false,
+      "description": "HDW-512: the optional answer footer. Off by default, so no host sees extra body text.\n\n``fields`` names the facts to print, in order; the gateway renders only these, so adding a\nfact is one formatter and one name here. The footer is never part of ``usage``.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "fields": {
+          "items": {
+            "enum": [
+              "model",
+              "tier",
+              "tokens",
+              "cost",
+              "latency"
+            ],
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "title": "FooterRules",
+      "type": "object"
+    },
     "FreeCloudTier": {
       "additionalProperties": false,
       "properties": {
@@ -341,6 +368,9 @@
           "default": true,
           "title": "Enabled",
           "type": "boolean"
+        },
+        "footer": {
+          "$ref": "#/$defs/FooterRules"
         },
         "port": {
           "default": 4000,
@@ -657,6 +687,9 @@
           "minimum": 60,
           "title": "Refresh Ttl S",
           "type": "number"
+        },
+        "tool_probe": {
+          "$ref": "#/$defs/ToolProbeRules"
         }
       },
       "title": "ModelsRules",
@@ -1035,6 +1068,42 @@
         }
       },
       "title": "TiersRules",
+      "type": "object"
+    },
+    "ToolProbeRules": {
+      "additionalProperties": false,
+      "description": "HDW-512: behavioural tool-capability verification (``headwaters models verify-tools``).\n\nOff the request path by design: a probe loads the model, so it is an explicit command and\nnever a per-request check. ``on_refresh`` is opt-in and off by default, even for\n``models refresh``, which is why the observation is stored and overlaid at routing time.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "max_models": {
+          "default": 25,
+          "minimum": 1,
+          "title": "Max Models",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "default": 256,
+          "minimum": 1,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "on_refresh": {
+          "default": false,
+          "title": "On Refresh",
+          "type": "boolean"
+        },
+        "retry_after_s": {
+          "default": 86400,
+          "minimum": 0,
+          "title": "Retry After S",
+          "type": "number"
+        }
+      },
+      "title": "ToolProbeRules",
       "type": "object"
     },
     "ToolsRules": {

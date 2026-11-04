@@ -5,7 +5,7 @@ Pure helpers. Nothing here stores or logs request text.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 
 from headwaters.core.analyzer._extract import collect
@@ -129,23 +129,34 @@ def request_role(reqs: Requirements) -> Role:
     return "general"
 
 
+def _same_model(a: str, b: str) -> bool:
+    return a.strip().lower().removesuffix(":latest") == b.strip().lower().removesuffix(":latest")
+
+
 def pull_hint(
-    reqs: Requirements, hw: HardwareState | None, profiles: Mapping[str, GpuProfile]
+    reqs: Requirements,
+    hw: HardwareState | None,
+    profiles: Mapping[str, GpuProfile],
+    *,
+    installed: Collection[str] = (),
 ) -> str | None:
     """``pull <model>`` from the catalog's recommendation for this GPU profile and role.
 
     Unknown or ``custom`` profiles fall back to the smallest-VRAM profile that lists the role
-    (the safe choice, as the classifier does). ``None`` when the catalog names nothing.
+    (the safe choice, as the classifier does). Models in ``installed`` are skipped, so the hint
+    never tells the user to pull something they already have — including the model the router
+    just picked, which was the HDW-512 defect. ``None`` when nothing uninstalled is named.
     """
     role = request_role(reqs)
+    have = list(installed)
     ordered: list[GpuProfile] = []
     if hw is not None and hw.profile in profiles:
         ordered.append(profiles[hw.profile])
     ordered.extend(sorted(profiles.values(), key=lambda p: p.vram_gb))
     for profile in ordered:
-        models = profile.recommended.get(role)
-        if models:
-            return f"pull {models[0]}"
+        for name in profile.recommended.get(role) or ():
+            if not any(_same_model(name, known) for known in have):
+                return f"pull {name}"
     return None
 
 

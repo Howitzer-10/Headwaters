@@ -148,6 +148,8 @@ class RouteResult:
     verify: VerifyOutcome | None = None
     first_choice: str | None = None  # what the policy picked first, when different from model
     reasons: tuple[str, ...] = field(default=())
+    latency_ms: int | None = None  # wall clock from request start to answer (footer)
+    cost_usd: float | None = None  # priced from catalog rates, None when unpriced (footer)
 
     @property
     def verify_failed(self) -> bool:
