@@ -88,7 +88,9 @@ class KeepWarm:
         """
         local = self._rules.tiers.local
         if local.keep_warm_heartbeat and local.heartbeat_interval_s > 0:
-            return local.heartbeat_interval_s
+            # Same floor as the derived path: a sub-30 s interval would turn the daemon's
+            # `_every` loop into a fast poll (a DB read + POST + `/api/ps` each tick).
+            return max(MIN_INTERVAL_S, local.heartbeat_interval_s)
         seconds = parse_duration_s(local.keep_alive)
         if seconds is None or seconds <= 0:
             return DEFAULT_INTERVAL_S

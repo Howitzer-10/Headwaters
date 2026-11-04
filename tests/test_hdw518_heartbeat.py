@@ -143,6 +143,14 @@ def test_heartbeat_interval_override() -> None:
     assert _warm(ignored, FakeHttp()).interval_s() == 900.0
 
 
+def test_heartbeat_interval_floor_is_thirty_seconds() -> None:
+    """The explicit interval honours the same 30 s floor the derived path applies (FU-518-8)."""
+    tiny = _rules(keep_warm_heartbeat=True, keep_alive="30m", heartbeat_interval_s=5.0)
+    assert _warm(tiny, FakeHttp()).interval_s() == 30.0
+    exact = _rules(keep_warm_heartbeat=True, keep_alive="30m", heartbeat_interval_s=30.0)
+    assert _warm(exact, FakeHttp()).interval_s() == 30.0
+
+
 def test_heartbeat_interval_must_be_shorter_than_keep_alive() -> None:
     with pytest.raises(ValidationError) as caught:
         _rules(keep_warm_heartbeat=True, keep_alive="10m", heartbeat_interval_s=600.0)
