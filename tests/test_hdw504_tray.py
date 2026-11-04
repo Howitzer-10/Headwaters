@@ -256,6 +256,7 @@ def test_the_menu_is_exactly_these_items_in_this_order() -> None:
         "Keys",
         "Open dashboard",
         "Doctor",
+        "Start daemon",
         "Restart daemon",
         "Quit",
     ]
@@ -382,8 +383,18 @@ def test_a_missing_daemon_disables_the_switches_but_not_quit() -> None:
     assert by_text["daemon not running"].options["enabled"] is False
     for switch in ("Scope", "Private Mode", "Keys"):
         assert by_text[switch].options["enabled"] is False
-    for always in ("Doctor", "Restart daemon", "Quit"):
+    for always in ("Doctor", "Start daemon", "Restart daemon", "Quit"):
         assert by_text[always].options["enabled"] is True
+
+
+def test_start_is_the_only_daemon_switch_that_changes_with_the_icon_colour() -> None:
+    """A red icon has nothing to restart, so Start is offered; a live daemon greys it out."""
+    down = {item.text: item for item in fake_menu(TrayState.daemon_down(), _NoActions())}
+    up = {item.text: item for item in fake_menu(TrayState(daemon_up=True), _NoActions())}
+    assert down["Start daemon"].options["enabled"] is True
+    assert up["Start daemon"].options["enabled"] is False
+    assert down["Restart daemon"].options["enabled"] is True
+    assert up["Restart daemon"].options["enabled"] is True
 
 
 def test_the_menu_wraps_an_action_so_pystray_can_call_it_with_an_icon() -> None:
@@ -492,6 +503,53 @@ def test_restart_reports_and_reads_the_daemon_again() -> None:
     assert app.wait_for_action()
     assert app.toasts == ["daemon restarted"]
     assert sum(1 for request in seen if request.url.path == "/v1/status") == status_reads + 1
+
+
+def test_start_reports_and_reads_the_daemon_again() -> None:
+    """Start brings a red icon back: it says so and reloads the menu from the new daemon."""
+    client, seen = fake_daemon()
+    app, _, _ = app_with(client=client)
+    app._starter = lambda: "daemon started"  # type: ignore[method-assign]
+    app.refresh()
+    status_reads = sum(1 for request in seen if request.url.path == "/v1/status")
+    app.start()
+    assert app.wait_for_action()
+    assert app.toasts == ["daemon started"]
+    assert sum(1 for request in seen if request.url.path == "/v1/status") == status_reads + 1
+
+
+def test_start_runs_on_a_worker_thread_and_logs_started_and_finished() -> None:
+    caller = threading.get_ident()
+    seen: dict[str, Any] = {}
+    dialog, log = FakeDialog(), FakeLogger()
+
+    def fake_start() -> str:
+        seen["ident"] = threading.get_ident()
+        seen["name"] = threading.current_thread().name
+        return "daemon started"
+
+    app, _, _ = app_with(dialog=dialog, logger=log, starter=fake_start)
+    app.start()
+    assert app.wait_for_action()
+    assert seen["ident"] != caller
+    assert seen["name"] == "tray-start-daemon"
+    assert log.lines == ["start daemon started", "start daemon finished: daemon started"]
+    assert dialog.calls == [("Headwaters daemon", "daemon started")]
+
+
+def test_a_start_that_raises_says_so_instead_of_staying_silent() -> None:
+    def broken_start() -> str:
+        raise RuntimeError("no daemon binary")
+
+    dialog, log = FakeDialog(), FakeLogger()
+    app, _, _ = app_with(dialog=dialog, logger=log, starter=broken_start)
+    app.start()
+    assert app.wait_for_action()
+    assert dialog.calls == [("Headwaters daemon", "could not start the daemon")]
+    assert log.lines == [
+        "start daemon started",
+        "start daemon finished: could not start the daemon",
+    ]
 
 
 def test_a_successful_doctor_shows_the_report_in_a_dialog_exactly_once() -> None:
@@ -912,6 +970,9 @@ class _NoActions:
 
     def doctor(self) -> None:
         self.calls.append("doctor")
+
+    def start(self) -> None:
+        self.calls.append("start")
 
     def restart(self) -> None:
         self.calls.append("restart")

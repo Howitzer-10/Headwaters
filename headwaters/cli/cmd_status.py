@@ -1,6 +1,8 @@
 """``headwaters status``: scope, locks, walls with ETAs and the warm model.
 
-Reads only local state (rules, project rule, the shared SQLite database); no network call.
+The table describes the daemon that is running *now*, so the command asks that daemon first: a
+``/health`` answer on the API port that names the pid in ``daemon.json``. Nothing printed below is
+cached state presented as live - when the daemon does not answer, the command says so and stops.
 """
 
 import time
@@ -12,7 +14,8 @@ import typer
 from headwaters.cli import runtime
 from headwaters.cli.output import emit_json, fail, fmt_eta, make_console, table
 from headwaters.core.daemon_client import find_running
-from headwaters.core.daemon_control import start_daemon
+from headwaters.core.daemon_control import pid_alive, start_daemon
+from headwaters.core.daemon_info import read_info, remove_info
 from headwaters.core.quotas import wall_label
 from headwaters.core.rules import tier_order_label
 from headwaters.core.scope import ScopeDecision, ScopeError, paid_scopes_available, resolve_scope
@@ -29,6 +32,30 @@ DASHBOARD_FIX = (
     "Set dashboard.enabled: true in rules.yaml, or start the daemon by hand and read the "
     "dashboard port from `headwaters daemon-status`."
 )
+DAEMON_DOWN_FIX = "Start it with `headwaters start`, then run `headwaters status` again."
+
+
+def live_daemon() -> tuple[Any, str | None]:
+    """The client for the daemon that answers ``/health`` now, or ``None`` and a note.
+
+    Liveness is an actual ``/health`` probe on the API port that names the same pid - the test the
+    tray and every shim use - never the existence of ``daemon.json``. When the file survives the
+    process it names, it is removed here: a stale pid file must not keep faking a live daemon.
+    """
+    client = find_running()
+    if client is not None:
+        return client, None
+    return None, _clear_stale_info()
+
+
+def _clear_stale_info() -> str | None:
+    """Delete ``daemon.json`` when the pid it names is gone. Returns a line about what happened."""
+    info = read_info()
+    if info is None or pid_alive(info.pid):
+        return None
+    removed = remove_info(info.pid)
+    note = f"the process in daemon.json (pid {info.pid}) is gone"
+    return f"Removed a stale daemon.json: {note}." if removed else f"daemon.json is stale: {note}."
 
 
 def status_page_url(
@@ -137,12 +164,19 @@ def register(app: typer.Typer) -> None:
         """Show the scope in force, locks, walls with their reset times, and the warm model.
 
         With --open, do not print the table: start the daemon if it is not running and open the
-        dashboard page the daemon is serving.
+        dashboard page the daemon is serving. Without a daemon answering ``/health``, there is no
+        live status to show: the command says so and stops instead of printing cached state.
         """
         rt = runtime.load_runtime(as_json=as_json)
         if open_page:
             _open_status_page(rt, as_json=as_json)
             return
+        client, stale_note = live_daemon()
+        if client is None:
+            message = "The daemon is not running, so there is no live status to show."
+            if stale_note:
+                message = f"{message} {stale_note}"
+            fail("daemon_not_running", message, fix=DAEMON_DOWN_FIX, as_json=as_json)
         now = time.time()
         decision, scope_error = effective_scope(rt)
         locks = locks_in_force(rt, decision)

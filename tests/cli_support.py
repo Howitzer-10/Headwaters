@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from typer.testing import CliRunner, Result
 
-from headwaters.cli import runtime
+from headwaters.cli import cmd_status, runtime
 from headwaters.cli.main import app
 from headwaters.core import paths
 from headwaters.core.catalog.loader import SEED_RELATIVE_PATH, load_catalog
+from headwaters.core.daemon_info import DaemonInfo, DaemonPorts
 from headwaters.core.hardware.gpu import GpuInfo
 from headwaters.core.hardware.state import BatteryState, HardwareState, build_state
 from headwaters.core.rules import LocalTier
@@ -38,13 +40,30 @@ def gpu_state(total_gb: int = 16, on_battery: bool = False) -> HardwareState:
     return build_state(gpu, LocalTier(), BatteryState(True, on_battery, 80.0), profiles=profiles)
 
 
+def live_daemon() -> Any:
+    """A stand-in for ``find_running``: a daemon answers ``/health``, as it does in daily use."""
+    info = DaemonInfo(4242, 0.0, "test", DaemonPorts(4002, 4000, 4001))
+    return SimpleNamespace(info=info)
+
+
+def daemon_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``headwaters status`` see no daemon: nothing answers ``/health`` on the API port."""
+    monkeypatch.setattr(cmd_status, "find_running", lambda: None)
+
+
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hw: HardwareState | None = None) -> Path:
-    """Point Headwaters at ``tmp_path``, run from there, and fix the hardware snapshot."""
+    """Point Headwaters at ``tmp_path``, run from there, and fix the hardware snapshot.
+
+    ``headwaters status`` now asks the daemon before it prints anything, so the harness stands a
+    live one in by default: no test opens a socket, and the table tests keep testing the table.
+    A test for the daemon-is-down path calls ``daemon_down`` after this.
+    """
     monkeypatch.setenv(paths.HOME_ENV_VAR, str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("COLUMNS", raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cmd_status, "find_running", live_daemon)
     state = hw if hw is not None else gpu_state()
     monkeypatch.setattr(runtime, "hardware_state", lambda rules: state)
     return tmp_path

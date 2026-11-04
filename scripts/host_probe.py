@@ -192,7 +192,9 @@ def spawn_sleeper() -> dict[str, Any]:
     if sys.platform != "win32":
         child = subprocess.Popen(argv, start_new_session=True, **quiet)
         return {"pid": child.pid, "mode": "new_session"}
-    base = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED | NEW_GROUP | NO_WINDOW
+    # The same two flags daemon_control uses: a console of its own with no window at all.
+    # DETACHED_PROCESS is deliberately absent - on Windows 11 it opens a real terminal window.
+    base = 0x00000200 | 0x08000000  # NEW_GROUP | NO_WINDOW
     for mode, extra in (("breakaway", 0x01000000), ("no_breakaway", 0)):
         try:
             child = subprocess.Popen(argv, creationflags=base | extra, **quiet)

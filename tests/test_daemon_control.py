@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from headwaters.core import paths
+from headwaters.core import daemon_control, paths
 from headwaters.core.catalog.http import SourceError
 from headwaters.core.daemon_client import DaemonClient, DaemonError, find_running
 from headwaters.core.daemon_control import daemon_command, start_daemon, stop_daemon
@@ -442,3 +443,81 @@ def test_stop_without_force_never_kills() -> None:
     )
     assert result.outcome == "not_running"
     assert killed == []
+
+
+# ------------------------------------- how the daemon is detached from the terminal (no spawn)
+
+
+class FakePopen:
+    """Records the keywords each spawn attempt used, and can refuse the first attempt."""
+
+    def __init__(self, refuse: int = 0) -> None:
+        self.refuse = refuse
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, argv: Any, **kwargs: Any) -> Any:
+        self.calls.append({"argv": list(argv), **kwargs})
+        if len(self.calls) <= self.refuse:
+            raise OSError("a job object refused the breakaway")
+        return Child()
+
+
+def _windows_spawn(monkeypatch: pytest.MonkeyPatch, refuse: int = 0) -> FakePopen:
+    fake = FakePopen(refuse=refuse)
+    monkeypatch.setattr(daemon_control.sys, "platform", "win32")
+    monkeypatch.setattr(daemon_control.subprocess, "Popen", fake)
+    return fake
+
+
+def test_the_daemon_is_spawned_without_detached_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DETACHED_PROCESS is what makes Windows 11 show a blank terminal window for the daemon.
+
+    Measured on Windows 11 with Windows Terminal as the default terminal: every DETACHED_PROCESS
+    child of the probe got a console, and one new Windows Terminal window appeared for it -
+    CREATE_NO_WINDOW in the same call was ignored. GetConsoleWindow came back NULL, and no
+    window appeared, only for the combinations that leave DETACHED_PROCESS out.
+    """
+    fake = _windows_spawn(monkeypatch)
+    daemon_control._spawn_detached(daemon_control.daemon_command())
+    flags = fake.calls[0]["creationflags"]
+    assert flags & daemon_control._NO_WINDOW
+    assert flags & daemon_control._NEW_GROUP
+    assert flags & daemon_control._BREAKAWAY
+    assert not flags & daemon_control._DETACHED
+
+
+def test_a_windowless_child_cannot_write_to_a_console_it_cannot_see(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _windows_spawn(monkeypatch)
+    daemon_control._spawn_detached(daemon_control.daemon_command())
+    kwargs = fake.calls[0]
+    for stream in ("stdin", "stdout", "stderr"):
+        assert kwargs[stream] is subprocess.DEVNULL
+    assert kwargs["close_fds"] is True
+    assert kwargs["env"]["PYTHONUTF8"] == "1"
+
+
+def test_a_refused_breakaway_is_retried_with_plain_detach_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job that forbids breakaway must not turn into "the daemon will not start"."""
+    fake = _windows_spawn(monkeypatch, refuse=1)
+    daemon_control._spawn_detached(daemon_control.daemon_command())
+    assert len(fake.calls) == 2
+    first = fake.calls[0]["creationflags"]
+    assert first == daemon_control._DAEMON_FLAGS | daemon_control._BREAKAWAY
+    second = fake.calls[1]["creationflags"]
+    assert second == daemon_control._DAEMON_FLAGS
+    assert not second & daemon_control._DETACHED
+
+
+def test_elsewhere_the_daemon_gets_a_new_session_and_no_windows_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakePopen()
+    monkeypatch.setattr(daemon_control.sys, "platform", "linux")
+    monkeypatch.setattr(daemon_control.subprocess, "Popen", fake)
+    daemon_control._spawn_detached(daemon_control.daemon_command())
+    assert fake.calls[0]["start_new_session"] is True
+    assert "creationflags" not in fake.calls[0]

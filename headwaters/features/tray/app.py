@@ -5,8 +5,8 @@ the notifier, the doctor and restart callables, the dialog, the log writer and t
 tests therefore drive the whole app - every action, every label, the icon colour - without a
 notification area, a browser, a message box or a real daemon.
 
-The doctor and restart actions run on a worker thread and report in a native message box, not
-only a balloon tip: a toast is not durable on Windows 11, and a report nobody sees is no report.
+The doctor, start and restart actions run on a worker thread and report in a native message box,
+not only a balloon tip: a toast is not durable on Windows 11, and a report nobody sees is no report.
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ class TrayApp:
         notifier: Callable[[str], None] | None = None,
         doctor: Callable[[], str] | None = None,
         restarter: Callable[[], str] | None = None,
+        starter: Callable[[], str] | None = None,
         dialog: Callable[[str, str], None] | None = None,
         logger: Callable[[str], None] | None = None,
         client: TrayClient | None = None,
@@ -59,6 +60,7 @@ class TrayApp:
         self._notifier = notifier
         self._doctor = doctor if doctor is not None else _run_doctor
         self._restarter = restarter if restarter is not None else _restart_daemon
+        self._starter = starter if starter is not None else _start_daemon
         # dialog(title, message) where the platform has a real one; else the toast is all there is.
         self._dialog = dialog if dialog is not None else _default_dialog()
         self._logger = logger if logger is not None else log_line
@@ -153,6 +155,18 @@ class TrayApp:
             "could not restart the daemon",
         )
 
+    def start(self) -> None:
+        """Start a daemon that is not running (a red icon), off the message loop too.
+
+        Start and Restart differ in one call only: there is nothing to stop first.
+        """
+        self._start_action(
+            "start daemon",
+            RESTART_TITLE,
+            self._start_and_refresh,
+            "could not start the daemon",
+        )
+
     def wait_for_action(self, timeout_s: float = 5.0) -> bool:
         """Join the worker an action started. False if it is still running after ``timeout_s``."""
         worker = self._action_thread
@@ -230,6 +244,12 @@ class TrayApp:
     def _restart_and_refresh(self) -> str:
         try:
             return self._restarter()
+        finally:
+            self.refresh()
+
+    def _start_and_refresh(self) -> str:
+        try:
+            return self._starter()
         finally:
             self.refresh()
 
@@ -375,6 +395,14 @@ def _doctor_summary(report: Any) -> str:
         lines.append(f"... and {hidden} more")
     noun = "check" if len(attention) == 1 else "checks"
     return "\n".join([*lines, "", f"{len(attention)} {noun} need attention"])
+
+
+def _start_daemon() -> str:
+    """Start the daemon: the same call the CLI makes (HDW-201), with room for a cold start."""
+    from headwaters.core.daemon_control import start_daemon
+
+    started = start_daemon(timeout_s=45)
+    return "daemon started" if getattr(started, "ok", False) else "the daemon did not start"
 
 
 def _restart_daemon() -> str:

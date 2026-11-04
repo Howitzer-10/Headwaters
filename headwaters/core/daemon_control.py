@@ -28,10 +28,20 @@ __all__ = [
 ]
 
 DAEMON_MODULE = "headwaters.daemon"
-_DETACHED = 0x00000008  # DETACHED_PROCESS
+_DETACHED = 0x00000008  # DETACHED_PROCESS: NOT used, see below - it opens a console window
 _NEW_GROUP = 0x00000200  # CREATE_NEW_PROCESS_GROUP
-_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW: a console of its own, with no window
 _BREAKAWAY = 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+# The daemon must own a console that no window is attached to, and that the terminal it was
+# started from cannot close. Two measured facts decide the flags (Windows 11, Windows Terminal as
+# the default terminal, evidence in the commit message):
+#   * DETACHED_PROCESS and CREATE_NO_WINDOW are mutually exclusive: with DETACHED_PROCESS set,
+#     CREATE_NO_WINDOW is ignored and the child is given a console anyway - which Windows Terminal
+#     then shows as a blank window. So DETACHED_PROCESS *alone* still opens a window, and closing
+#     it kills the daemon with it.
+#   * CREATE_NO_WINDOW on its own gives the child a console with no window at all: nothing on
+#     screen, and its own console, so closing the terminal that started it does not touch it.
+_DAEMON_FLAGS = _NO_WINDOW | _NEW_GROUP
 START_TIMEOUT_S = 25.0
 STOP_TIMEOUT_S = 15.0
 
@@ -67,10 +77,20 @@ def daemon_command(port: int | None = None) -> list[str]:
     return argv
 
 
+def _detach_flags() -> int:
+    """The creation flags for the daemon on Windows: no window, its own group, its own console.
+
+    Never ``DETACHED_PROCESS`` as well: see ``_DAEMON_FLAGS``.
+    """
+    return _DAEMON_FLAGS
+
+
 def _spawn_detached(argv: Sequence[str]) -> subprocess.Popen[bytes]:
     env = {**os.environ, "PYTHONUTF8": "1"}
     if sys.platform == "win32":
-        flags = _DETACHED | _NEW_GROUP | _NO_WINDOW
+        flags = _detach_flags()
+        # The daemon has a console with no window, so nothing may write to it: all three standard
+        # handles are DEVNULL, or the daemon dies on its first write.
         # A host that runs the shim in a Job Object (kill-on-close) would reap the daemon with it;
         # break away when the job allows it, and fall back when it does not.
         for extra in (_BREAKAWAY, 0):

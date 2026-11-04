@@ -1,9 +1,13 @@
 """The tray menu, as data (HDW-504).
 
 Exactly these items, in this order: the status line, Scope, Private Mode, Keys, Open dashboard,
-Doctor, Restart daemon, Quit. Building the real ``pystray.Menu`` is one call at the end, so the
-menu can be tested - and every label with it - without a notification area, and without pystray
-being imported at all.
+Doctor, Start daemon, Restart daemon, Quit. Building the real ``pystray.Menu`` is one call at the
+end, so the menu can be tested - and every label with it - without a notification area, and
+without pystray being imported at all.
+
+Start exists because a red icon (no daemon) used to offer only Restart, which is the wrong word
+for starting something that is not there: Start is enabled while the daemon is down and greyed
+out while it is up.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ class TrayActions(Protocol):
     def open_dashboard(self) -> None: ...
 
     def doctor(self) -> None: ...
+
+    def start(self) -> None: ...
 
     def restart(self) -> None: ...
 
@@ -99,6 +105,9 @@ def menu_entries(state: TrayState, actions: TrayActions) -> tuple[MenuEntry, ...
             default=True,
         ),
         MenuEntry(text="Doctor", action=actions.doctor),
+        # A red icon means there is nothing to restart: Start is the honest word, and it is
+        # greyed out once a daemon is already answering.
+        MenuEntry(text="Start daemon", action=actions.start, enabled=not up),
         MenuEntry(text="Restart daemon", action=actions.restart),
         MenuEntry(text="Quit", action=actions.quit),
     )

@@ -6,11 +6,21 @@ from pathlib import Path
 
 import pytest
 
+from headwaters.cli import cmd_status
+from headwaters.core.daemon_info import DaemonInfo, DaemonPorts, read_info, write_info
 from headwaters.core.state import open_database
 from headwaters.core.state_limits import record_wall
-from tests.cli_support import home, invoke, invoke_json, seed_models, write_rules
+from tests.cli_support import (
+    daemon_down,
+    home,
+    invoke,
+    invoke_json,
+    seed_models,
+    write_rules,
+)
 
 FAR_FUTURE = 4_102_444_800.0  # 2100-01-01
+INFO = DaemonInfo(4321, 1.0, "0.0.0", DaemonPorts(4002, 4000, 4001))
 
 
 @pytest.fixture
@@ -116,3 +126,61 @@ def test_status_airplane_mode_is_a_lock(cli_home: Path) -> None:
     _, data = invoke_json("status")
     assert data["airplane"] is True
     assert "airplane" in data["locks"]
+
+
+# ------------------------------------------------------- the daemon that is not there (honesty)
+
+
+def test_status_says_the_daemon_is_not_running_and_prints_no_table(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing answers /health, so cached state must not be presented as the live status."""
+    daemon_down(monkeypatch)
+    record_wall(open_database(), "model:vendor/free:free", "rate_limit", until=FAR_FUTURE)
+    seed_models(cli_home)
+    result = invoke("status")
+    output = result.stdout + result.stderr
+    assert result.exit_code == 1
+    assert "not running" in output
+    for line in ("Effective scope", "Locks in force", "Walls:", "Warm model:"):
+        assert line not in output
+    assert "qwen:14b" not in output
+
+
+def test_status_json_when_the_daemon_is_down_is_an_error_document(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    daemon_down(monkeypatch)
+    result, data = invoke_json("status")
+    assert result.exit_code == 1
+    assert data["ok"] is False
+    assert data["error"]["code"] == "daemon_not_running"
+    assert "walls" not in data
+    assert "warm_models" not in data
+    assert "headwaters start" in data["error"]["fix"]
+
+
+def test_a_stale_daemon_json_is_removed_and_reported(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pid file that outlives its process is deleted, not left to fake a healthy status."""
+    daemon_down(monkeypatch)
+    monkeypatch.setattr(cmd_status, "pid_alive", lambda pid: False)
+    write_info(INFO)
+    result = invoke("status")
+    assert result.exit_code == 1
+    assert "stale daemon.json" in result.stdout + result.stderr
+    assert read_info() is None
+
+
+def test_daemon_json_for_a_living_pid_is_left_alone(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unanswering daemon whose process is still alive is not ours to erase."""
+    daemon_down(monkeypatch)
+    monkeypatch.setattr(cmd_status, "pid_alive", lambda pid: True)
+    write_info(INFO)
+    invoke("status")
+    assert read_info() is not None
+    again = invoke("status")
+    assert "stale" not in again.stdout + again.stderr
