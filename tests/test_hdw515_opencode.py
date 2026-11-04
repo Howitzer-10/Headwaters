@@ -162,7 +162,8 @@ def test_the_go_listing_keeps_the_models_the_plan_includes() -> None:
     http = FakeHttp({("GET", GO_LISTING): {"data": [listing(id="iceman-contributor-free")]}})
     models = sources.registry_models(http, provider("opencode-go"), "key-123")
     assert [m.id for m in models] == ["opencode-go/iceman-contributor-free"]
-    assert models[0].tier == "paid"
+    # D23: the Go plan's $0 ids consume the subscription allowance, so they are plan access.
+    assert models[0].tier == "free_cloud"
 
 
 def test_an_unreachable_filter_never_calls_a_model_the_listing_excludes() -> None:

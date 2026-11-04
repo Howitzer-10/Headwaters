@@ -64,9 +64,12 @@ def store(registry: Registry, **env: str) -> KeyStore:
 def test_seed_registers_every_ticket_provider_with_a_tier() -> None:
     registry = Registry.from_catalog(load_catalog(SEED_PATH))
     assert {p.name: (p.env_var, p.tier) for p in registry} == EXPECTED
-    # HDW-519 rows record `verify: false` plus a note naming the probe that could not be run.
+    # HDW-519 rows record `verify: false` plus a note naming the probe that could not be run;
+    # kilo joins them under D18 until the stored key is replaced (a keyless probe does work).
     assert all(p.base_url.startswith("https://") for p in registry)
-    assert all(p.verify for p in registry if p.name not in {"gemini", "groq", "cerebras", "cohere"})
+    unverified = {p.name for p in registry if not p.verify}
+    assert unverified == {"gemini", "groq", "cerebras", "cohere", "kilo"}
+    assert all(p.note for p in registry if not p.verify)
 
 
 def test_no_paid_provider_is_declared_free_cloud_by_accident() -> None:

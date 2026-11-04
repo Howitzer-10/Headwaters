@@ -79,6 +79,9 @@ class State:
 
 
 def _rules(**local: Any) -> Rules:
+    # D21 made ``off`` the real default. These tests exercise the ``auto`` tick, so they ask for
+    # it explicitly; the default itself is pinned by ``test_keepwarm.py``.
+    local.setdefault("keep_warm_model", "auto")
     return Rules.model_validate({"tiers": {"local": local}})
 
 
@@ -109,10 +112,10 @@ def test_heartbeat_default_matches_today() -> None:
         "heartbeat_interval_s": 300.0,
         "heartbeat_idle_backoff_s": 60.0,
     }
-    today = _warm(_rules(), FakeHttp(["qwen:14b"]))
+    today = _warm(_rules(keep_warm_model="auto"), FakeHttp(["qwen:14b"]))
     http_off = FakeHttp(["qwen:14b"])
     off = _warm(
-        _rules(**heartbeat_keys),
+        _rules(keep_warm_model="auto", **heartbeat_keys),
         http_off,
         last_request=lambda: 0.0,  # ancient traffic: an off heartbeat must ignore it
         clock=lambda: 1e9,

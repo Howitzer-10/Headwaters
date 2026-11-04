@@ -147,11 +147,14 @@ class LocalTier(_Model):
             "number."
         ),
     )
-    keep_warm_model: str = "auto"
-    # HDW-518: the keep-warm heartbeat. The tick itself is unchanged and stays on whenever a
-    # model is loaded (``keep_warm_model: auto``); what is opt-in is the heartbeat mode: a
-    # configurable interval, idle backoff, and a ``/api/ps`` ``expires_at`` on the result.
-    # ``0`` means derive the interval (``keep_alive``/2) / never back off.
+    keep_warm_model: str = "off"
+    # Keep-warm is opt-in (D21): ``off`` disables the tick, so a model unloads after
+    # ``keep_alive`` once the last request is done. ``auto`` re-arms whatever ``/api/ps`` already
+    # lists (it never loads one) and keeps doing so forever once a model has been used, which is
+    # what holds VRAM; any other value names the model to keep warm.
+    # HDW-518 adds an opt-in heartbeat mode on top: a configurable interval, idle backoff, and a
+    # ``/api/ps`` ``expires_at`` on the result. ``0`` means derive the interval
+    # (``keep_alive``/2) / never back off.
     keep_warm_heartbeat: bool = False
     heartbeat_interval_s: float = Field(default=0.0, ge=0)
     heartbeat_idle_backoff_s: float = Field(default=0.0, ge=0)

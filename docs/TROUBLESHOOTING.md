@@ -49,16 +49,19 @@ out. The model has to be loaded into VRAM before it can stream: the executor all
 `executor.local_cold_first_token_s` (240 s) for that first token and
 `executor.local_warm_first_token_s` (60 s) once it is resident, so a cold call that fails is usually
 a load that is slower than 240 s, not a broken model. `local.keep_alive` (default `30m`) keeps the
-model resident between calls and `local.keep_warm_model` keeps one model warm on purpose. Give
+model resident between calls and `local.keep_warm_model` keeps one model warm on purpose — off by
+default, so nothing is kept warm unless you ask (see below). Give
 `keep_alive` a unit (`30m`, `120s`): Ollama rejects a quoted bare number, so a quoted `"120"` is
 stored as `120s` when the file is read, and a bare YAML number (`120`) is rejected with that hint.
 Check `headwaters models list` for what is loaded, and the GPU row in `headwaters doctor` for a card
 that is busy with something else before blaming the timeout.
 
-The keep-warm tick runs every half `keep_alive` and pings whatever Ollama already has loaded, so on
-a machine that is used regularly the model usually stays resident with nothing to configure. Three
-keys make that a deliberate heartbeat; all are off by default, and off means the tick behaves
-exactly as it did before HDW-518:
+With `local.keep_warm_model: auto` set, the keep-warm tick runs every half `keep_alive` and pings
+whatever Ollama already has loaded. Keep-warm is opt-in (`off` by default, D21): with `off` no tick
+runs, the model unloads after `keep_alive`, and the next call is a cold load. Set `auto`, name a
+model, or turn on the heartbeat if you want a model kept warm. Three keys make that a deliberate
+heartbeat; all are off by default, and with `keep_warm_model: auto` the heartbeat off means the tick
+behaves exactly as it did before HDW-518:
 
 - `local.keep_warm_heartbeat: true` turns the heartbeat on: the interval below, the idle backoff,
   and the `expires_at` the daemon logs after a successful ping.
@@ -70,9 +73,9 @@ exactly as it did before HDW-518:
   seconds (`0` = never pause). It is a pause, not a shutdown: the next request resumes it. A machine
   that has never routed a request counts as idle.
 
-A ping cannot evict the model a request is using. With `keep_warm_model: auto` only loaded models
-are re-armed; with a named model the ping is skipped while a different model is loaded, because a
-12 GB card has room for one. That also means a named model is loaded on an empty device, which is
+A ping cannot evict the model a request is using. With `keep_warm_model: auto` (which you have to
+set) only loaded models are re-armed; with a named model the ping is skipped while a different model
+is loaded, because a 12 GB card has room for one. That also means a named model is loaded on an empty device, which is
 the one case the tick warms a cold model; `auto` never loads one, since nothing records the model
 last used.
 

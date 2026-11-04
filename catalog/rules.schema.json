@@ -502,7 +502,7 @@
           "type": "boolean"
         },
         "keep_warm_model": {
-          "default": "auto",
+          "default": "off",
           "title": "Keep Warm Model",
           "type": "string"
         },

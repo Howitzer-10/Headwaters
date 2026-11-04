@@ -50,6 +50,9 @@ class State:
 
 
 def _rules(**local: Any) -> Rules:
+    # D21 made ``off`` the real default. These tests exercise the ``auto`` behaviour, so they ask
+    # for it explicitly rather than leaning on whatever the model happens to default to.
+    local.setdefault("keep_warm_model", "auto")
     return Rules.model_validate({"tiers": {"local": local}})
 
 
@@ -149,6 +152,17 @@ def test_can_be_switched_off(setting: str) -> None:
     http = FakeHttp(["qwen:14b"])
     result = _warm(_rules(keep_warm_model=setting), http).tick()
     assert result.reason == "disabled"
+    assert http.calls == []
+
+
+def test_keep_warm_is_off_by_default() -> None:
+    assert Rules().tiers.local.keep_warm_model == "off"
+
+
+def test_the_default_off_disables_the_tick() -> None:
+    http = FakeHttp(["qwen:14b"])
+    result = _warm(Rules(), http).tick()
+    assert (result.action, result.reason) == ("skipped", "disabled")
     assert http.calls == []
 
 

@@ -19,12 +19,16 @@
 | D15 | Beta tester promise: **everyone on the beta tester list gets Headwaters Pro free if a free/Pro split ships at 1.0.** HDW-407's packet offers free Pro or a discount for testers; the free option is chosen, the discount is not promised, and the list itself is a release-gate owner step. | Decided (2026-11-10, HDW-407) |
 | D16 | Two stages: **Stage 1 is the owner running the current build from source, dogfooding it and functionally testing it, with ticket work continuing through Phase 7; Stage 2 is distribution and sale and starts only when Phase 7 is complete.** No public beta, no closed alpha and no 0.x release in Stage 1, and the release gate stays red and unmodified until Stage 2 begins. | Decided (2026-11-03, owner) |
 | D17 | Retries inside one request: **a request never picks again a model that failed it, and the ladder emits tiers round-robin so every tier takes one attempt before any tier takes a second.** A failure lives on the run and never writes a wall, a cloud provider with no key fast-fails for the whole request, and the terminal error lists the attempts and names a healthy tier that was never tried. | Decided (2026-11-03, HDW-513) |
-| D18 | Provider identity: **every surface (CLI, dashboard page, tray menu) reads one registry of plain, lowercase provider names, and a person is never shown an underlying environment variable name.** The registry is `KeyStore.providers()`; it currently holds `anthropic`, `openai`, `openrouter`, `nvidia`, `huggingface`, `mistral`, `pollinations`, `opencode`, `opencode-go` and keyless `ollama` (whatever `providers()` returns is the list; this branch's registry also carries a `kilo` row from the catalog work, FU-503-2), and a provider added there appears on every surface without a second list. `HF_TOKEN` and `NVIDIA_API_KEY` are internal mappings, accepted as input at most, and never printed. No surface keeps its own provider list or label, and `keys set` rejects an unknown name. Why: a person thinks in products, not environment variables, and two surfaces drifting on naming is a support burden. Implemented by HDW-514 (registry owner), HDW-503 (dashboard) and HDW-504 (tray). | Decided (owner, HDW-503 / 504 / 514 packets) |
+| D18 | Provider identity: **every surface (CLI, dashboard page, tray menu) reads one registry of plain, lowercase provider names, and a person is never shown an underlying environment variable name.** The registry is `KeyStore.providers()`; it currently holds `anthropic`, `openai`, `openrouter`, `nvidia`, `huggingface`, `mistral`, `pollinations`, `opencode`, `opencode-go`, `kilo` and keyless `ollama` (whatever `providers()` returns is the list), and a provider added there appears on every surface without a second list. `kilo` is an intended provider, not a stray catalog row: its catalog row is `verify: false` pending a keyed probe of whether its free model is reachable outside the Kilo client (keyless discovery and a keyless call both work; the owner's stored key returns 401 INVALID_TOKEN, so clearing or replacing it is an owner action). `HF_TOKEN` and `NVIDIA_API_KEY` are internal mappings, accepted as input at most, and never printed. No surface keeps its own provider list or label, and `keys set` rejects an unknown name. Why: a person thinks in products, not environment variables, and two surfaces drifting on naming is a support burden. Implemented by HDW-514 (registry owner), HDW-503 (dashboard) and HDW-504 (tray). | Decided (owner, HDW-503 / 504 / 514 packets) |
 | D19 | "Paid" vocabulary: **the word is never written bare, because this product uses it for two different things.** A **paid tier** is a provider whose use costs the person money, gated by the local `features.paid_scopes` flag; that is the sense HDW-503 / 504 / 514 already use. A **paid product** is a capability sold to the person as part of the app (for example intelligent paid routing); that is a different system, because `features.paid_scopes` is a local boolean in `rules.yaml`, not an entitlement check, and selling a capability needs a real entitlement or licence check, which does not exist yet. Code, docs, CLI output and UI text qualify which sense they mean (for example `paid tier` or `licensed feature`), so a grep can tell them apart. Why: the two senses will otherwise be conflated exactly the way environment-variable names and provider names were before D18, and an entitlement bug in this area spends real money. | Decided (2026-11-03, owner) |
 | D20 | Behaviour over advertisement: **a capability is recorded from an observed tool call, not from what the provider advertises**; `models.overrides` in `rules.yaml` is applied **last**, after catalog and scoring; the gateway answer footer is **opt-in and off by default**. | Decided (2026-11-03, HDW-512) |
+| D21 | Keep-warm is opt-in: **`tiers.local.keep_warm_model` defaults to `off`, not `auto`.** `auto` re-arms whatever `/api/ps` already lists (it never loads one), so once a local model has been used the tick keeps re-arming it forever and VRAM is held indefinitely; with `off` the model unloads after `keep_alive` once the last request is done. A person who wants warmth sets `auto`, names a model, or turns on `keep_warm_heartbeat`. A `rules.yaml` that already carries `keep_warm_model: auto` is left alone (the first-run writer has already persisted it there). Why: the owner's words — "don't touch my GPU unless I ask." | Decided (2026-11-03, owner) |
+| D22 | Dashboard CSRF scope, accepted: **the token defends against a page on another origin, not against a process on the same machine.** Any local process that can read the loopback page can also read the token, so it is not a defence against local software. Accepted for a single-user loopback tool; a second user on one machine is out of scope until the listening socket carries an OS-level ACL. Why: the threat model is cross-origin web pages, and claiming more would imply a boundary the socket does not have. Closes FU-503-1. | Decided (2026-11-03, owner) |
+| D23 | A zero price is not free access: **a model listed at $0 whose use consumes an entitlement or allowance is `free_access: "plan"`, never `"all"`.** `"all"` means any caller with a key can use it at no cost and with no allowance. Applied to the OpenCode Go provider row, whose two $0 ids (`beam-free`, `iceman-contributor-free`) are included in the Go plan; the catalog carries `free_access` per provider, not per model. `plan` classifies as free in `_registry_tier` (it returns `free_cloud` for both `"all"` and `"plan"`), and for a $0 row this carries no billing risk; FU-519-4 stays open for providers whose `plan` scope can actually be billed. Why: `"all"` would claim the use is free of any allowance, which is false for a subscription. Closes FU-515-12. | Decided (2026-11-03, owner) |
+| D24 | `licence` is documentation only, permanently: **no runtime path reads it and no non-commercial gate will be built.** A gate would need commercial intent from the caller, which the catalog cannot supply, so `licence` stays a note to a person. `test_licence_is_documentation_only` stays as it is. Why: a gate built on a field that cannot see the caller's intent would be theatre and would risk blocking legitimate use. Closes FU-519-8. | Decided (2026-11-03, owner) |
 
 Numbering note: decision numbers are permanent — never reused, renumbered or handed to another
-decision — and this file is the consolidated copy of D1-D20. The owner resolved the D17 collision:
+decision — and this file is the consolidated copy of D1-D24. The owner resolved the D17 collision:
 D17 is HDW-513's per-request failure memory and tier turn-taking, D20 is HDW-512's behaviour over
 advertisement, and `howitzer-10-refactored-umbrella` was not renumbered (that branch keeps its own text).
 
@@ -79,7 +83,7 @@ Spec 2026-07-28 deprecates roots and sampling and removes server-initiated reque
 - **Elicitation (HDW-205, HDW-206):** spend confirmation and scope loosening use the SDK's multi-round-trip mechanism where the host supports it. Otherwise the tool returns a structured "confirmation required" result with the exact follow-up call, and nothing is spent or loosened until the user confirms. Scope loosening stays user-only.
 - **Tasks:** keep the `job_id` pattern as the baseline (HDW-206). Return an MCP Tasks handle only when the client declares the Tasks extension.
 
-### D10 detail: escalation in core
+## D10 detail: escalation in core
 
 **Decision.** Core adds one bounded retry, only when verification was mandatory
 (`verify_required`: below the floor, optimistic, best-effort, local below the floor) and failed.
@@ -107,7 +111,7 @@ of the verification-v2 gain, re-scope ★ verification v2; do not weaken core.
 
 **Refinement (2026-11-01, FU-129-2; the owner accepted the triage recommendation):** for an agentic request the retry also keeps tool-call strength. A candidate qualifies only if its task score is above the failed model's **and** its `agentic_tools` score is not below it. Not-below, rather than higher, so a good escalation is not lost. With none left the answer is flagged `verify_failed` and says why. Ticket HDW-154.
 
-### D11 detail: sticky sessions in core
+## D11 detail: sticky sessions in core
 
 **Decision.** On the next turn, core puts the session's last *successful* model first while it is
 usable: no wall, still in scope, passes the hard filter, and still meets the floor (or is the same
@@ -133,7 +137,7 @@ good enough).
 **Revisit** if HDW-305 shows sessions stuck on a degrading free tier, or when HDW-607 lands (★ must
 extend the core rule, not replace it).
 
-### D12 detail: `headwaters_think` in 0.1
+## D12 detail: `headwaters_think` in 0.1
 
 **Decision.** Ship `headwaters_think` in Beta 0.1 as core. It is a read-only tool that sends the
 question (and optional paths) to the best reasoning-capable model in the effective scope with
@@ -166,7 +170,7 @@ support in 0.1.
 **Revisit** at the Beta 0.2 gate (HDW-509) if hosts mostly call `think` for work that
 `headwaters_do` should do.
 
-### D14 detail: daemon package boundary
+## D14 detail: daemon package boundary
 
 **Decision.** FU-124-1 / FU-TRI-3 found that `.importlinter` lets only `headwaters.gateway` import
 `fastapi` / `starlette` and only `headwaters.mcp` import `mcp`, while the repo layout put the daemon

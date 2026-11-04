@@ -3,8 +3,9 @@
 One ``tick`` pings Ollama's native ``/api/chat`` with an empty ``messages`` list, which loads (or
 re-arms) a model without generating anything and sends no prompt text. Rules:
 
-- ``tiers.local.keep_warm_model``: ``auto`` pings the models Ollama already has loaded (it never
-  loads a model on its own); ``off`` disables; any other value names the model to keep warm.
+- ``tiers.local.keep_warm_model``: ``off`` (the default, D21) disables the tick; ``auto`` pings
+  the models Ollama already has loaded (it never loads a model on its own); any other value names
+  the model to keep warm.
 - An explicit model is only pinged when it is already loaded or nothing else is, so a background
   ping can never evict the model a request is using (12 GB: one resident model). That also means an
   explicit model *does* load on a cold device, which is the one way the tick can warm one; ``auto``

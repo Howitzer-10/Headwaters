@@ -144,14 +144,18 @@ def test_unmigrated_catalog_derives_todays_labels() -> None:
 
 def test_unmigrated_catalog_model_tiers_are_unchanged() -> None:
     for name in TODAYS_LABELS:
-        if name == "mistral":
-            continue  # the owner-approved none -> plan migration: its own test asserts the change
+        if name in {"mistral", "opencode-go"}:
+            continue  # deliberate migrations, each asserted below
         row = provider(name)
         assert tiers(stripped(row)) == tiers(row), name
-    # Every other row keeps today's routing; mistral is the one deliberate behaviour change.
+    # Every other row keeps today's routing. Two migrations are deliberate: mistral's
+    # none -> plan (HDW-519) and opencode-go's none -> plan (D23, a $0 id that spends the plan).
     mistral = stripped(provider("mistral"))
     assert tiers(mistral) == ["paid", "paid"]
     assert tiers(provider("mistral")) == ["free_cloud", "free_cloud"]
+    go = stripped(provider("opencode-go"))
+    assert tiers(go) == ["paid", "paid"]
+    assert tiers(provider("opencode-go")) == ["free_cloud", "free_cloud"]
 
 
 def test_old_build_rejects_new_catalog_fields() -> None:
@@ -187,6 +191,29 @@ def test_kilo_states_both_facts() -> None:
     label = format_access(kilo.charges_money, kilo.free_access)
     assert SELLS_USAGE in label
     assert "marked" in label
+
+
+def test_kilo_is_unverified_pending_a_keyed_probe() -> None:
+    """D18: keyless discovery and a keyless call work, but the owner's stored key is dead."""
+    kilo = provider("kilo")
+    assert kilo.verify is False
+    note = kilo.note or ""
+    assert "401" in note
+    assert "INVALID_TOKEN" in note
+
+
+def test_a_zero_price_plan_model_is_plan_never_all() -> None:
+    """D23: a $0 id whose use spends an allowance is plan access, not open access."""
+    go = provider("opencode-go")
+    assert (go.charges_money, go.free_access, go.tier) == (True, "plan", "paid")
+    free_ids = {"data": [{"id": "beam-free", **TEXT}, {"id": "iceman-contributor-free", **TEXT}]}
+    http = FakeHttp({("GET", go.models_url): free_ids})
+    models = sources.registry_models(http, go, "k-abcdef123456")
+    assert [m.id for m in models] == [
+        "opencode-go/beam-free",
+        "opencode-go/iceman-contributor-free",
+    ]
+    assert [m.tier for m in models] == ["free_cloud", "free_cloud"]
 
 
 def test_free_tier_provider_routes_free() -> None:

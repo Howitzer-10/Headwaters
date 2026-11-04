@@ -15,6 +15,7 @@ Every follow-up from every report ends up in exactly one row here, with one of t
 
 | FU id | Question | Options | Raised |
 | --- | --- | --- | --- |
+| FU-503-3 | The stored `KILO_API_KEY` returns 401 `INVALID_TOKEN` while the identical keyless request answers 200. Clear it or replace it? | Clear the stored key (the keyless free path keeps working) or replace it with a valid Kilo key; Headwaters works either way | 2026-11-03 |
 
 ## Ledger
 
@@ -155,6 +156,15 @@ Every follow-up from every report ends up in exactly one row here, with one of t
 | FU-TRI-6 | HDW-141 report | gap | Unmet accept-when item: not verified on a fresh Windows checkout. | done | The windows-latest CI jobs check out fresh and are green (run 41294994373). | 2026-11-01 |
 | FU-TRI-7 | HDW-208 report | bug | The report said `Commit: uncommitted` although the work was committed. | done | Report fixed to `949ad02` on 2026-11-01. | 2026-11-01 |
 | FU-TRI-8 | Phase 2 review | gap | The backlog has no Phase 2 review-gate ticket, though the workflow requires a gate at the end of each phase. | done | Review run on 2026-11-01 and written to `docs/PHASE2_REVIEW.md` (GO for Phase 3). | 2026-11-01 |
+| FU-503-1 | HDW-503 | risk | The dashboard CSRF token can be read by any local process that can read the loopback page, so it defends against another origin, not against local software. | done | D22 accepts that scope for a single-user loopback tool: a second user on one machine is out of scope until the listening socket carries an OS-level ACL. | 2026-11-03 |
+| FU-503-2 | HDW-503 | risk | The registry carries a `kilo` row that D18 did not name, so it read as a stray catalog row from the catalog work. | done | D18 now names `kilo` as an intended provider. Its catalog row stays `verify: false` pending a keyed probe: keyless discovery and a keyless call both answer 200 (routed to `stealth/glyph-cluster`, cost 0), but the stored key returns 401 `INVALID_TOKEN` (FU-503-3). No free-limit claims added for kilo. | 2026-11-03 |
+| FU-503-3 | HDW-503 | owner | The owner's stored Kilo key is dead: `KILO_API_KEY` is rejected with HTTP 401 `INVALID_TOKEN` ("Your authentication token is invalid. Please sign in again.") while the identical keyless request answers 200. | owner | Clear or replace `KILO_API_KEY` in `C:\Projects\Headwaters\.env` — the owner's file, not edited by this session, and the value is never printed. The `kilo` row stays `verify: false` until a keyed call succeeds. | 2026-11-03 |
+| FU-515-12 | HDW-515 | risk | Two OpenCode Go ids are listed at $0, and the catalog classified the whole Go row as not free, so the $0 rows were neither offered as free nor recorded as allowance-backed. | done | D23: a model listed at $0 whose use consumes an entitlement or allowance is `free_access: "plan"`, never `"all"`. The `opencode-go` row is now `plan`; `plan` still classifies as free (`free_cloud` in `_registry_tier`), and FU-519-4 stays open for plan scopes that can actually be billed. | 2026-11-03 |
+| FU-515-13 | HDW-515 report | doc | The report's "two Go `$0` ids are not reclassified as free here" and its 429/app-only reading are now stale: the Go probe shows `beam-free` 200 at cost 0 with `billing_source: go` and `iceman-contributor-free` 400 on the workspace Privacy setting, so neither Go id is 429 or app-only (the 429 covers only the Console/Zen `-free` ids). | done | Reports are immutable, so the report text stands; the correction is carried by D23, `ASSUMPTIONS.md` A-OC-3, `SDK_FACTS.md` and `PROVIDERS.md`, and this row is the record. | 2026-11-03 |
+| FU-518-4 | HDW-518 | gap | Wiring OS idle (`GetLastInputInfo`) into `KeepWarm._idle()` was considered, so the heartbeat would also pause when nobody is at the keyboard. | dropped | Rejected by the owner on 2026-11-03: keep-warm is now opt-in (D21), so a person who turned it on asked for it. Do not wire OS idle into the heartbeat. | 2026-11-03 |
+| FU-519-8 | HDW-519 | gap | `licence` could have become a non-commercial gate. | dropped | D24: `licence` is documentation only, permanently. No runtime path reads it and no gate will be built; a gate would need commercial intent from the caller, which the catalog cannot supply. `test_licence_is_documentation_only` stays as it is. | 2026-11-03 |
+| FU-520-4 | HDW-520 | doc | `docs/DECISIONS.md` mixes `##` (D7-D9, D15-D17, D20) and `###` (D10-D12, D14) detail headings. | done | Every detail section normalised to `##` on 2026-11-03. | 2026-11-03 |
+| FU-520-5 | HDW-520 | doc | `docs/reports/HDW-503.md:177` says D16/D17 are absent, which is stale. | done | Reports are immutable, so the stale claim stands in the report; D16 and D17 exist in `docs/DECISIONS.md` and this row is the record. | 2026-11-03 |
 
 ## Triage log
 
