@@ -475,7 +475,28 @@ def test_each_status_renders_with_its_colour_class_and_its_word(
     record_key_test(db, "openrouter", status, "a host and an HTTP code", now=NOW)
     html = render_html(page(db, keys=store), section="keys")
     assert f'<span class="status {css}">{status}</span>' in html
+    assert f'<strong class="status {css}">openrouter</strong>' in html  # the name agrees
     assert "a host and an HTTP code" in html
+
+
+def test_the_provider_name_carries_the_status_colour_and_the_word_keeps_the_dot(
+    db: Database, store: KeyStore
+) -> None:
+    store.save("openrouter", SECRET)
+    record_key_test(db, "openrouter", "unauthorized", "HTTP 401", now=NOW)
+    data = page(db, keys=store)
+    html = render_html(data, section="keys")
+    tested = next(
+        group for group in data.keys if any(key.source != "not set" for key in group.keys)
+    )
+    assert f'<strong class="status bad">{tested.name}</strong>' in html
+    assert '<span class="status bad">last test unauthorized</span>' in html
+    # A provider with no key is muted, not red: no answer is not a bad answer.
+    untested = next(group.name for group in data.keys if not group.key_required)
+    assert f'<strong class="status idle">{untested}</strong>' in html
+    # The dot stays on the status word: a coloured name must not read as a bullet.
+    assert "span.status::before" in html
+    assert "strong.status::before" not in html
 
 
 def test_a_key_that_was_never_tested_has_a_neutral_indicator(db: Database, store: KeyStore) -> None:

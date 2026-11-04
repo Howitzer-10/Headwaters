@@ -316,11 +316,13 @@ th { font-weight: 600; }
 td.reasons, span.reasons { font-size: .8rem; color: var(--muted); }
 code { font-size: .85rem; }
 .on::before { content: "on"; } .off::before { content: "off"; }
+/* The dot belongs to a status word, so it stays span-qualified: a coloured provider name
+   (<strong class="status ok">) takes the colour and never a bullet. */
 span.status::before { content: "\\25CF"; margin-right: .35em; }
-span.status.ok { color: var(--ok); }
-span.status.bad { color: var(--bad); }
-span.status.warn { color: var(--warn); }
-span.status.idle { color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--bad); }
+.status.warn { color: var(--warn); }
+.status.idle { color: var(--muted); }
 p.error { color: #b00020; font-weight: 600; }
 form { margin: .35rem 0; }
 td form, td input { display: inline-block; margin-right: .3rem; }
@@ -450,13 +452,28 @@ def _provider_state(group: PageProvider) -> str:
     return "no key saved"
 
 
-def _provider_test(group: PageProvider) -> str:
-    """The provider's latest answer, as HTML: the coloured word, never the colour alone."""
+def _provider_status(group: PageProvider) -> str | None:
+    """The provider's current answer: its newest tested alias, or None when nothing was tested.
+
+    One lookup for the whole heading, so the name's colour and the "last test ..." word cannot
+    disagree. No alias, no key saved and no test result all mean None - neutral, never alarming.
+    """
     tested = [key for key in group.keys if key.status is not None]
     if not tested:
+        return None
+    return max(tested, key=lambda key: key.tested_at or 0.0).status
+
+
+def _provider_test(status: str | None) -> str:
+    """The provider's latest answer, as HTML: the coloured word, never the colour alone."""
+    if status is None:
         return _status("never tested", None)
-    latest = max(tested, key=lambda key: key.tested_at or 0.0)
-    return _status(f"last test {latest.status}", latest.status)
+    return _status(f"last test {status}", status)
+
+
+def _provider_name(group: PageProvider, status: str | None) -> str:
+    """The provider's name in its current status colour. ``<strong>``: no dot, no bullet."""
+    return f'<strong class="status {_status_class(status)}">{_e(group.name)}</strong>'
 
 
 # The status word -> the colour beside it. Green is an answer, red is a key to fix, amber is "not
@@ -472,10 +489,14 @@ _STATUS_CLASS = {
 }
 
 
+def _status_class(status: str | None) -> str:
+    """The colour class for a status: muting the unknown keeps a missing answer neutral."""
+    return "idle" if status is None else _STATUS_CLASS.get(status, "warn")
+
+
 def _status(word: str, status: str | None) -> str:
     """``word`` with a coloured dot. The word stays, so a screenshot reads without colour."""
-    css = "idle" if status is None else _STATUS_CLASS.get(status, "warn")
-    return f'<span class="status {css}">{_e(word)}</span>'
+    return f'<span class="status {_status_class(status)}">{_e(word)}</span>'
 
 
 def _csrf_field(page: StatusPage) -> str:
@@ -530,9 +551,10 @@ def _provider_note(group: PageProvider) -> str:
 
 
 def _provider_block(page: StatusPage, group: PageProvider) -> str:
+    status = _provider_status(group)
     summary = (
-        f"<strong>{_e(group.name)}</strong> · {_e(group.access)} · "
-        f"{_e(_provider_state(group))} · {_provider_test(group)}"
+        f"{_provider_name(group, status)} · {_e(group.access)} · "
+        f"{_e(_provider_state(group))} · {_provider_test(status)}"
     )
     head = f'<details id="keys-{_e(group.name)}"><summary>{summary}</summary>'
     body = ""
