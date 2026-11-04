@@ -28,6 +28,7 @@ __all__ = [
     "TITLE",
     "TraySurface",
     "command",
+    "log_line",
     "log_path",
     "log_tail",
     "register",
@@ -43,8 +44,9 @@ DEFAULT = True
 DISABLE_ENV = "HEADWATERS_NO_TRAY"
 # A test process must never leave a real icon behind, and the daemon honours this too.
 TEST_ENV = "PYTEST_CURRENT_TEST"
-# The child's stderr goes here: a tray that dies at once leaves its traceback where the daemon,
-# and a person, can read it instead of vanishing into DEVNULL.
+# The child's stderr goes here - a tray that dies at once leaves its traceback where the daemon,
+# and a person, can read it instead of vanishing into DEVNULL. Menu actions log their start and
+# result here too, because a toast can be dropped and then nothing at all would be left.
 TRAY_LOG_NAME = "tray.log"
 TRAY_LOG_MAX_BYTES = 8192
 TRAY_LOG_TAIL_CHARS = 2000
@@ -128,14 +130,37 @@ def log_tail(limit: int = TRAY_LOG_TAIL_CHARS) -> str:
     return text[-limit:].strip()
 
 
+def log_line(message: str) -> None:
+    """Append one line to the tray log, capped exactly like the child's stderr (HDW-504).
+
+    A toast is not durable: Windows 11 drops balloon tips from a process that is not a
+    registered notification source. An action writes that it started and how it ended here
+    instead, so a click that shows nothing still leaves a trace. A missing started line is
+    proof the action never fired; a started line with no finished line is proof it hung.
+    """
+    line = " ".join(message.splitlines())
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _truncate_if_large(path)
+        with path.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(f"{line}\n")
+    except OSError:
+        return  # a log that cannot be written never breaks the action it describes
+
+
+def _truncate_if_large(path: Path) -> None:
+    """One run is what matters: do not grow a file nobody reads."""
+    if path.exists() and path.stat().st_size > TRAY_LOG_MAX_BYTES:
+        path.write_bytes(b"")
+
+
 def _open_log() -> IO[bytes]:
     """The log handle, truncated once it passes a few KB; DEVNULL if it cannot be opened."""
     try:
         path = log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and path.stat().st_size > TRAY_LOG_MAX_BYTES:
-            # One run's crash is what matters: do not grow a file nobody reads.
-            path.write_bytes(b"")
+        _truncate_if_large(path)
         return path.open("ab")
     except OSError:
         return open(os.devnull, "wb")  # closed by the caller's finally
