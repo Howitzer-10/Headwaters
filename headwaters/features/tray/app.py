@@ -7,10 +7,14 @@ notification area, a browser, a message box or a real daemon.
 
 The doctor, start and restart actions run on a worker thread and report in a native message box,
 not only a balloon tip: a toast is not durable on Windows 11, and a report nobody sees is no report.
+The doctor's report is the exception: when something actually needs doing it opens a real scrolling
+window (``headwaters.features.tray.doctor_window``) with the plain-English detail and fix for each
+problem, and only an all-clear report stays a short message box sentence.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import threading
 import webbrowser
@@ -19,6 +23,7 @@ from typing import Any
 
 from headwaters.features.tray import TITLE, log_line
 from headwaters.features.tray.client import TrayClient
+from headwaters.features.tray.doctor_window import DoctorView, summarise
 from headwaters.features.tray.icon import render
 from headwaters.features.tray.menu import MenuEntry, build_menu, menu_entries
 from headwaters.features.tray.model import TrayState
@@ -33,8 +38,6 @@ KEYS_SECTION = "?section=keys"
 _ICON_ERRORS = (AttributeError, RuntimeError, OSError)
 # A message box truncates, and a dialog is a summary: keep the body short and free of detail.
 DIALOG_MAX_CHARS = 2000
-# How many non-ok checks the body lists before it says how many are left.
-DIALOG_MAX_CHECK_LINES = 20
 DOCTOR_TITLE = "Headwaters doctor"
 RESTART_TITLE = "Headwaters daemon"
 
@@ -46,10 +49,11 @@ class TrayApp:
         icon: Any = None,
         opener: Callable[[str], bool] | None = None,
         notifier: Callable[[str], None] | None = None,
-        doctor: Callable[[], str] | None = None,
+        doctor: Callable[[], DoctorView] | None = None,
         restarter: Callable[[], str] | None = None,
         starter: Callable[[], str] | None = None,
         dialog: Callable[[str, str], None] | None = None,
+        window: Callable[[DoctorView], None] | None = None,
         logger: Callable[[str], None] | None = None,
         client: TrayClient | None = None,
         interval: float = DEFAULT_INTERVAL_S,
@@ -63,6 +67,8 @@ class TrayApp:
         self._starter = starter if starter is not None else _start_daemon
         # dialog(title, message) where the platform has a real one; else the toast is all there is.
         self._dialog = dialog if dialog is not None else _default_dialog()
+        # window(view): the Doctor window, where the platform has one; a test injects a fake.
+        self._window = window if window is not None else _default_window()
         self._logger = logger if logger is not None else log_line
         self._client = client if client is not None else TrayClient()
         self._interval = interval
@@ -137,14 +143,21 @@ class TrayApp:
             self._notify("could not open the dashboard in a browser")
 
     def doctor(self) -> None:
-        """The checks, off pystray's message loop, and the report in a real dialog (HDW-504).
+        """The checks, off pystray's message loop, and the report in a real window (HDW-504).
 
         ``_run_doctor`` shells out for the live host checks, so running it on the message loop
         froze the menu with no acknowledgement - and the toast that eventually followed was a
         balloon tip Windows 11 drops. The worker keeps the icon responsive; the started/finished
-        lines in the tray log survive the dialog too.
+        lines in the tray log survive the window too. The window is opened from that same worker:
+        tkinter owns its own loop, and pystray's cannot service a GUI.
         """
-        self._start_action("doctor", DOCTOR_TITLE, self._doctor, "doctor could not run")
+        self._start_action(
+            "doctor",
+            DOCTOR_TITLE,
+            self._doctor,
+            "doctor could not run",
+            present=self._present_doctor,
+        )
 
     def restart(self) -> None:
         """Stop and start the daemon off the message loop: that is tens of seconds of waiting."""
@@ -190,14 +203,15 @@ class TrayApp:
         self,
         name: str,
         title: str,
-        work: Callable[[], str],
+        work: Callable[[], Any],
         failure: str,
+        present: Callable[[str, Any], None] | None = None,
     ) -> None:
         """One slow action on its own worker, never on pystray's message loop.
 
         The guard is taken here and released by the worker, so a second click while the first
         is still running is dropped instead of stacking a second dialog on the first and racing
-        the same log lines.
+        the same log lines. ``present`` is how the result is shown; the default is ``_tell``.
         """
         if not self._action_lock.acquire(blocking=False):
             self._log(f"{name}: ignored, {self._action_name or 'an action'} is still running")
@@ -205,7 +219,7 @@ class TrayApp:
         worker = threading.Thread(
             target=self._run_action,
             name=f"tray-{name.replace(' ', '-')}",
-            args=(name, title, work, failure),
+            args=(name, title, work, failure, present),
             daemon=True,
         )
         self._action_name = name
@@ -222,24 +236,43 @@ class TrayApp:
         self,
         name: str,
         title: str,
-        work: Callable[[], str],
+        work: Callable[[], Any],
         failure: str,
+        present: Callable[[str, Any], None] | None = None,
     ) -> None:
         try:
             # The order is deliberate. A started line and no finished line means the action hung;
             # no started line at all means the menu item never fired. The result is logged before
-            # the dialog, so it survives a dialog that never opens.
+            # the window or dialog, so it survives one that never opens.
             self._log(f"{name} started")
             try:
                 message = work()
             except Exception:  # a convenience action's failure is never the tray's
                 message = failure
             self._log(f"{name} finished: {message}")
-            self._tell(title, message)
+            (present or self._tell)(title, message)
         finally:
             self._action_name = None
             self._action_thread = None
             self._action_lock.release()
+
+    def _present_doctor(self, title: str, message: Any) -> None:
+        """The window for a real problem; one short sentence through the dialog when there is none.
+
+        ``skip`` checks never reach here (``summarise`` drops them) and a report with nothing to
+        do never opens the big window. A window that cannot open - no display, a broken Tk - is
+        caught and the same content goes to the dialog, so a Doctor click always shows something.
+        """
+        view = message if isinstance(message, DoctorView) else None
+        if view is None or view.all_clear or self._window is None:
+            self._tell(title, view.text() if view is not None else str(message))
+            return
+        try:
+            self._window(view)
+        except Exception:  # no display here: the text report is still worth showing
+            self._tell(title, view.text())
+            return
+        self.toasts.append(view.text())
 
     def _restart_and_refresh(self) -> str:
         try:
@@ -364,6 +397,25 @@ def _message_box(title: str, message: str) -> None:
         raise OSError("MessageBoxW failed")
 
 
+def _default_window() -> Callable[[DoctorView], None] | None:
+    """The real Doctor window, where there is one: Windows with the standard library's tkinter.
+
+    ``tkinter`` imports without a display; creating a ``Tk`` needs one. So only the import is
+    checked here, and a ``TclError`` when the window opens is caught by ``_present_doctor``,
+    which falls back to the dialog. No toolkit is added to ``pyproject.toml``.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        if importlib.util.find_spec("tkinter") is None:
+            return None
+    except Exception:  # a broken installation must not take the tray down at startup
+        return None
+    from headwaters.features.tray.doctor_window import show
+
+    return show
+
+
 def _clip(text: str, limit: int) -> str:
     """``text`` at most ``limit`` characters, ending in an ellipsis when it was cut."""
     if len(text) <= limit:
@@ -371,30 +423,12 @@ def _clip(text: str, limit: int) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
-def _run_doctor() -> str:
-    """``headwaters doctor``, in this process: the same checks, the same code path."""
+def _run_doctor() -> DoctorView:
+    """``headwaters doctor``, in this process: the same checks, as the window's payload."""
     from headwaters.cli.runtime import load_rules_or_exit
     from headwaters.control.doctor import run_doctor
 
-    return _doctor_summary(run_doctor(load_rules_or_exit()))
-
-
-def _doctor_summary(report: Any) -> str:
-    """The report in the few lines a person reads in a dialog, not the whole report.
-
-    One ``name: status`` line per check that is not ``ok`` and a final count. No ``detail``:
-    a detail can carry a filesystem path, a prompt or a masked key, and neither a dialog nor a
-    toast is the place for one. ``run_doctor`` already scrubs; this narrows it further.
-    """
-    attention = [check for check in report.checks if check.status != "ok"]
-    if not attention:
-        return "doctor: every check passed"
-    lines = [f"{check.title}: {check.status}" for check in attention[:DIALOG_MAX_CHECK_LINES]]
-    hidden = len(attention) - len(lines)
-    if hidden:
-        lines.append(f"... and {hidden} more")
-    noun = "check" if len(attention) == 1 else "checks"
-    return "\n".join([*lines, "", f"{len(attention)} {noun} need attention"])
+    return summarise(run_doctor(load_rules_or_exit()))
 
 
 def _start_daemon() -> str:

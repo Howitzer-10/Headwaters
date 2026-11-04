@@ -19,6 +19,7 @@ from PIL import Image
 from typer.testing import CliRunner
 
 from headwaters.cli.main import app as cli_app
+from headwaters.control.doctor import Check, Report
 from headwaters.core import paths
 from headwaters.core.catalog.schema import Catalog
 from headwaters.core.daemon_info import DaemonInfo, DaemonPorts
@@ -28,6 +29,11 @@ from headwaters.core.rules import Rules
 from headwaters.features.tray import FEATURE_ID
 from headwaters.features.tray.app import TrayApp
 from headwaters.features.tray.client import TrayClient
+from headwaters.features.tray.doctor_window import (
+    ALL_CLEAR,
+    DoctorView,
+    summarise,
+)
 from headwaters.features.tray.icon import (
     AMBER_RGB,
     CENTRE_PROBE,
@@ -159,6 +165,19 @@ class FakeDialog:
         self.calls.append((title, message))
 
 
+class FakeWindow:
+    """Stands in for the Doctor window: records the payload it was handed and draws nothing."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[DoctorView] = []
+        self.fail = fail
+
+    def __call__(self, view: DoctorView) -> None:
+        if self.fail:
+            raise RuntimeError("no display here")
+        self.calls.append(view)
+
+
 class FakeLogger:
     """Stands in for ``tray.log_line``: records each line and touches no file."""
 
@@ -217,12 +236,21 @@ def fake_builder(entries: tuple[MenuEntry, ...]) -> FakeMenu:
     return build_menu(entries, menuitem=FakeItem, menu=FakeMenu)
 
 
+def view_of(*checks: Check) -> DoctorView:
+    """The payload the tray hands the window: a real report, summarised as the window shows it."""
+    return summarise(Report(checks=checks))
+
+
+ALL_CLEAR_VIEW = view_of(Check(id="ollama", title="Ollama", status="ok"))
+
+
 def app_with(**kwargs: Any) -> tuple[TrayApp, FakeIcon, list[str]]:
     """An app whose browser is a list: ``opener(url)`` records the URL and says it worked.
 
-    A dialog and a log writer are injected unless a test asks for its own: no test may open a
-    real message box or write the owner's real ``tray.log``. ``dialog=None`` still means "use
-    whatever the platform has", so a fallback test patches ``_default_dialog`` first.
+    A dialog, a log writer and the Doctor window are injected unless a test asks for its own:
+    no test may open a real message box, write the owner's real ``tray.log``, or create a
+    display. ``dialog=None`` and ``window=None`` still mean "use whatever the platform has",
+    so a fallback test patches ``_default_dialog``/``_default_window`` first.
     """
     opened: list[str] = []
 
@@ -236,6 +264,8 @@ def app_with(**kwargs: Any) -> tuple[TrayApp, FakeIcon, list[str]]:
     kwargs.setdefault("builder", fake_builder)
     if "dialog" not in kwargs:
         kwargs["dialog"] = FakeDialog()
+    if "window" not in kwargs:
+        kwargs["window"] = FakeWindow()
     if "logger" not in kwargs:
         kwargs["logger"] = FakeLogger()
     app = TrayApp(icon=icon, opener=opener, **kwargs)
@@ -484,13 +514,16 @@ def test_a_browser_that_will_not_open_is_said_out_loud_not_raised() -> None:
     assert app.toasts == ["could not open the dashboard in a browser"]
 
 
-def test_doctor_reports_counts_only() -> None:
-    app, _, _ = app_with(client=fake_daemon()[0])
-    app._doctor = lambda: "doctor: every check passed"  # type: ignore[method-assign]
+def test_an_all_clear_doctor_says_one_short_sentence_and_opens_no_window() -> None:
+    window, dialog = FakeWindow(), FakeDialog()
+    app, icon, _ = app_with(window=window, dialog=dialog, doctor=lambda: ALL_CLEAR_VIEW)
     app.refresh()
     app.doctor()
     assert app.wait_for_action()
-    assert app.toasts == ["doctor: every check passed"]
+    assert window.calls == []  # nothing needs doing: no big window to read
+    assert dialog.calls == [("Headwaters doctor", ALL_CLEAR)]
+    assert app.toasts == [ALL_CLEAR]
+    assert icon.notified == []  # a dialog that opened is not also a toast
 
 
 def test_restart_reports_and_reads_the_daemon_again() -> None:
@@ -552,40 +585,66 @@ def test_a_start_that_raises_says_so_instead_of_staying_silent() -> None:
     ]
 
 
-def test_a_successful_doctor_shows_the_report_in_a_dialog_exactly_once() -> None:
-    dialog = FakeDialog()
-    app, icon, _ = app_with(dialog=dialog, doctor=lambda: "doctor: every check passed")
+def test_a_doctor_with_a_problem_opens_the_window_and_no_dialog() -> None:
+    view = view_of(
+        Check(
+            id="ollama",
+            title="Ollama",
+            status="fail",
+            detail="Ollama is not running, so nothing can answer.",
+            fix="Start Ollama, then choose Doctor again.",
+        )
+    )
+    window, dialog = FakeWindow(), FakeDialog()
+    app, icon, _ = app_with(window=window, dialog=dialog, doctor=lambda: view)
     app.refresh()
     app.doctor()
     assert app.wait_for_action()
-    assert dialog.calls == [("Headwaters doctor", "doctor: every check passed")]
-    assert app.toasts == ["doctor: every check passed"]
-    assert icon.notified == []  # a dialog that opened is not also a toast
+    assert window.calls == [view]
+    assert dialog.calls == []  # the window is the report; a message box on top is noise
+    assert app.toasts == [view.text()]
+    assert icon.notified == []
 
 
-def test_doctor_runs_on_a_worker_thread_not_the_caller() -> None:
+def test_the_window_is_driven_on_the_same_worker_thread_never_the_caller() -> None:
     caller = threading.get_ident()
     seen: dict[str, Any] = {}
+    view = view_of(
+        Check(
+            id="daemon",
+            title="Daemon",
+            status="fail",
+            detail="The daemon is not running.",
+            fix="Start it from this menu.",
+        )
+    )
 
-    def fake_doctor() -> str:
+    def fake_doctor() -> DoctorView:
         seen["ident"] = threading.get_ident()
         seen["name"] = threading.current_thread().name
-        return "doctor: every check passed"
+        return view
 
-    app, _, _ = app_with(doctor=fake_doctor)
+    def fake_window(_view: DoctorView) -> None:
+        seen["window_ident"] = threading.get_ident()
+        seen["window_name"] = threading.current_thread().name
+
+    app, _, _ = app_with(doctor=fake_doctor, window=fake_window)
     app.doctor()
     assert app.wait_for_action()
     assert seen["ident"] != caller
     assert seen["name"] == "tray-doctor"
+    # tkinter must be created and driven by this worker: pystray's loop cannot service a GUI.
+    assert seen["window_ident"] == seen["ident"]
+    assert seen["window_name"] == "tray-doctor"
 
 
 def test_the_log_records_a_started_line_then_a_finished_line() -> None:
     log = FakeLogger()
-    app, _, _ = app_with(logger=log, doctor=lambda: "doctor: every check passed")
+    app, _, _ = app_with(logger=log, doctor=lambda: ALL_CLEAR_VIEW)
     app.refresh()
     app.doctor()
     assert app.wait_for_action()
-    assert log.lines == ["doctor started", "doctor finished: doctor: every check passed"]
+    assert log.lines == ["doctor started", f"doctor finished: {ALL_CLEAR}"]
 
 
 def test_the_log_file_holds_every_action_line_in_order(
@@ -594,13 +653,13 @@ def test_the_log_file_holds_every_action_line_in_order(
     from headwaters.features import tray as tray_feature
 
     monkeypatch.setenv(paths.HOME_ENV_VAR, str(tmp_path))
-    app, _, _ = app_with(logger=tray_feature.log_line, doctor=lambda: "doctor: every check passed")
+    app, _, _ = app_with(logger=tray_feature.log_line, doctor=lambda: ALL_CLEAR_VIEW)
     app.doctor()
     assert app.wait_for_action()
     text = tray_feature.log_path().read_text(encoding="utf-8")
     assert text.splitlines()[:2] == [
         "doctor started",
-        "doctor finished: doctor: every check passed",
+        f"doctor finished: {ALL_CLEAR}",
     ]
 
 
@@ -617,17 +676,18 @@ def test_the_action_log_is_capped_like_the_childs_stderr(
 
 
 def test_a_doctor_that_raises_still_shows_a_dialog_and_logs_the_failure() -> None:
-    dialog, log = FakeDialog(), FakeLogger()
+    dialog, log, window = FakeDialog(), FakeLogger(), FakeWindow()
 
-    def broken() -> str:
+    def broken() -> DoctorView:
         raise RuntimeError("the probe exploded")
 
-    app, _, _ = app_with(dialog=dialog, logger=log, doctor=broken)
+    app, _, _ = app_with(dialog=dialog, logger=log, window=window, doctor=broken)
     app.doctor()
     assert app.wait_for_action()
     assert dialog.calls == [("Headwaters doctor", "doctor could not run")]
     assert app.toasts == ["doctor could not run"]
     assert log.lines == ["doctor started", "doctor finished: doctor could not run"]
+    assert window.calls == []
 
 
 def test_a_platform_without_a_message_box_falls_back_to_the_toast(
@@ -636,28 +696,69 @@ def test_a_platform_without_a_message_box_falls_back_to_the_toast(
     from headwaters.features.tray import app as app_module
 
     monkeypatch.setattr(app_module, "_default_dialog", lambda: None)
-    app, icon, _ = app_with(dialog=None, doctor=lambda: "doctor: every check passed")
+    app, icon, _ = app_with(dialog=None, doctor=lambda: ALL_CLEAR_VIEW)
     assert app._dialog is None  # type: ignore[attr-defined]
     app.refresh()
     app.doctor()
     assert app.wait_for_action()
-    assert icon.notified == ["doctor: every check passed"]
+    assert icon.notified == [ALL_CLEAR]
 
 
 def test_a_dialog_that_cannot_open_falls_back_to_the_toast() -> None:
     dialog = FakeDialog(fail=True)
-    app, icon, _ = app_with(dialog=dialog, doctor=lambda: "doctor: every check passed")
+    app, icon, _ = app_with(dialog=dialog, doctor=lambda: ALL_CLEAR_VIEW)
     app.refresh()
     app.doctor()
     assert app.wait_for_action()
-    assert icon.notified == ["doctor: every check passed"]
+    assert icon.notified == [ALL_CLEAR]
+
+
+def test_a_window_that_cannot_open_falls_back_to_the_dialog() -> None:
+    """No display, or a broken Tk: the report still reaches the person, as plain text."""
+    view = view_of(
+        Check(
+            id="keys",
+            title="Keys",
+            status="fail",
+            detail="No key is saved for the provider you selected.",
+            fix="Open the dashboard and paste the key.",
+        )
+    )
+    window, dialog = FakeWindow(fail=True), FakeDialog()
+    app, icon, _ = app_with(window=window, dialog=dialog, doctor=lambda: view)
+    app.doctor()
+    assert app.wait_for_action()
+    assert window.calls == []
+    assert dialog.calls == [("Headwaters doctor", view.text())]
+    assert view.headline in dialog.calls[0][1]
+    assert view.entries[0].detail in dialog.calls[0][1]
+    assert view.entries[0].fix is not None
+    assert view.entries[0].fix in dialog.calls[0][1]
+    assert icon.notified == []
+
+
+def test_a_doctor_with_no_window_at_all_uses_the_dialog() -> None:
+    view = view_of(
+        Check(
+            id="daemon",
+            title="Daemon",
+            status="fail",
+            detail="It is not running.",
+            fix="Start it.",
+        )
+    )
+    dialog = FakeDialog()
+    app, _, _ = app_with(window=None, dialog=dialog, doctor=lambda: view)
+    app.doctor()
+    assert app.wait_for_action()
+    assert dialog.calls == [("Headwaters doctor", view.text())]
 
 
 def test_a_long_report_is_clipped_for_the_dialog_but_recorded_whole() -> None:
     dialog = FakeDialog()
-    report = "doctor: " + ("x" * 3000)
-    app, _, _ = app_with(dialog=dialog, doctor=lambda: report)
-    app.doctor()
+    report = "daemon: " + ("x" * 3000)
+    app, _, _ = app_with(dialog=dialog, restarter=lambda: report)
+    app.restart()
     assert app.wait_for_action()
     assert len(dialog.calls) == 1
     _, shown = dialog.calls[0]
@@ -666,33 +767,35 @@ def test_a_long_report_is_clipped_for_the_dialog_but_recorded_whole() -> None:
     assert app.toasts == [report]
 
 
-def test_the_doctor_summary_lists_each_unhealthy_check_then_the_count() -> None:
-    from headwaters.control.doctor import Check, Report
-    from headwaters.features.tray.app import _doctor_summary
-
+def test_the_doctor_payload_drops_skips_and_sorts_optional_last() -> None:
+    window = FakeWindow()
     report = Report(
         checks=(
-            Check(id="ollama", title="Ollama", status="ok"),
-            Check(id="keys", title="Keys", status="warn"),
-            Check(id="hosts", title="Editors", status="fail"),
+            Check(
+                id="git",
+                title="Git line endings",
+                status="warn",
+                detail="core.autocrlf is false in this repository.",
+                fix="Run git config core.autocrlf true.",
+            ),
+            Check(id="private_mode", title="Private Mode", status="skip"),
+            Check(
+                id="ollama",
+                title="Ollama",
+                status="fail",
+                detail="Ollama is not running.",
+                fix="Start Ollama, then choose Doctor again.",
+            ),
         )
     )
-    summary = _doctor_summary(report)
-    assert summary.splitlines() == [
-        "Keys: warn",
-        "Editors: fail",
-        "",
-        "2 checks need attention",
-    ]
-
-
-def test_the_doctor_summary_for_a_clean_run_is_one_line() -> None:
-    from headwaters.control.doctor import Check, Report
-    from headwaters.features.tray.app import _doctor_summary
-
-    assert _doctor_summary(Report(checks=(Check(id="ollama", title="Ollama", status="ok"),))) == (
-        "doctor: every check passed"
-    )
+    app, _, _ = app_with(window=window, doctor=lambda: summarise(report))
+    app.doctor()
+    assert app.wait_for_action()
+    (view,) = window.calls
+    assert [entry.id for entry in view.entries] == ["ollama", "git"]
+    assert [entry.title for entry in view.needs_doing] == ["Ollama"]
+    assert [entry.detail for entry in view.needs_doing] == ["Ollama is not running."]
+    assert [entry.fix for entry in view.needs_doing] == ["Start Ollama, then choose Doctor again."]
 
 
 def test_restart_runs_on_a_worker_thread_and_opens_its_own_dialog() -> None:
@@ -717,11 +820,11 @@ def test_a_second_click_while_one_is_running_starts_no_second_worker() -> None:
     runs: list[str] = []
     dialog, log = FakeDialog(), FakeLogger()
 
-    def slow_doctor() -> str:
+    def slow_doctor() -> DoctorView:
         runs.append(threading.current_thread().name)
         entered.set()
         release.wait(5)
-        return "doctor: every check passed"
+        return ALL_CLEAR_VIEW
 
     app, _, _ = app_with(dialog=dialog, logger=log, doctor=slow_doctor)
     app.doctor()
@@ -730,7 +833,7 @@ def test_a_second_click_while_one_is_running_starts_no_second_worker() -> None:
     release.set()
     assert app.wait_for_action()
     assert runs == ["tray-doctor"]
-    assert dialog.calls == [("Headwaters doctor", "doctor: every check passed")]
+    assert dialog.calls == [("Headwaters doctor", ALL_CLEAR)]
     assert len([line for line in log.lines if line == "doctor started"]) == 1
     assert any("still running" in line for line in log.lines)
 
