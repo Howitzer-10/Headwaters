@@ -17,11 +17,16 @@
 | D13 | Ollama cloud models are not routable in 0.1: **Headwaters never routes to Ollama `:cloud` / `-cloud` models, in any tier.** Discovery drops them (never `local`, never `free_cloud` or `paid`), and the executor refuses them as defence in depth. Owner answer to HDW-119 question 1 ("never"). Where HDW-121 says "`tier=free_cloud`/`paid` per catalog, or drops them", only "drops them" applies. | Decided (2026-10-31, owner, HDW-119) |
 | D14 | Daemon packages: **`headwaters.gateway` owns the HTTP server** (the only package allowed to import `fastapi`, `starlette` and `uvicorn`), **`headwaters.mcp` owns the MCP SDK** and hands its streamable-HTTP app out as a plain ASGI callable, and a new **`headwaters.daemon` is the composition root** that wires core, gateway and mcp into one process. Nothing imports `headwaters.daemon`; the CLI starts it as a child process. The internal API and health endpoint live in `gateway/server.py`, not under `headwaters/mcp/`. | Decided (2026-10-31, HDW-201) |
 | D15 | Beta tester promise: **everyone on the beta tester list gets Headwaters Pro free if a free/Pro split ships at 1.0.** HDW-407's packet offers free Pro or a discount for testers; the free option is chosen, the discount is not promised, and the list itself is a release-gate owner step. | Decided (2026-11-10, HDW-407) |
+| D16 | Two stages: **Stage 1 is the owner running the current build from source, dogfooding it and functionally testing it, with ticket work continuing through Phase 7; Stage 2 is distribution and sale and starts only when Phase 7 is complete.** No public beta, no closed alpha and no 0.x release in Stage 1, and the release gate stays red and unmodified until Stage 2 begins. | Decided (2026-11-03, owner) |
+| D17 | Retries inside one request: **a request never picks again a model that failed it, and the ladder emits tiers round-robin so every tier takes one attempt before any tier takes a second.** A failure lives on the run and never writes a wall, a cloud provider with no key fast-fails for the whole request, and the terminal error lists the attempts and names a healthy tier that was never tried. | Decided (2026-11-03, HDW-513) |
 | D18 | Provider identity: **every surface (CLI, dashboard page, tray menu) reads one registry of plain, lowercase provider names, and a person is never shown an underlying environment variable name.** The registry is `KeyStore.providers()`; it currently holds `anthropic`, `openai`, `openrouter`, `nvidia`, `huggingface`, `mistral`, `pollinations`, `opencode`, `opencode-go` and keyless `ollama` (whatever `providers()` returns is the list; this branch's registry also carries a `kilo` row from the catalog work, FU-503-2), and a provider added there appears on every surface without a second list. `HF_TOKEN` and `NVIDIA_API_KEY` are internal mappings, accepted as input at most, and never printed. No surface keeps its own provider list or label, and `keys set` rejects an unknown name. Why: a person thinks in products, not environment variables, and two surfaces drifting on naming is a support burden. Implemented by HDW-514 (registry owner), HDW-503 (dashboard) and HDW-504 (tray). | Decided (owner, HDW-503 / 504 / 514 packets) |
 | D19 | "Paid" vocabulary: **the word is never written bare, because this product uses it for two different things.** A **paid tier** is a provider whose use costs the person money, gated by the local `features.paid_scopes` flag; that is the sense HDW-503 / 504 / 514 already use. A **paid product** is a capability sold to the person as part of the app (for example intelligent paid routing); that is a different system, because `features.paid_scopes` is a local boolean in `rules.yaml`, not an entitlement check, and selling a capability needs a real entitlement or licence check, which does not exist yet. Code, docs, CLI output and UI text qualify which sense they mean (for example `paid tier` or `licensed feature`), so a grep can tell them apart. Why: the two senses will otherwise be conflated exactly the way environment-variable names and provider names were before D18, and an entitlement bug in this area spends real money. | Decided (2026-11-03, owner) |
 | D20 | Behaviour over advertisement: **a capability is recorded from an observed tool call, not from what the provider advertises**; `models.overrides` in `rules.yaml` is applied **last**, after catalog and scoring; the gateway answer footer is **opt-in and off by default**. | Decided (2026-11-03, HDW-512) |
 
-Numbering note: D16 has a detail section only. D17 is HDW-513's retry rule, D18 is the provider registry, D19 is the paid vocabulary and D20 is HDW-512's behaviour-over-advertisement rule. Two branches claimed D17 for different decisions; the merged file gives the older one (HDW-512) the number its consolidation uses.
+Numbering note: decision numbers are permanent — never reused, renumbered or handed to another
+decision — and this file is the consolidated copy of D1-D20. The owner resolved the D17 collision:
+D17 is HDW-513's per-request failure memory and tier turn-taking, D20 is HDW-512's behaviour over
+advertisement, and `howitzer-10-refactored-umbrella` was not renumbered (that branch keeps its own text).
 
 ## Decided, not yet built
 
@@ -286,6 +291,7 @@ a few fixed strings.
 **Tickets.** HDW-513. **Revisit** if a provider grows per-model authentication (then the provider-level
 fast-fail must narrow to the models that share the credential).
 
+
 ## D20 detail: observed capabilities, user overrides, opt-in footer
 
 **Decision.** Three rules came out of one defect: Cline showed a raw
@@ -329,4 +335,3 @@ answer's `cost` is priced from the catalog and reads `unknown` when the catalog 
 a routing-cost hint, not a bill.
 
 **Tickets.** HDW-512. The composition-honest error text stays HDW-511's.
-
