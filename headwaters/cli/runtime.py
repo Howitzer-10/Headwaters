@@ -7,6 +7,7 @@ Everything is created per command and nothing here starts a server or calls a mo
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,6 +123,10 @@ class SizedAnalyzer:
         hard = dataclasses.replace(found.hard, min_ctx=size)
         soft = dataclasses.replace(found.soft, complexity=max(1, min(5, level)))
         return dataclasses.replace(found, hard=hard, soft=soft, est_tokens=size)
+
+    def estimate_tokens(self, chunks: Iterable[str], code_extra_chars: int, images: int) -> int:
+        """Same split the base analyzer uses, so the tool-cost composition is not a guess."""
+        return self._base.estimate_tokens(chunks, code_extra_chars, images)
 
 
 def _never_runs(decision: RouteDecision) -> ExecTarget:

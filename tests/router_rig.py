@@ -45,6 +45,7 @@ class Rig:
         gpu_profiles: Mapping[str, GpuProfile] | None = None,
         analyzer: Any | None = None,
         resolve: Callable[[RouteDecision], ExecTarget] | None = None,
+        candidates_for: Callable[[Requirements], Sequence[Candidate]] | None = None,
     ) -> None:
         self.rules = rules or Rules()
         live: Rules | Callable[[], Rules] = rules_source or self.rules  # HDW-131
@@ -54,6 +55,9 @@ class Rig:
         self.waits: list[float] = []
         self.analyzer = analyzer if analyzer is not None else FixedAnalyzer(reqs)
         pool = list(candidates)
+        source: Callable[[Requirements], Sequence[Candidate]] = (
+            candidates_for if candidates_for is not None else lambda _reqs: pool
+        )
 
         def cloud_factory() -> Dispatch:
             self.cloud_clients += 1
@@ -79,7 +83,7 @@ class Rig:
             live,
             self.db,
             self.analyzer,
-            lambda _reqs: pool,
+            source,
             executor,
             self.quotas,
             secrets=secrets,
