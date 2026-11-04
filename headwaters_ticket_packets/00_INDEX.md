@@ -2,11 +2,13 @@
 
 Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only the design sections that ticket references** (from its `Refs` field). Work in order and follow each ticket's `Depends` field.
 
-- The full design (all documents) is about **21.4k tokens**. An average Sonnet packet is about **1.8k tokens** (largest 2.7k), including the Context Pack.
+- The full design (all documents) is about **21.4k tokens**. An average Sonnet packet is about **1.8k tokens**. Five are deliberately larger because they carry a normative contract instead of relying on a design excerpt: HDW-503 (**5.3k**, the keys section and its write API), HDW-504 (**4.6k**, the tray as front door), HDW-514 (**6.9k**, seven provider slices) and HDW-519 (**12.0k**, a schema contract, six provider slices, five rate-limit shapes, the probe list and the routing-consumption table — it is the largest packet and every section is referenced by its accept-when).
 - Review-gate tickets (Opus) are the exception: attach the full design plus the phase's code diff.
 - If Sonnet asks for a section that isn't included, paste just that section from `headwaters_full_session.md`.
 - Re-generate the packets if you edit the design or backlog, so the excerpts stay in sync.
 - **Decisions override packets.** Every packet carries a `DECISIONS OVERRIDE PACKET TEXT` block (just above `WORKFLOW FOR THIS TICKET`) that tells the session to read `docs/DECISIONS.md` and `docs/ASSUMPTIONS.md` first; D7 and later win over conflicting packet text, and tickets listed under "Deferred tickets" are not built. **If you regenerate the packets, put this block back into the Context Pack template**, or the protection is lost.
+- **HDW-516, HDW-517 and HDW-518** are capability packets for routing order and local-model residency, written on top of the unmerged HDW-513 work (`interleave_tiers`), which is **not** on `main`. **HDW-517 depends on HDW-516**: the downward cascade in 517 targets the descending order that 516 defines, so 516 lands first. HDW-518 is independent of both. All three default to today's behaviour unless opted in.
+- **HDW-519** is the catalog-side follow-up to HDW-514 and the owner's finding that "we only have openrouter/nvidia/opencode for free models" is wrong: seven provider rows and two `free_limits` rows exist, and one `tier` scalar was answering two questions. It is data and schema only (no new tier name, no `scope.py` edit — that stays HDW-516's). It applies **D19**, which lives on `howitzer-10-decisions-paid-vocabulary` and is **not** on `main`; read it before building. It needs no new decision number, and it records two disagreements with its own brief: GitHub Models is retired upstream, and Cloudflare Workers AI's base URL needs an account id that today's `base_url` cannot express.
 - Decisions made so far that change packet text: D7 (thin litellm-SDK gateway), D8 (`mcp` v2 / `MCPServer`), D9 (roots optional, sampling deferred, elicitation fallback), D10 (core verified retry), D11 (core session stickiness), D12 (`headwaters_think` in core), D13 (Ollama cloud models not routable). HDW-120 to HDW-141 are the Phase 1.5 review fixes from HDW-119; Part 3 of each packet holds its review findings. HDW-142 and later (HDW-144 to HDW-154 are the Phase 2.5 tickets) come from triage sessions (`docs/FOLLOWUPS.md`); their Part 3 names the follow-up.
 
 | Ticket | Title | Model | Design sections included | ≈ k tokens |
@@ -92,14 +94,19 @@ Each file is a ready-to-paste session prompt: **Context Pack + one ticket + only
 | HDW-407 | Beta 0.1 docs and release gate | Sonnet + Opus | Full design + phase diff (attach) | 1.3 |
 | HDW-501 | Ledger and savings ★ | Sonnet | v3 §4.9, v3.2 §E3 | 1.5 |
 | HDW-502 | Paid scopes, budgets, handback advice ★ | Sonnet | v3 §6, v3.2 §E2, v3.3 §B | 2.1 |
-| HDW-503 | Dashboard ★ | Sonnet | v3 §5.3 | 1.4 |
-| HDW-504 | Tray app ★ | Sonnet | v3.1 §C7, v3.3 §C | 1.9 |
+| HDW-503 | Dashboard ★ (keys section + its write API; provider identity rule, D18) | Sonnet | v3 §5.3 | 5.3 |
+| HDW-504 | Tray app ★ (front door, keys; provider identity rule, D18) | Sonnet | v3.1 §C7, v3.3 §C | 4.6 |
 | HDW-505 | Setup wizard ★ | Sonnet | v3 §5.3 | 1.5 |
 | HDW-506 | VS Code extension: model provider ★ | Sonnet | v3.2 §E1 | 1.5 |
 | HDW-507 | VS Code extension: status bar, commands, publishing ★ | Sonnet | v3.2 §E1 | 1.5 |
 | HDW-508 | Opt-in usage report, feedback, survey ★ | Sonnet | v3.5 §D2, v3.5 §D4 | 1.7 |
 | HDW-509 | Beta 0.2 review gate | Opus | Full design + phase diff (attach) | 1.2 |
 | HDW-512 | Tool capability truth, live overrides, honest pull hint, gateway footer | Sonnet | HDW-512.md | 1.3 |
+| HDW-514 | Free cloud providers (registry as data and owner of provider identity, D18, NVIDIA NIM, HuggingFace, Pollinations, Mistral, OpenCode key, Kilo) | Sonnet | v3 §4.2, v3 §6, v3 §14, v3.3 §A, v3.3 §B1, v3.3 §F1 | 6.9 |
+| HDW-516 | Cloud-first descending order (tier order as a configured preference; default unchanged) | Sonnet | v3.3 §A, docs/reports/HDW-513.md | 3.4 |
+| HDW-517 | Draft-and-verify cascade (downward verified hand-off; provenance of the pass/fail signal; **depends on HDW-516**) | Sonnet + Opus | v3 §4.5, v3 §4.6, D10 | 3.0 |
+| HDW-518 | Local model keep-warm heartbeat (opt-in residency; reuses `Daemon._every`) | Sonnet | v3 §7, A-OLL-3, A-OLL-5 | 2.8 |
+| HDW-519 | Free access is not a tier: `charges_money` + `free_access` (D19 applied to data), the five missing providers, `free_limits` as clauses (metric/window/scope/condition), and what routing actually reads | Sonnet | `docs/PROVIDERS.md`, D18, D19, `docs/SDK_FACTS.md:96-117` | 12.0 |
 | HDW-601 | Repo context engine A: symbol index ★ | Sonnet | v3.4 §D | 1.4 |
 | HDW-602 | Context engine B: embeddings and packing ★ | Sonnet | v3.4 §D | 1.5 |
 | HDW-603 | Analyzer layer 2: embedding kNN ★ | Sonnet | v3.4 §C | 1.5 |
