@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -26,7 +26,7 @@ from urllib.parse import urlsplit, urlunsplit
 from headwaters.core.catalog import updater
 from headwaters.core.catalog.http import HttpClient, SourceError, UrllibHttp
 from headwaters.core.catalog.merge import ModelRecord, merge_models
-from headwaters.core.catalog.schema import Catalog
+from headwaters.core.catalog.schema import Catalog, ProviderEntry
 from headwaters.core.catalog.sources import (
     LiveModel,
     ollama_models,
@@ -34,8 +34,11 @@ from headwaters.core.catalog.sources import (
     opencode_config_paths,
     opencode_models,
     openrouter_models,
+    registry_models,
 )
+from headwaters.core.keys import KeyStore
 from headwaters.core.ollama_remote import RemotePatterns, remote_patterns_from
+from headwaters.core.providers import Registry
 from headwaters.core.rules import Rules
 from headwaters.core.state import Database
 from headwaters.core.state_misc import kv_get, kv_set
@@ -144,6 +147,8 @@ def _gather(
     *,
     budget_s: float | None = REFRESH_BUDGET_S,
     progress: Callable[[str], None] | None = None,
+    providers: Iterable[ProviderEntry] = (),
+    key_for: Callable[[str], str | None] | None = None,
 ) -> dict[str, list[LiveModel]]:
     """Live models by source name. Only sources that answered appear in the result."""
     found: dict[str, list[LiveModel]] = {}
@@ -210,6 +215,20 @@ def _gather(
             )
         except SourceError as exc:
             result.warnings.append(f"{endpoint.name}: {exc}")
+    for entry in providers:
+        key = key_for(entry.name) if key_for is not None else env.get(entry.env_var)
+        if not key and entry.key_required:
+            continue  # nothing a keyless call could use; stay quiet until a key is set
+        try:
+            found[f"provider:{entry.name}"] = _read_source(
+                f"provider:{entry.name}",
+                entry.name,
+                partial(registry_models, http, entry, key or None),
+                budget,
+                report,
+            )
+        except SourceError as exc:
+            result.warnings.append(f"{entry.name}: {exc}")
     return found
 
 
@@ -237,6 +256,8 @@ def refresh_models(
     now: float | None = None,
     budget_s: float | None = REFRESH_BUDGET_S,
     progress: Callable[[str], None] | None = None,
+    providers: Iterable[ProviderEntry] = (),
+    key_for: Callable[[str], str | None] | None = None,
 ) -> RefreshResult:
     """Discover, merge and persist. Never raises because a source is down or out of budget.
 
@@ -245,16 +266,22 @@ def refresh_models(
     """
     result = RefreshResult()
     stamp = time.time() if now is None else now
+    environment = os.environ if env is None else env
+    registered = list(providers) or list(catalog.providers)
+    if key_for is None and registered and env is None:
+        key_for = KeyStore(rules, env=environment, registry=Registry(registered)).api_key_for
     live = _gather(
         rules,
         http or UrllibHttp(),
-        os.environ if env is None else env,
+        environment,
         home or Path.home(),
         result,
         remote_patterns_from(catalog),
         catalog.endpoints.openrouter_base_url,
         budget_s=budget_s,
         progress=progress,
+        providers=registered,
+        key_for=key_for,
     )
     result.sources_ok = sorted(live)
     flat = [m for models in live.values() for m in models]

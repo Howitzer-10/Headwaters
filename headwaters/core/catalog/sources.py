@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from headwaters.core.catalog.http import HttpClient, SourceError, is_loopback_url
-from headwaters.core.catalog.schema import Endpoints
+from headwaters.core.catalog.schema import Endpoints, ProviderEntry
 from headwaters.core.ollama_remote import RemotePatterns, has_remote_fields, is_remote_name
 from headwaters.core.rules import OpenAICompatEndpoint
 
@@ -319,6 +319,115 @@ def opencode_models(
             ),
         )
     return list(seen.values()), warnings
+
+
+def _bearer(api_key: str) -> dict[str, str]:
+    return {"Authorization": "Bearer " + api_key}
+
+
+def _any_true(values: list[Any]) -> bool:
+    return any(v is True for v in values)
+
+
+def _registry_tier(entry: ProviderEntry, item: Mapping[str, Any], providers: list[Any]) -> LiveTier:
+    """The provider's own tier, lifted to free only by a marker its listing carries."""
+    if entry.tier == "free_cloud":
+        return "free_cloud"
+    if not entry.honor_free_markers:
+        return "paid"
+    model_id = str(item.get("id", ""))
+    marked = (
+        model_id.endswith(":free")
+        or item.get("isFree") is True
+        or _any_true([_as_dict(p).get("is_free") for p in providers])
+    )
+    return "free_cloud" if marked else "paid"
+
+
+def _registry_text_only(item: Mapping[str, Any]) -> tuple[bool, list[str]]:
+    """``(is a chat model, input modalities)`` from either listing shape."""
+    arch = _as_dict(item.get("architecture"))
+    modalities = _as_dict(item.get("modalities"))
+    outputs = (
+        [str(m) for m in _as_list(arch.get("output_modalities"))]
+        or [str(m) for m in _as_list(item.get("output_modalities"))]
+        or [str(m) for m in _as_list(modalities.get("output"))]
+    )
+    inputs = (
+        [str(m) for m in _as_list(arch.get("input_modalities"))]
+        or [str(m) for m in _as_list(item.get("input_modalities"))]
+        or [str(m) for m in _as_list(modalities.get("input"))]
+    )
+    caps = _as_dict(item.get("capabilities"))
+    if "completion_chat" in caps and caps["completion_chat"] is not True:
+        return False, inputs
+    if "vision" in caps and caps["vision"] is True and "image" not in inputs:
+        inputs = [*(inputs or ["text"]), "image"]
+    return (not outputs or "text" in outputs), inputs
+
+
+def registry_models(http: HttpClient, entry: ProviderEntry, api_key: str | None) -> list[LiveModel]:
+    """Models of one registered provider (HDW-514), read from its ``models_url``.
+
+    Ids are ``{name}/{upstream id}`` so they cannot collide with another provider's. Without a
+    key only ``free_cloud`` models are offered. Fields a listing does not carry stay ``None``.
+    """
+    headers = _bearer(api_key) if api_key else None
+    payload = _as_dict(http.request_json("GET", entry.models_url, headers=headers))
+    skip = re.compile(entry.skip_id_pattern) if entry.skip_id_pattern else None
+    out: list[LiveModel] = []
+    for raw in _as_list(payload.get("data")):
+        item = _as_dict(raw)
+        model_id = item.get("id")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        if skip is not None and skip.search(model_id):
+            continue
+        chat, inputs = _registry_text_only(item)
+        if not chat:
+            continue
+        providers = _as_list(item.get("providers"))
+        tier = _registry_tier(entry, item, providers)
+        if tier != "free_cloud" and not api_key:
+            continue
+        params = {str(p) for p in _as_list(item.get("supported_parameters"))}
+        caps = _as_dict(item.get("capabilities"))
+        tools = (
+            "tools" in params
+            or item.get("tools") is True
+            or item.get("supports_tools") is True
+            or caps.get("function_calling") is True
+            or _as_dict(caps.get("tools")).get("supported") is True
+            or _any_true([_as_dict(p).get("supports_tools") for p in providers])
+        )
+        ctx = (
+            _int(item.get("context_length"))
+            or _int(_as_dict(item.get("top_provider")).get("context_length"))
+            or _int(_as_dict(item.get("limit")).get("context"))
+            or next((c for p in providers if (c := _int(_as_dict(p).get("context_length")))), None)
+        )
+        free = tier == "free_cloud"
+        out.append(
+            LiveModel(
+                id=f"{entry.name}/{model_id}",
+                tier=tier,
+                provider=entry.name,
+                source=f"provider:{entry.name}",
+                modalities=inputs or ["text"],
+                tools_ok=tools,
+                json_ok=bool(params & {"response_format", "structured_outputs"})
+                or caps.get("structured_output") is True,
+                reasoning_ok="reasoning" in params
+                or item.get("reasoning") is True
+                or _as_dict(caps.get("reasoning")).get("supported") is True,
+                ctx=ctx,
+                price_in=0.0 if free else None,
+                price_out=0.0 if free else None,
+                retains_data=entry.retains_data,
+                match_names=[model_id],
+            )
+        )
+    return out
 
 
 def openai_compatible_models(

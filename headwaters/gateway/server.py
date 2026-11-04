@@ -15,31 +15,41 @@ from __future__ import annotations
 import asyncio
 import hmac
 import socket
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any
-from urllib.parse import urlsplit
+from typing import Any, Protocol
+from urllib.parse import parse_qs, quote, urlsplit
 
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from headwaters.core.catalog.http import is_loopback_host
+from headwaters.core.keys import KeyStoreError
 
 __all__ = [
     "GuardedApp",
     "HttpServer",
+    "KeysActions",
     "LoopbackOnlyApp",
     "build_app",
     "build_status_page_app",
+    "is_dashboard_authority",
+    "is_dashboard_origin",
     "is_loopback_authority",
 ]
 
 HEALTH_PATH = "/health"
 STATUS_PAGE_PATHS = ("/", "/index.html")
+# The dashboard's three writes (HDW-503): path -> the backend call it makes. Nothing else is a
+# write, and a JSON body is never accepted: a cross-site page can post a form, not read one.
+KEYS_PATHS: dict[str, str] = {"/keys/set": "save", "/keys/remove": "remove", "/keys/test": "test"}
+FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+MAX_FORM_BYTES = 8 * 1024
+KEYS_SECTION = "keys"
 PAGE_FAILED = (
     "<!doctype html><title>Headwaters status</title>"
     "<h1>Headwaters status</h1><p>The page could not be built; the daemon log has the error.</p>"
@@ -47,6 +57,22 @@ PAGE_FAILED = (
 GRACE_S = 5
 
 JsonProvider = Callable[[], Mapping[str, Any]]
+
+
+class KeysActions(Protocol):
+    """What the dashboard needs from the keys backend: exactly three calls, no other writes."""
+
+    def save(self, alias: str, provider: str, secret: str) -> str:
+        """Store a key; returns the provider whose section the page comes back to."""
+        ...
+
+    def remove(self, alias: str) -> str:
+        """Remove a stored key; returns the provider whose section the page comes back to."""
+        ...
+
+    def test(self, alias: str) -> str:
+        """Test one key; returns the provider whose section the page comes back to."""
+        ...
 
 
 def is_loopback_authority(value: str) -> bool:
@@ -67,6 +93,62 @@ def _origin_ok(origin: str) -> bool:
         return is_loopback_host(urlsplit(origin).hostname)
     except ValueError:
         return False
+
+
+def is_dashboard_authority(value: str, port: int) -> bool:
+    """True when ``Host`` names *this* dashboard: loopback, and on this dashboard's own port.
+
+    The read path answers ``421 bad_host`` for a name that is not loopback (HDW-404). A write is
+    stricter: a local service on another port, or a browser that was pointed at a different port
+    on this host, is not this dashboard, so the port must be the one the daemon really bound
+    (``DaemonInfo.ports.dashboard``) rather than the configured default.
+    """
+    if not value or not is_loopback_authority(value):
+        return False
+    try:
+        return urlsplit("//" + value).port == port
+    except ValueError:
+        return False
+
+
+def is_dashboard_origin(value: str, port: int) -> bool:
+    """True when ``Origin`` (or ``Referer``) is this dashboard's own origin, port included."""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    return parts.scheme == "http" and is_loopback_host(parts.hostname) and parts.port == port
+
+
+def _read_refusal(headers: Mapping[str, str]) -> tuple[int, str] | None:
+    """The read path's guard: a foreign ``Host`` is ``421``, a foreign ``Origin`` is ``403``."""
+    if not is_loopback_authority(headers.get("host", "")):
+        return 421, "bad_host"
+    origin = headers.get("origin")
+    if origin is not None and not _origin_ok(origin):
+        return 403, "bad_origin"
+    return None
+
+
+def _refused(status: int, code: str) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": {"code": code}}, status_code=status)
+
+
+async def _form_body(request: Request) -> bytes | None:
+    """The whole form body, or ``None`` when a key form cannot possibly be that large."""
+    declared = request.headers.get("content-length", "").strip()
+    if declared.isdigit() and int(declared) > MAX_FORM_BYTES:
+        return None
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_FORM_BYTES:
+            return None
+    return bytes(body)
+
+
+def _first(form: Mapping[str, list[str]], name: str) -> str:
+    return form.get(name, [""])[0]
 
 
 def _credentials(headers: Mapping[str, str]) -> list[str]:
@@ -126,22 +208,27 @@ class GuardedApp:
 
 
 class LoopbackOnlyApp:
-    """ASGI wrapper for the read-only status page (HDW-404): loopback ``Host``/``Origin`` only.
+    """ASGI wrapper for the dashboard: loopback ``Host``/``Origin`` on the read paths.
 
-    The page holds no secret and offers no control, so it needs no token; it is still refused
-    unless the ``Host`` (and any ``Origin``) is loopback, which is what stops a page on another
-    machine from pointing a browser at ``127.0.0.1`` here (DNS rebinding).
+    The page holds no secret and needs no token, but a request whose ``Host`` is not loopback is
+    ``421 bad_host``, which is what stops a page on another machine from pointing a browser at
+    ``127.0.0.1`` here (DNS rebinding).
+
+    The key writes (HDW-503) are exempt: they answer ``403``, in their own words, from the route
+    that also checks the port, the origin and the CSRF token. ``write_paths`` is empty unless the
+    app was built with a keys backend.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, write_paths: Collection[str] = ()) -> None:
         self._app = app
+        self._write_paths = frozenset(write_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self._app(scope, receive, send)  # lifespan
             return
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
-        refusal = self._refusal(headers)
+        refusal = self._refusal(headers, scope.get("path", ""))
         if refusal is None:
             await self._app(scope, receive, send)
         elif scope["type"] == "http":
@@ -151,30 +238,115 @@ class LoopbackOnlyApp:
         else:
             await send({"type": "websocket.close", "code": 1008})
 
-    def _refusal(self, headers: Mapping[str, str]) -> tuple[int, str] | None:
-        if not is_loopback_authority(headers.get("host", "")):
-            return 421, "bad_host"
-        origin = headers.get("origin")
-        if origin is not None and not _origin_ok(origin):
-            return 403, "bad_origin"
-        return None
+    def _refusal(self, headers: Mapping[str, str], path: str = "") -> tuple[int, str] | None:
+        if path in self._write_paths:
+            return None  # the write route refuses with 403, so this wrapper must not pre-empt it
+        return _read_refusal(headers)
 
 
-def build_status_page_app(*, render: Callable[[], str]) -> ASGIApp:
-    """The dashboard's read-only page on ``GET /``. ``render`` returns the whole HTML body.
+class _KeysRoute:
+    """One ``POST /keys/<action>``: host and port, origin, form, CSRF token, then one write.
 
-    It runs off the event loop: it reads rules and the shared SQLite state.
+    Every refusal is a ``403`` with a code and nothing written: a foreign ``Host`` (the wrong port
+    included), a foreign or unparseable ``Origin``, a missing or wrong token. The body must be a
+    small form: anything else is ``415`` or ``413`` before it is read. A refusal the person can act
+    on (an alias that does not exist) comes back as the page with a sentence, at ``400``.
+    """
+
+    def __init__(
+        self,
+        action: str,
+        keys: KeysActions,
+        csrf: str,
+        port: int,
+        render: Callable[[str | None, str | None], str],
+    ) -> None:
+        self._action = action
+        self._keys = keys
+        self._csrf = csrf
+        self._port = port
+        self._render = render
+
+    async def handle(self, request: Request) -> Response:
+        headers = request.headers
+        if not is_dashboard_authority(headers.get("host", ""), self._port):
+            return _refused(403, "bad_host")
+        origin = headers.get("origin") or headers.get("referer")
+        if origin is not None and not is_dashboard_origin(origin, self._port):
+            return _refused(403, "bad_origin")
+        media = headers.get("content-type", "").split(";")[0].strip().lower()
+        if media != FORM_MEDIA_TYPE:
+            return _refused(415, "unsupported_media_type")
+        body = await _form_body(request)
+        if body is None:
+            return _refused(413, "body_too_large")
+        try:
+            form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+        except UnicodeDecodeError:
+            return _refused(400, "bad_form")
+        if not self._token_ok(_first(form, "csrf")):
+            return _refused(403, "bad_csrf")
+        try:
+            provider = self._run(form)
+        except KeyStoreError as exc:
+            return await self._again(400, str(exc))
+        except Exception:
+            return await self._again(
+                500, "the change could not be completed; the daemon log has the error"
+            )
+        target = f"/?section={KEYS_SECTION}#keys-{quote(provider, safe='')}"
+        return RedirectResponse(target, status_code=303)
+
+    def _token_ok(self, given: str) -> bool:
+        if not self._csrf:
+            return False  # no token configured means no write is allowed, never "any token"
+        return hmac.compare_digest(given.encode("utf-8"), self._csrf.encode("utf-8"))
+
+    def _run(self, form: Mapping[str, list[str]]) -> str:
+        if self._action == "save":
+            alias = _first(form, "alias")
+            return self._keys.save(alias, _first(form, "provider"), _first(form, "secret"))
+        if self._action == "remove":
+            return self._keys.remove(_first(form, "alias"))
+        return self._keys.test(_first(form, "alias"))
+
+    async def _again(self, status: int, message: str) -> HTMLResponse:
+        body = await asyncio.to_thread(self._render, KEYS_SECTION, message)
+        return HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+def build_status_page_app(
+    *,
+    render: Callable[[str | None, str | None], str],
+    keys: KeysActions | None = None,
+    csrf: str = "",
+    port: int | None = None,
+) -> ASGIApp:
+    """The dashboard: the page on ``GET /`` plus its three key writes on ``POST /keys/*`` (HDW-503).
+
+    ``render(section, error)`` returns the whole HTML body: ``section`` is ``"keys"`` when the
+    request asked for that section first (``?section=keys``) and ``error`` is a sentence to show
+    when a write was refused. It runs off the event loop: it reads rules and the shared SQLite
+    state. The writes are registered only when a backend *and* this dashboard's port are given,
+    because the guard needs the port the socket really bound.
     """
 
     async def get_page(request: Request) -> HTMLResponse:
         try:
-            body = await asyncio.to_thread(render)
+            body = await asyncio.to_thread(render, request.query_params.get("section"), None)
         except Exception:
             return HTMLResponse(PAGE_FAILED, status_code=500)
         return HTMLResponse(body, headers={"Cache-Control": "no-store"})
 
-    routes = [Route(path, get_page, methods=["GET"]) for path in STATUS_PAGE_PATHS]
-    return LoopbackOnlyApp(Starlette(routes=routes))
+    routes: list[Route] = [Route(path, get_page, methods=["GET"]) for path in STATUS_PAGE_PATHS]
+    write_paths: tuple[str, ...] = ()
+    if keys is not None and port is not None:
+        write_paths = tuple(KEYS_PATHS)
+        routes += [
+            Route(path, _KeysRoute(action, keys, csrf, port, render).handle, methods=["POST"])
+            for path, action in KEYS_PATHS.items()
+        ]
+    return LoopbackOnlyApp(Starlette(routes=routes), write_paths=write_paths)
 
 
 def build_app(

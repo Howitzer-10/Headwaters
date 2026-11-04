@@ -25,6 +25,9 @@ class ExecTarget:
     num_ctx: int | None = None
     cold: bool | None = None
     api_base: str | None = None
+    # A provider that cannot be routed without a per-conversation header names it here (catalog
+    # ``session_header``); the executor fills the value from the request's session key.
+    session_header: str | None = None
 
 
 @dataclass(frozen=True)

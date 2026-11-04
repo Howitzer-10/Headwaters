@@ -109,7 +109,8 @@
     }
   ],
   "free_limits": [
-    {"provider": "openrouter", "model": null, "rpm": 20, "rpd": 50, "verify": true}
+    {"provider": "openrouter", "model": null, "rpm": 20, "rpd": 50, "verify": true},
+    {"provider": "nvidia", "model": null, "rpm": 40, "rpd": null, "verify": true}
   ],
   "wall_patterns": [
     {"provider": "*", "status_codes": [429], "body_regex": null, "kind": "rate_limit", "scope": "model", "verify": true, "source": "RFC 9110 / provider error docs: 429 is rate limiting", "checked": "2026-11-01"},
@@ -165,6 +166,82 @@
     }
   },
   "endpoints": {"openrouter_base_url": "https://openrouter.ai/api/v1"},
+  "providers": [
+    {
+      "name": "nvidia", "title": "NVIDIA NIM (build.nvidia.com)", "env_var": "NVIDIA_API_KEY",
+      "base_url": "https://integrate.api.nvidia.com/v1", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models", "tier": "free_cloud",
+      "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": "(?i)(embed|rerank|reward|guard|safety)",
+      "retains_data": true,
+      "free_notes": "Free to prototype with, up to 40 requests per minute on most models; trial terms apply.",
+      "source_url": "https://build.nvidia.com/api/runtime/content/help-center-faq.yaml",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "huggingface", "title": "Hugging Face Inference Providers", "env_var": "HF_TOKEN",
+      "base_url": "https://router.huggingface.co/v1", "auth_style": "bearer",
+      "metadata_url": "https://huggingface.co/api/whoami-v2", "models_path": "/models",
+      "tier": "paid", "honor_free_markers": true, "key_required": true,
+      "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "Free accounts have no included credits; only models a provider marks is_free count as free.",
+      "source_url": "https://huggingface.co/docs/inference-providers/index",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "mistral", "title": "Mistral La Plateforme", "env_var": "MISTRAL_API_KEY",
+      "base_url": "https://api.mistral.ai/v1", "auth_style": "bearer",
+      "metadata_url": "https://api.mistral.ai/v1/models", "models_path": "/models",
+      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "A free mode exists, but nothing in the API tells a free key from a paid one, so every model counts as paid.",
+      "source_url": "https://docs.mistral.ai/api/",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "pollinations", "title": "Pollinations", "env_var": "POLLINATIONS_API_KEY",
+      "base_url": "https://gen.pollinations.ai/v1", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models",
+      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "Spend is metered in Pollen and the docs name no keyless generation, so every model counts as paid.",
+      "source_url": "https://gen.pollinations.ai/llms.txt",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "kilo", "title": "Kilo Gateway", "env_var": "KILO_API_KEY",
+      "base_url": "https://ai-gateway.kilo.ai/api/v1", "auth_style": "bearer",
+      "metadata_url": null, "models_path": "/models",
+      "tier": "paid", "honor_free_markers": true, "key_required": false,
+      "skip_id_pattern": null, "retains_data": null,
+      "free_notes": "Models marked :free or isFree work without a key (200 requests per hour per IP); the rest need a key.",
+      "source_url": "https://kilo.ai/docs/gateway/api-reference",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "opencode", "title": "OpenCode Console", "env_var": "OPENCODE_API_KEY",
+      "base_url": "https://opencode.ai/inference/openai/v1", "auth_style": "bearer",
+      "metadata_url": "https://opencode.ai/inference/v1/models", "models_path": "/models",
+      "models_endpoint": "https://opencode.ai/inference/v1/models",
+      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": "(?i)-free$", "retains_data": null,
+      "free_notes": "Pay as you go (paid tier by subscription/credits, not a Headwaters entitlement). Nine -free ids are listed at cost 0, but they are app-only: calling one from here returns HTTP 429 FreeUsageLimitError (\"Free usage limit reached. Free models work in OpenCode\") with or without a key, so they are refused and every callable model is paid. The HTTP 403 seen when probing was Cloudflare rejecting a generic HTTP-library user agent (error code 1010), not an auth gate; this client now sends its own product user agent.",
+      "source_url": "https://opencode.ai/docs/zen/",
+      "checked": "2026-11-03", "verify": true
+    },
+    {
+      "name": "opencode-go", "title": "OpenCode Go", "env_var": "OPENCODE_API_KEY",
+      "base_url": "https://opencode.ai/inference/go/openai/v1", "auth_style": "bearer",
+      "metadata_url": "https://opencode.ai/inference/go/v1/models", "models_path": "/models",
+      "models_endpoint": "https://opencode.ai/inference/go/v1/models",
+      "tier": "paid", "honor_free_markers": false, "key_required": true,
+      "skip_id_pattern": null, "retains_data": null,
+      "session_header": "x-opencode-session",
+      "free_notes": "The Go plan is a subscription (Go, Go Plus, Go Teams) - paid money, though Headwaters has no entitlement system to check, so the key is the only gate. Beam Free and Iceman Contributor Free are included in it at no per-call price; the plan itself is paid, so no model here counts as free. Every call must carry a stable per-conversation id in the x-opencode-session header or it is refused with HTTP 400 MissingSessionID; Headwaters sends the router's session key.",
+      "source_url": "https://opencode.ai/docs/go/",
+      "checked": "2026-11-03", "verify": true
+    }
+  ],
   "secret_patterns": [
     {"name": "sk-style-api-key", "regex": "\\bsk-[A-Za-z0-9_-]{20,}", "verify": true},
     {"name": "aws-access-key-id", "regex": "\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b", "verify": true},

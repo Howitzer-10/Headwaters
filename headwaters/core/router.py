@@ -185,7 +185,14 @@ class Router:
         run = await self._prepare(request)
         decision = run.first
         while True:
-            events = self._executor.run(decision, run.messages, request.tools, True, run.options)
+            events = self._executor.run(
+                decision,
+                run.messages,
+                request.tools,
+                True,
+                run.options,
+                conversation_id=run.key,
+            )
             seen_first = False
             result: ExecResult | None = None
             failure: ExecutorError | None = None
@@ -356,7 +363,12 @@ class Router:
             self._emit(run, "executing", decision)
             try:
                 result = await self._executor.run(
-                    decision, run.messages, run.request.tools, False, run.options
+                    decision,
+                    run.messages,
+                    run.request.tools,
+                    False,
+                    run.options,
+                    conversation_id=run.key,
                 )
             except ExecutorError as exc:
                 decision = await self._recover(run, decision, exc)

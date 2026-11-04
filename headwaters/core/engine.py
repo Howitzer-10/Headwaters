@@ -30,6 +30,7 @@ from headwaters.core.keys import KeyStore
 from headwaters.core.ollama_remote import RemotePatterns, remote_patterns_from
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.policy.types import RouteDecision
+from headwaters.core.providers import Registry
 from headwaters.core.quotas import QuotaTracker
 from headwaters.core.router import CandidateSource, RequirementsAnalyzer, Router
 from headwaters.core.rules import OpenAICompatEndpoint, Rules, RulesProvider, as_provider
@@ -43,6 +44,7 @@ OLLAMA = "ollama"
 OPENROUTER = "openrouter"
 OPENCODE = "opencode"
 _OPENAI_ROUTE = "openai"
+ANONYMOUS_KEY = "headwaters-no-key"
 
 _REQUEST_CANDIDATES: ContextVar[Mapping[str, Candidate] | None] = ContextVar(
     "headwaters_request_candidates", default=None
@@ -58,9 +60,11 @@ class TargetBuilder:
         env: Mapping[str, str] | None = None,
         *,
         key_store: KeyStore | None = None,
+        registry: Registry | None = None,
     ) -> None:
         self._env = os.environ if env is None else env
         self._keys = key_store
+        self._registry = registry if registry is not None else Registry()
         self._endpoints: dict[str, OpenAICompatEndpoint] = {
             e.name: e for e in rules.models.openai_compatible
         }
@@ -87,8 +91,28 @@ class TargetBuilder:
             name = model.removeprefix(prefix)
             base = endpoint.base_url.rstrip("/")
             return ExecTarget(model, provider, f"{_OPENAI_ROUTE}/{name}", api_base=base)
+        entry = self._registry.get(provider)
+        if entry is not None:
+            name = model.removeprefix(prefix)
+            if entry.refuses(name):
+                # The provider's own listing excludes this id for outside clients (OpenCode's
+                # free-tier models are app-only): refuse instead of calling for a 429.
+                raise ExecutorError(
+                    "provider_unsupported",
+                    f"{entry.title} does not serve {name!r} outside its own app.",
+                    provider=provider,
+                    model=model,
+                )
+            base = entry.base_url.rstrip("/")
+            return ExecTarget(
+                model,
+                provider,
+                f"{_OPENAI_ROUTE}/{name}",
+                api_base=base,
+                session_header=entry.session_header,
+            )
         if provider == OPENCODE:
-            # Free-tier models are served only to OpenCode itself (403 elsewhere); defence in
+            # Free-tier models are served only to OpenCode itself (429 elsewhere); defence in
             # depth, since discovery no longer offers them (A-OC-3, HDW-150).
             raise ExecutorError(
                 "provider_unsupported",
@@ -105,13 +129,26 @@ class TargetBuilder:
         A ``KeyStore`` answers first (credential store, then the environment variable), so a key
         saved with ``headwaters keys set`` reaches the call. Without a store this stays the
         endpoint-only env lookup it always was.
+
+        A registered provider never gets ``None``: litellm's ``openai/`` route would then send
+        the user's ``OPENAI_API_KEY`` to another company's server, so a missing key becomes a
+        fixed placeholder (an anonymous call, or a clean 401 from the provider).
         """
+        key = self._stored_key(provider)
+        if key is None and provider in self._registry:
+            return ANONYMOUS_KEY
+        return key
+
+    def _stored_key(self, provider: str) -> str | None:
         if self._keys is not None:
             return self._keys.api_key_for(provider)
         endpoint = self._endpoints.get(provider)
-        if endpoint is None or not endpoint.api_key_env:
-            return None
-        return self._env.get(endpoint.api_key_env) or None
+        if endpoint is not None and endpoint.api_key_env:
+            return self._env.get(endpoint.api_key_env) or None
+        entry = self._registry.get(provider)
+        if entry is not None:
+            return self._env.get(entry.env_var) or None
+        return None
 
 
 class _RememberingSource:
@@ -184,8 +221,12 @@ def build_engine(
     provider = as_provider(rules)
     rules = snapshot if snapshot is not None else provider()
     patterns = remote_patterns_from(catalog)
-    keys = key_store if key_store is not None else KeyStore(rules, env=env)
-    targets = TargetBuilder(rules, env, key_store=keys)
+    keys = (
+        key_store
+        if key_store is not None
+        else KeyStore(rules, env=env, registry=Registry.from_catalog(catalog))
+    )
+    targets = TargetBuilder(rules, env, key_store=keys, registry=Registry.from_catalog(catalog))
     registry = FeatureRegistry()
     discover_features(registry)
     registry.set_flags(rules.features)
@@ -196,7 +237,7 @@ def build_engine(
         targets,
         cloud_factory=cloud_factory,
         local_factory=local_factory,
-        api_key_for=keys.api_key_for,
+        api_key_for=targets.api_key_for,
         key_alias_for=keys.key_alias_for,
         remote_patterns=patterns,
     )

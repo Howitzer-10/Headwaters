@@ -150,6 +150,71 @@ class Endpoints(_Model):
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", min_length=1)
 
 
+ProviderTier = Literal["free_cloud", "paid"]
+# Names the router already uses for providers that are wired in code (or never routed).
+# ``opencode`` left this set in HDW-515: it is a catalog row now (Console, key required).
+RESERVED_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "ollama"})
+
+
+class ProviderEntry(_Model):
+    """One OpenAI-compatible cloud provider, registered as data (HDW-514).
+
+    Adding a provider is a catalog entry plus a test: the key store, ``keys test``, discovery and
+    the executor all read this row. ``tier`` is what an unmarked model of the provider costs:
+    ``paid`` keeps every model out of the free scope unless the provider's own listing marks it
+    free and ``honor_free_markers`` is on. Every row names its docs page and the day it was read.
+    """
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    title: str = Field(min_length=1)
+    env_var: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    base_url: str = Field(pattern=r"^https://\S+$")
+    auth_style: Literal["bearer"] = "bearer"
+    metadata_url: str | None = Field(default=None, pattern=r"^https://\S+$")
+    models_path: str = Field(default="/models", pattern=r"^/\S*$")
+    # HDW-515: some providers list models outside the chat root (OpenCode: chat on
+    # ``/inference/openai/v1``, listing on ``/inference/v1/models``). A full URL here wins over
+    # ``base_url + models_path``; it is never guessed, only read from the provider's docs.
+    models_endpoint: str | None = Field(default=None, pattern=r"^https://\S+$")
+    tier: ProviderTier
+    honor_free_markers: bool = False
+    key_required: bool = True
+    skip_id_pattern: str | None = None
+    # HDW-515 amendment: a provider that routes a call by conversation requires this header on
+    # every chat request (OpenCode Go answers 400 MissingSessionID without it, so a plain
+    # bearer-style call can never succeed). The header name is data; the value is the request's
+    # stable session key, set by the executor. ``None`` means the provider needs no such header.
+    session_header: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    retains_data: bool | None = None
+    free_notes: str | None = None
+    source_url: str = Field(pattern=r"^https://\S+$")
+    checked: str = Field(pattern=_DATE)
+    verify: bool = False
+
+    @field_validator("skip_id_pattern")
+    @classmethod
+    def _skip_is_regex(cls, value: str | None) -> str | None:
+        return value if value is None else _check_regex(value)
+
+    @property
+    def models_url(self) -> str:
+        if self.models_endpoint is not None:
+            return self.models_endpoint
+        return self.base_url.rstrip("/") + self.models_path
+
+    def refuses(self, model_id: str) -> bool:
+        """Whether ``skip_id_pattern`` covers this upstream id.
+
+        Discovery uses it to drop ids the provider has for its own client only; the executor uses
+        it so such a model is refused with a clear error instead of being called for a 403
+        (HDW-515, defence in depth — no model slug is ever hard-coded).
+        """
+        return (
+            self.skip_id_pattern is not None
+            and re.search(self.skip_id_pattern, model_id) is not None
+        )
+
+
 class SubscriptionRate(_Model):
     plan: str = Field(min_length=1)
     usd_per_month: float = Field(ge=0)
@@ -243,11 +308,21 @@ class Catalog(_Model):
     subscription_rates: list[SubscriptionRate] = Field(default_factory=list)
     analyzer_hints: AnalyzerHints = Field(default_factory=AnalyzerHints)
     endpoints: Endpoints = Field(default_factory=Endpoints)
+    providers: list[ProviderEntry] = Field(default_factory=list)
     prompt_bank_ref: str | None = None
 
     @model_validator(mode="after")
     def _cross_references(self) -> Self:
         problems: list[str] = []
+        seen_names: set[str] = set()
+        # A repeated ``env_var`` is allowed (HDW-515: ``opencode`` and ``opencode-go`` both read
+        # one key): the key store keeps a record per provider name, so the share is safe.
+        for provider in self.providers:
+            if provider.name in seen_names:
+                problems.append(f"providers: name {provider.name!r} is listed twice")
+            seen_names.add(provider.name)
+            if provider.name in RESERVED_PROVIDER_NAMES:
+                problems.append(f"providers: {provider.name!r} is a reserved provider name")
         names: dict[str, int] = {}
         for index, entry in enumerate(self.models):
             for name in {entry.id.lower(), *(a.lower() for a in entry.aliases)}:

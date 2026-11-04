@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import secrets
 import socket
 import threading
 import time
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import headwaters
+from headwaters.control.keys import DashboardKeys
 from headwaters.control.status_page import build_page, render_html
 from headwaters.core import netports
 from headwaters.core.catalog import discovery, updater
@@ -96,6 +98,11 @@ class Daemon:
     # keyring backend. The executor, the router's key-scoped walls and the key-poll timer all read
     # this one keyring, so they agree on a key's alias.
     keys: KeyStore | None = None
+    # The dashboard's CSRF token (HDW-503): one random value per daemon start, held in memory only.
+    # It is what a page this daemon did not serve cannot produce, and it never reaches
+    # ``daemon.json`` or a log line. A restart changes it, which only means the page must be
+    # reloaded before its forms work again.
+    dashboard_csrf: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     started_at: float = field(default_factory=time.time)
     engine: Engine | None = None
     last_keep_warm: KeepWarmResult | None = None
@@ -345,12 +352,14 @@ class Daemon:
         registry.set_flags(self.live_rules.features)
         return registry
 
-    def dashboard_page(self) -> str:
-        """The read-only status page (HDW-404), built from the live rules and the shared state.
+    def dashboard_page(self, section: str | None = None, error: str | None = None) -> str:
+        """The status page (HDW-404, HDW-503), built from the live rules and the shared state.
 
-        Blocking (SQLite reads): ``build_status_page_app`` runs it off the event loop. The project
-        rule is read from the daemon's working directory, as ``headwaters status`` does; an
-        unreadable project file must not take the page down, so it falls back to the defaults.
+        Blocking (SQLite reads and the credential store): ``build_status_page_app`` runs it off
+        the event loop. The project rule is read from the daemon's working directory, as
+        ``headwaters status`` does; an unreadable project file must not take the page down, so it
+        falls back to the defaults. ``section`` is ``keys`` when the request asked for that
+        section first, and ``error`` is the sentence a refused write came back with.
         """
         rules = self.live_rules
         try:
@@ -368,10 +377,12 @@ class Daemon:
             project_path=project_path,
             db=self.db,
             registry=self.feature_registry(),
+            keys=self.key_store,
+            csrf=self.dashboard_csrf,
             version=headwaters.__version__,
             catalog=catalog,
         )
-        return render_html(data)
+        return render_html(data, section=section, error=error)
 
     async def serve(self) -> None:
         self._stop = asyncio.Event()
@@ -396,7 +407,18 @@ class Daemon:
             self._gateway_server = HttpServer(self.gateway_app(), self.gateway_sock)
             servers.append(self._gateway_server)
         if self.dashboard_sock is not None:
-            page = build_status_page_app(render=self.dashboard_page)
+            page = build_status_page_app(
+                render=self.dashboard_page,
+                keys=DashboardKeys(
+                    store=lambda: self.key_store,
+                    rules=lambda: self.live_rules,
+                    db=self.db,
+                ),
+                csrf=self.dashboard_csrf,
+                # The port the socket really bound, not ``rules.dashboard.port`` (FU-201-6): the
+                # write guard compares the Host against the port a person can actually reach.
+                port=self.ports.dashboard,
+            )
             self._dashboard_server = HttpServer(page, self.dashboard_sock)
             servers.append(self._dashboard_server)
         serving = [asyncio.create_task(server.serve()) for server in servers]

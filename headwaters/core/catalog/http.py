@@ -13,7 +13,8 @@ import urllib.request
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
-USER_AGENT = "Headwaters-discovery"
+from headwaters.core.user_agent import USER_AGENT
+
 LOOPBACK_IPV4 = "127.0.0.1"
 
 

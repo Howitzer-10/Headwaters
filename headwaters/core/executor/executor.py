@@ -35,6 +35,7 @@ from headwaters.core.executor.types import (
 from headwaters.core.ollama_remote import RemotePatterns, is_remote_name
 from headwaters.core.policy.types import RouteDecision
 from headwaters.core.rules import ExecutorRules, Rules, RulesProvider, as_provider
+from headwaters.core.user_agent import USER_AGENT
 from headwaters.core.walls import WallClassifier
 
 # Maps a decision to what to call (litellm route or Ollama name, ``num_ctx``, cold flag).
@@ -96,6 +97,8 @@ class Executor:
         tools: Sequence[ToolSpec] | None = ...,
         stream: Literal[False] = ...,
         options: ExecOptions | None = ...,
+        *,
+        conversation_id: str | None = ...,
     ) -> Coroutine[Any, Any, ExecResult]: ...
 
     @overload
@@ -106,6 +109,8 @@ class Executor:
         tools: Sequence[ToolSpec] | None,
         stream: Literal[True],
         options: ExecOptions | None = ...,
+        *,
+        conversation_id: str | None = ...,
     ) -> AsyncIterator[StreamEvent]: ...
 
     def run(
@@ -115,14 +120,21 @@ class Executor:
         tools: Sequence[ToolSpec] | None = None,
         stream: bool = False,
         options: ExecOptions | None = None,
+        *,
+        conversation_id: str | None = None,
     ) -> Coroutine[Any, Any, ExecResult] | AsyncIterator[StreamEvent]:
         """``stream=False`` -> awaitable ``ExecResult`` (raises ``ExecutorError``).
         ``stream=True`` -> async iterator of ``StreamEvent``: errors before the first token are
-        raised (the caller may fail over); later ones arrive as an ``error`` event."""
+        raised (the caller may fail over); later ones arrive as an ``error`` event.
+
+        ``conversation_id`` is the caller's stable per-conversation key. A provider whose catalog
+        row names a ``session_header`` (OpenCode Go) gets it in that header, because it refuses a
+        call without one.
+        """
         opts = options or ExecOptions()
         if stream:
-            return self._events(decision, messages, tools, opts)
-        return self._collect(decision, messages, tools, opts)
+            return self._events(decision, messages, tools, opts, conversation_id)
+        return self._collect(decision, messages, tools, opts, conversation_id)
 
     async def _collect(
         self,
@@ -130,9 +142,10 @@ class Executor:
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] | None,
         options: ExecOptions,
+        conversation_id: str | None = None,
     ) -> ExecResult:
         final: ExecResult | None = None
-        async for event in self._events(decision, messages, tools, options):
+        async for event in self._events(decision, messages, tools, options, conversation_id):
             if event.kind == "error" and event.error is not None:
                 raise event.error
             if event.kind == "done":
@@ -142,7 +155,7 @@ class Executor:
         return final
 
     def _prepare(
-        self, decision: RouteDecision
+        self, decision: RouteDecision, conversation_id: str | None = None
     ) -> tuple[Backend, ExecTarget, dict[str, str], str | None]:
         rules = self._rules_source()  # one reading per call
         enforce_scope(decision, rules, self._remote_patterns)  # before any backend exists
@@ -153,7 +166,20 @@ class Executor:
             return self._local_factory(rules.tiers.local.host), target, {}, None
         if self._cloud is None:
             self._cloud = self._cloud_factory()
-        headers = attribution_headers(rules.attribution) if target.provider == OPENROUTER else {}
+        # Every cloud call names Headwaters: a Cloudflare-fronted provider answers a generic SDK
+        # or HTTP-library user agent with 403 "error code: 1010", before it reads the key.
+        headers = {"User-Agent": USER_AGENT}
+        if target.provider == OPENROUTER:
+            headers.update(attribution_headers(rules.attribution))
+        if target.session_header is not None:
+            if not conversation_id:
+                raise ExecutorError(
+                    "session_required",
+                    f"{target.provider} needs a per-conversation session id for every call.",
+                    provider=target.provider,
+                    model=decision.model,
+                )
+            headers[target.session_header] = conversation_id
         key = self._api_key_for(target.provider) if self._api_key_for else None
         return self._cloud, target, headers, key
 
@@ -197,8 +223,9 @@ class Executor:
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] | None,
         options: ExecOptions,
+        conversation_id: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        backend, target, headers, key = self._prepare(decision)
+        backend, target, headers, key = self._prepare(decision, conversation_id)
         cfg = self._cfg()
         if decision.tier != "local" and options.reasoning is True:
             options = replace(options, reasoning=cfg.default_effort)

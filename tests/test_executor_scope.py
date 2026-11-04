@@ -13,6 +13,7 @@ from headwaters.core.executor.types import Delta, ExecResult
 from headwaters.core.policy.types import RouteDecision
 from headwaters.core.rules import Rules
 from headwaters.core.scope import FREE_TIERS, ScopeDecision
+from headwaters.core.user_agent import USER_AGENT
 from tests.executor_support import ScriptedBackend, decision, make_executor, run_once
 
 SCRIPT = [Delta(content="Hello"), Delta(finish_reason="stop")]
@@ -106,18 +107,20 @@ def test_tier_outside_scope_is_refused() -> None:
 def test_attribution_is_off_by_default_and_openrouter_only() -> None:
     backend = ScriptedBackend(SCRIPT)
     run(make_executor(backend), decision())
-    assert backend.requests[0].headers == {}  # no telemetry by default
+    # Every cloud call names Headwaters; no telemetry unless attribution is configured.
+    assert backend.requests[0].headers == {"User-Agent": USER_AGENT}
 
     rules = Rules.model_validate({"attribution": {"referer": "https://hw.example", "title": "HW"}})
     on = ScriptedBackend(SCRIPT)
     run(make_executor(on, rules=rules), decision())
     assert on.requests[0].headers == {
+        "User-Agent": USER_AGENT,
         "HTTP-Referer": "https://hw.example",
         "X-OpenRouter-Title": "HW",
     }
     other = ScriptedBackend(SCRIPT)
     run(make_executor(other, rules=rules), decision("paid", "anthropic/claude-x"))
-    assert other.requests[0].headers == {}
+    assert other.requests[0].headers == {"User-Agent": USER_AGENT}
 
 
 def test_api_key_comes_from_the_key_resolver() -> None:

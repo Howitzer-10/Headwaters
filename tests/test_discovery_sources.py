@@ -13,6 +13,7 @@ from headwaters.core.catalog import sources
 from headwaters.core.catalog.http import SourceError
 from headwaters.core.catalog.schema import Endpoints
 from headwaters.core.rules import OpenAICompatEndpoint
+from headwaters.core.user_agent import USER_AGENT
 
 GIB = 1024**3
 
@@ -372,6 +373,16 @@ def _patch_opener(monkeypatch: pytest.MonkeyPatch, behaviour: Any) -> list[Any]:
 
     monkeypatch.setattr(urllib.request, "build_opener", lambda *h: Opener())
     return seen
+
+
+def test_urllib_http_sends_a_product_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Cloudflare answers a generic HTTP-library user agent with 403 "error code: 1010".
+    seen = _patch_opener(monkeypatch, lambda r: _Resp(b"{}"))
+    http_mod.UrllibHttp().request_json("GET", "https://opencode.ai/inference/v1/models")
+    sent = seen[0].get_header("User-agent")
+    assert sent == USER_AGENT
+    assert sent.startswith("headwaters/")
+    assert not sent.lower().startswith(("python-urllib", "urllib3", "httpx", "openai"))
 
 
 def test_urllib_http_success_and_post_body(monkeypatch: pytest.MonkeyPatch) -> None:
