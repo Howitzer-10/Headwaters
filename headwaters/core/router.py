@@ -48,6 +48,7 @@ from headwaters.core.policy.filters import Candidate, hard_filter
 from headwaters.core.policy.scoring import AGENTIC_TASK
 from headwaters.core.policy.types import PolicyContext, PolicyRequest, RouteDecision
 from headwaters.core.quotas import QuotaTracker, WallDecision
+from headwaters.core.router_failures import redact, terminal_message
 from headwaters.core.router_log import LogEntry
 from headwaters.core.router_plan import RoutePlan
 from headwaters.core.router_prep import (
@@ -80,6 +81,7 @@ from headwaters.core.rules import Rules, RulesProvider, as_provider
 from headwaters.core.scope import (
     ScopeDecision,
     ScopeError,
+    TierName,
     paid_scopes_available,
     resolve_scope,
 )
@@ -401,20 +403,37 @@ class Router:
             run.attempts.append(Attempt(decision.model, decision.tier, exc.code))
             self._log_failure(run, decision, exc.code)
             raise RouteFailed(
-                exc.code, exc.message, attempts=run.attempts, last_error=exc.as_dict()
+                exc.code, redact(exc.message), attempts=run.attempts, last_error=exc.as_dict()
             ) from exc
         wall = self._record_wall(run, decision, exc)
-        wait = wall.wait_s if wall is not None and wall.action == "retry" else 0.0
-        run.attempts.append(Attempt(decision.model, decision.tier, exc.code, wait))
+        waiting = wall is not None and wall.action == "retry"
+        wait = wall.wait_s if wall is not None and waiting else 0.0
+        cand = run.candidate(decision.model)
+        provider = cand.row.provider if cand is not None else (exc.provider or "")
+        # HDW-513 (slice C): a cloud provider the key store has no key for cannot answer, so the
+        # failure is remembered as authentication, not as a model-quality problem. The check is
+        # the cached key store's own lookup: no network call on the hot path.
+        missing = bool(cand is not None and not cand.is_local) and (
+            self._executor.key_present(provider) is False
+        )
+        rec = run.failures.record(
+            decision.model,
+            decision.tier,
+            provider,
+            exc,
+            retrying=waiting,
+            missing_key=missing,
+        )
+        run.attempts.append(Attempt(decision.model, decision.tier, rec.code, wait))
         if len(run.attempts) >= self._max_attempts():
             self._log_failure(run, decision, "attempts_exhausted")
             raise RouteFailed(
                 "attempts_exhausted",
-                "Every allowed attempt failed.",
+                self._failure_message(run, "attempts_exhausted"),
                 attempts=run.attempts,
                 last_error=exc.as_dict(),
             ) from exc
-        if wall is not None and wall.action == "retry":
+        if waiting:
             run.notes.append(f"{decision.model}: {exc.code}, retry in {wait:.1f}s")
             self._emit(run, "retrying", decision, exc.code)
             await self._sleep(wait)
@@ -422,14 +441,21 @@ class Router:
         if run.request.pin_strict and run.request.pin is not None:
             # HDW-304: a pinned model fails as itself. A retry of the same model is still the
             # same model, so only the failover to another model is off.
-            run.notes.append(f"{decision.model}: {exc.code}, pinned (no failover)")
-            self._log_failure(run, decision, exc.code)
+            run.notes.append(f"{decision.model}: {rec.code}, pinned (no failover)")
+            self._log_failure(run, decision, rec.code)
             raise RouteFailed(
-                exc.code, exc.message, attempts=run.attempts, last_error=exc.as_dict()
+                rec.code, redact(exc.message), attempts=run.attempts, last_error=exc.as_dict()
             ) from exc
-        run.excluded.add(decision.model)
-        run.notes.append(f"{decision.model}: {exc.code}, cascading")
-        self._emit(run, "cascading", decision, exc.code)
+        if missing and cand is not None:
+            # Slice C: the provider cannot authenticate, so do not spend another attempt on any
+            # of its models. Cheap (the key store is cached) and it leaves the attempt budget to
+            # tiers that can actually answer.
+            skipped = run.failures.exclude_provider(run.candidates, provider)
+            if skipped:
+                run.notes.append(f"no key for {provider}: skipping its {skipped} models")
+        run.notes.append(run.failures.skip_line(len(run.attempts) + 1, self._max_attempts()))
+        run.notes.append(f"{decision.model}: {rec.code}, cascading")
+        self._emit(run, "cascading", decision, rec.code)
         try:
             return self._redecide(run, decision, exc.as_dict())
         except RouteFailed:
@@ -467,17 +493,54 @@ class Router:
         pin = run.request.pin if run.request.pin_strict else None
         try:
             return decide(
-                PolicyRequest(run.reqs, run.scope, pin, run.request.force),
+                PolicyRequest(
+                    run.reqs,
+                    run.scope,
+                    pin,
+                    run.request.force,
+                    tier_attempts=tuple(a.tier for a in run.attempts),
+                ),
                 PolicyContext(fresh, self._rules_source(), run.hw, escalation),
             )
         except NoRouteError as err:
             raise RouteFailed(
                 "no_route_left",
-                "No other model can serve this request in the current scope.",
+                self._failure_message(run, "no_route_left"),
                 attempts=run.attempts,
                 last_error=last_error,
                 no_route=err,
             ) from err
+
+    def _failure_message(self, run: RouteRun, code: str) -> str:
+        """The bounded, actionable end of a request (slice C of HDW-513).
+
+        One line per attempt, the missing-key fix command when a credential is the cause, and the
+        tier that was available but never tried. Never includes key material.
+        """
+        aliases = {c.row.provider: self._executor.key_alias(c.row.provider) for c in run.candidates}
+        return terminal_message(
+            run.attempts,
+            run.failures.records,
+            cap=self._max_attempts(),
+            code=code,
+            untried=self._untried_tiers(run),
+            aliases=aliases,
+        )
+
+    @staticmethod
+    def _untried_tiers(run: RouteRun) -> tuple[TierName, ...]:
+        """Tiers in scope with a usable model that no attempt of this request ever touched."""
+        tried = {a.tier for a in run.attempts}
+        out: list[TierName] = []
+        for c in run.candidates:
+            if (
+                c.tier in run.scope.tiers
+                and c.tier not in tried
+                and c.tier not in out
+                and c.availability.usable
+            ):
+                out.append(c.tier)
+        return tuple(out)
 
     @staticmethod
     def _keep_tool_strength(

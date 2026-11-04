@@ -89,6 +89,21 @@ class Executor:
         except Exception:  # a broken key store must not break routing
             return None
 
+    def key_present(self, provider: str) -> bool | None:
+        """Whether the key store has a usable key for ``provider``; ``None`` when unknown.
+
+        HDW-513: the router uses this to fail an unauthenticated cloud provider fast instead of
+        spending one of its bounded attempts on a call that cannot succeed. It reads the same
+        cached key store the call itself uses (no network, no extra secret read) and answers
+        ``None`` when no store is wired, so a test or an embedding without keys is unaffected.
+        """
+        if self._api_key_for is None:
+            return None
+        try:
+            return bool(self._api_key_for(provider))
+        except Exception:  # a broken key store must not break routing
+            return None
+
     @overload
     def run(
         self,

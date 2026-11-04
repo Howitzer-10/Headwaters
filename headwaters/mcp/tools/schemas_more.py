@@ -59,6 +59,10 @@ class WallInfo(BaseModel):
 class ScopeInfo(BaseModel):
     default_scope: str | None = None
     strategy: str | None = None
+    # HDW-516: the fallback order, "interleave" or "descend (cloud_first)". Hand-edited in
+    # rules.yaml (router.tier_order / router.tier_direction); no tool changes it.
+    tier_order: str | None = Field(default=None, description="Fallback order label.")
+    tier_direction: str | None = None
     effective: str | None = Field(default=None, description="Scope a plain request gets now.")
     tiers: list[str] = Field(default_factory=list)
     locks: list[str] = Field(default_factory=list)

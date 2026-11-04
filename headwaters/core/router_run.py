@@ -9,6 +9,7 @@ from headwaters.core.executor.types import ExecOptions, Message
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.policy.types import RouteDecision
+from headwaters.core.router_failures import FailureMemory
 from headwaters.core.router_types import Attempt, RouteRequest
 from headwaters.core.scope import ScopeDecision
 
@@ -26,9 +27,14 @@ class RouteRun:
     options: ExecOptions
     first: RouteDecision
     attempts: list[Attempt] = field(default_factory=list)
-    excluded: set[str] = field(default_factory=set)
+    failures: FailureMemory = field(default_factory=FailureMemory)  # HDW-513, this request only
     notes: list[str] = field(default_factory=list)
     escalations: int = 0
+
+    @property
+    def excluded(self) -> set[str]:
+        """Models this request may not choose again (kept as a set for existing callers)."""
+        return self.failures.excluded
 
     def candidate(self, model_id: str) -> Candidate | None:
         return next((c for c in self.candidates if c.id == model_id), None)

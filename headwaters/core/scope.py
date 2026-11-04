@@ -26,7 +26,7 @@ from typing import Literal, cast, get_args
 
 from headwaters.core.features import FeatureRegistry
 from headwaters.core.project_config import Privacy, ProjectConfig
-from headwaters.core.rules import Rules, Scope, Strategy
+from headwaters.core.rules import Rules, Scope, Strategy, TierDirection
 from headwaters.core.secrets_detect import SecretMatch
 
 TierName = Literal["paid", "openrouter_auto", "free_cloud", "local"]
@@ -51,6 +51,10 @@ PRIVACY_TIERS: dict[Privacy, frozenset[TierName]] = {
     "free": FREE_TIERS,
     "local": LOCAL_TIERS,
 }
+
+# HDW-516: the tiers from most to least cloud, in one place. ``router.tier_order: descend``
+# walks this list in ``router.tier_direction``; ``interleave`` (the default) ignores it.
+TIER_WALK: tuple[TierName, ...] = ("paid", "openrouter_auto", "free_cloud", "local")
 
 # Picker model suffixes (``headwaters/free+verify``, ``headwaters/auto+quality``).
 SUFFIX_STRATEGY: dict[str, Strategy] = {"quality": "quality_first", "primary": "primary_first"}
@@ -112,6 +116,11 @@ class ScopeDecision:
 def paid_scopes_available(registry: FeatureRegistry) -> bool:
     """True when the paid-scopes ★ feature is registered and switched on."""
     return registry.enabled(PAID_SCOPES_FEATURE_ID)
+
+
+def tier_walk(direction: TierDirection) -> tuple[TierName, ...]:
+    """The tier order for ``router.tier_direction``: cloud first, or its exact reverse."""
+    return TIER_WALK if direction == "cloud_first" else tuple(reversed(TIER_WALK))
 
 
 def parse_model_name(model: str) -> ParsedModel | None:

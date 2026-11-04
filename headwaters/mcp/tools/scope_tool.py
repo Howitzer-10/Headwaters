@@ -164,6 +164,13 @@ async def apply_scope(
     info = scope_info(tc.engine(), tc.rules(), project)
     if "default_scope" in todo and info.effective != todo["default_scope"]:
         notes.append("A lock or project rule is narrowing this; the tighter setting always wins.")
+    if info.tier_order and info.tier_order != "interleave":
+        # HDW-516: the fallback order is a rules.yaml setting this tool cannot change, so say
+        # so instead of letting a host believe the scope call covered it.
+        notes.append(
+            f"Fallback order is {info.tier_order}: it comes from router.tier_order and "
+            "router.tier_direction in rules.yaml, which only the user edits."
+        )
     return ScopeResult(ok=True, changed=sorted(todo), scope=info, notes=notes)
 
 

@@ -36,10 +36,28 @@ def test_invalid_project_file_is_a_config_error(cli_home: Path) -> None:
 
 def test_status_text_lists_scope_locks_walls_and_warm_model(cli_home: Path) -> None:
     out = invoke("status").stdout
-    for label in ("Default scope", "Effective scope", "Private lock", "Locks in force", "Catalog"):
+    for label in (
+        "Default scope",
+        "Fallback order",
+        "Effective scope",
+        "Private lock",
+        "Locks in force",
+        "Catalog",
+    ):
         assert label in out
     assert "Walls: none" in out
     assert "Warm model: none" in out
+
+
+def test_status_shows_the_fallback_order(cli_home: Path) -> None:
+    assert invoke_json("status")[1]["tier_order"] == "interleave"
+    write_rules(
+        cli_home,
+        "default_scope: cloud\nrouter:\n  tier_order: descend\n  tier_direction: local_first\n",
+    )
+    assert "descend (local_first)" in invoke("status").stdout
+    _, data = invoke_json("status")
+    assert (data["tier_order"], data["tier_direction"]) == ("descend", "local_first")
 
 
 def test_status_unsatisfiable_scope_shows_the_fix(cli_home: Path) -> None:

@@ -753,6 +753,24 @@
           "minimum": 1,
           "title": "Max Attempts",
           "type": "integer"
+        },
+        "tier_direction": {
+          "default": "cloud_first",
+          "enum": [
+            "cloud_first",
+            "local_first"
+          ],
+          "title": "Tier Direction",
+          "type": "string"
+        },
+        "tier_order": {
+          "default": "interleave",
+          "enum": [
+            "interleave",
+            "descend"
+          ],
+          "title": "Tier Order",
+          "type": "string"
         }
       },
       "title": "RouterRules",

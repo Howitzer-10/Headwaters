@@ -419,6 +419,31 @@ inside the 20 second discovery budget is a warning, and the run still succeeds w
 `models list` then shows rows, and `pick` returns a model with its fallbacks. [needs a key or Ollama]:
 with no source reachable it reports zero models and `pick` keeps answering `no_candidates`.
 
+## I. A dead tier still reaches a healthy one
+
+### 33. A dead free tier reaches a local model
+
+```
+uv run headwaters keys list
+uv run headwaters pick "summarise this function"
+```
+
+Expected with no cloud key saved (`keys list` says `not set` for the provider) and Ollama running:
+`pick` returns a free-cloud model first and a local model next, and the reasons include a tier
+fairness line naming both tiers. Send one real prompt through the gateway (or Cline on
+`headwaters/auto`): the first attempt fails, the decision record's attempt list shows a
+`auth_missing_key` free-cloud attempt followed by a `local` attempt, and the answer arrives. Fail if
+every attempt in the record is a free-cloud model.
+
+### 34. The terminal error says what to fix
+
+With no cloud key saved and the local tier unusable (stop Ollama), send one prompt through the
+gateway. Expected: an error of a handful of lines, `All N allowed attempts failed.`, then one line per
+attempt with its model, tier, provider, failure class and a short reason, then, when a credential is
+the cause, the provider named and the fix command (`headwaters keys set openrouter`), and, when a
+usable tier was never reached, a line naming it. No key material and no credential-shaped substring
+appear anywhere in the text, and the old opaque `Every allowed attempt failed.` is gone.
+
 ## What is not covered here, on purpose
 
 - The Windows installer, code signing, the clean Windows VM run, the Linux payload and the clean Linux

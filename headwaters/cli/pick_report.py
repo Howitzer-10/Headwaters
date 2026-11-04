@@ -10,6 +10,7 @@ from headwaters.cli.output import fmt_eta, make_console, table, yes_no
 from headwaters.core.advice import BELOW_FLOOR_WARNING
 from headwaters.core.policy.filters import Candidate
 from headwaters.core.router_plan import RoutePlan
+from headwaters.core.rules import tier_order_label
 
 _MAX_SKIPPED_SHOWN = 12
 
@@ -38,6 +39,8 @@ def plan_payload(plan: RoutePlan) -> dict[str, Any]:
             "verify": s.verify,
             "locks": list(s.locks),
             "active_locks": list(s.active_locks),
+            "tier_order": d.tier_order,
+            "tier_direction": d.tier_direction,
         },
         "requirements": {
             "task": r.soft.task,
@@ -83,6 +86,7 @@ def print_plan(plan: RoutePlan) -> None:
     head.add_row("Tier", d.tier)
     head.add_row("Scope", f"{s.scope} (tiers: {', '.join(sorted(s.tiers))})")
     head.add_row("Strategy", s.strategy)
+    head.add_row("Tier order", tier_order_label(d.tier_order, d.tier_direction))
     # FU-128-3: every lock in force, so Private Mode plus the local scope never reads "none".
     narrowing = f"  (narrowed by: {', '.join(s.locks)})" if s.locks else ""
     head.add_row("Locks", (", ".join(s.active_locks) or "none") + narrowing)
