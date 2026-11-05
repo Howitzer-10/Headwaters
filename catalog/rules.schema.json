@@ -822,6 +822,23 @@
           ],
           "title": "Tier Order",
           "type": "string"
+        },
+        "verify_cascade": {
+          "default": false,
+          "title": "Verify Cascade",
+          "type": "boolean"
+        },
+        "verify_cascade_model": {
+          "default": "",
+          "title": "Verify Cascade Model",
+          "type": "string"
+        },
+        "verify_cascade_tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verify Cascade Tasks",
+          "type": "array"
         }
       },
       "title": "RouterRules",

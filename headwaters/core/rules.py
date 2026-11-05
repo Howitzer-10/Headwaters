@@ -327,6 +327,15 @@ class RouterRules(_Model):
     # tiers in ``tier_direction`` order.
     tier_order: TierOrder = "interleave"
     tier_direction: TierDirection = "cloud_first"
+    # HDW-517: when a draft fails a real check, retry once on a strictly lower tier. Off by
+    # default, so an enabled deployment has to opt in and accept the wider gate below.
+    verify_cascade: bool = False
+    # Empty = choose the target from the descending order. Set = that model or no cascade at
+    # all, so a named fallback never turns into an unnamed one.
+    verify_cascade_model: str = ""
+    # Which task classes may cascade. Kept to the analyzer's task names rather than inventing a
+    # second vocabulary.
+    verify_cascade_tasks: list[str] = Field(default_factory=lambda: ["code"])
 
 
 class GatewayRules(_Model):
@@ -480,6 +489,42 @@ class Rules(_Model):
     features: dict[str, bool] = Field(default_factory=dict)
     hosts: HostsRules = Field(default_factory=HostsRules)
     advice: Literal["off", "inline", "header_only"] = "off"
+
+    @model_validator(mode="after")
+    def _cascade_is_usable(self) -> Rules:
+        """HDW-517: reject a cascade that could never fire, or that contradicts the ordering."""
+        router = self.router
+        for task in router.verify_cascade_tasks:
+            if task not in SCORE_TASKS:
+                raise ValueError(
+                    f"router.verify_cascade_tasks has unknown task {task!r}; "
+                    f"use one of {', '.join(SCORE_TASKS)}"
+                )
+        if not router.verify_cascade:
+            return self
+        if router.tier_order != "descend":
+            raise ValueError(
+                "router.verify_cascade needs router.tier_order: descend, because interleave "
+                "can repeat a tier before descending; set tier_order: descend or turn "
+                "verify_cascade off"
+            )
+        if not router.verify_cascade_tasks:
+            raise ValueError(
+                "router.verify_cascade_tasks is empty, so the cascade could never fire; list "
+                "at least one task or set router.verify_cascade: false"
+            )
+        if router.verify_cascade_model:
+            # The tier of an arbitrary catalog model is not known to the rules document; an
+            # override is. The runtime strictly-lower check covers the rest (HDW-517 report).
+            override = self.models.overrides.get(router.verify_cascade_model)
+            top = "paid" if router.tier_direction == "cloud_first" else "local"
+            if override is not None and override.tier == top:
+                raise ValueError(
+                    f"router.verify_cascade_model {router.verify_cascade_model!r} is in the "
+                    f"{top!r} tier, the top of the configured walk, so nothing is lower; name "
+                    "a model in a lower tier or leave the key empty"
+                )
+        return self
 
 
 RulesProvider = Callable[[], Rules]

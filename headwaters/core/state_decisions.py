@@ -119,6 +119,7 @@ class OutcomeRow:
     counterfactual_usd: float | None = None  # nullable: unknown unless computed
     verify_result: str | None = None
     escalated_to: str | None = None
+    cascade_to: str | None = None  # HDW-517: a downward retry, never an escalation
     user_feedback: str | None = None
 
 
@@ -132,6 +133,7 @@ _OUTCOME_COLUMNS = (
     "counterfactual_usd",
     "verify_result",
     "escalated_to",
+    "cascade_to",
     "user_feedback",
 )
 

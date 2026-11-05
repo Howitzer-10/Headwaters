@@ -127,5 +127,12 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         );
         """,
     ),
+    (
+        8,
+        "cascade target on outcomes",
+        """
+        ALTER TABLE outcomes ADD COLUMN cascade_to TEXT;
+        """,
+    ),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]

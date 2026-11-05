@@ -4,8 +4,16 @@ from typing import Literal
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
-from headwaters.core.rules import LocalTier, Rules, TiersRules
+from headwaters.core.rules import (
+    LocalTier,
+    ModelOverride,
+    ModelsRules,
+    RouterRules,
+    Rules,
+    TiersRules,
+)
 from headwaters.core.rules_io import (
     SCHEMA_RELATIVE_PATH,
     ConfigError,
@@ -257,3 +265,57 @@ def test_schema_still_declares_keep_warm_model_as_a_string() -> None:
     field = json.loads(schema_json())["$defs"]["LocalTier"]["properties"]["keep_warm_model"]
     assert field["type"] == "string"
     assert field["default"] == "off"
+
+
+def test_cascade_requires_descending_order(tmp_path: Path) -> None:
+    """HDW-517/D4: round-robin repeats a tier before it descends, so a cascade cannot target."""
+    target = tmp_path / "rules.yaml"
+    target.write_text("router:\n  verify_cascade: true\n", encoding="utf-8")
+    with pytest.raises(ConfigError) as caught:
+        load_rules(target)
+    problems = " ".join(caught.value.problems)
+    assert "verify_cascade" in problems
+    assert "descend" in problems, "the message says what to change"
+
+
+def test_cascade_tasks_validation(tmp_path: Path) -> None:
+    """HDW-517/D6: the task list reuses the score vocabulary and cannot be empty when enabled."""
+    target = tmp_path / "rules.yaml"
+    target.write_text(
+        "router:\n  tier_order: descend\n  verify_cascade: true\n"
+        "  verify_cascade_tasks: [nonsense]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_rules(target)
+    assert any("verify_cascade_tasks" in p for p in caught.value.problems)
+    target.write_text(
+        "router:\n  tier_order: descend\n  verify_cascade: true\n  verify_cascade_tasks: []\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_rules(target)
+    assert any("could never fire" in p for p in caught.value.problems)
+
+
+def test_cascade_accepts_the_documented_config(tmp_path: Path) -> None:
+    target = tmp_path / "rules.yaml"
+    target.write_text(
+        "router:\n  tier_order: descend\n  verify_cascade: true\n"
+        '  verify_cascade_model: "qwen3:8b"\n',
+        encoding="utf-8",
+    )
+    router = load_rules(target).router
+    assert router.verify_cascade is True
+    assert router.verify_cascade_model == "qwen3:8b"
+    assert router.verify_cascade_tasks == ["code"]
+
+
+def test_cascade_model_must_not_be_the_top_tier() -> None:
+    """A named target in the top tier of the walk has nothing below it to descend to."""
+    with pytest.raises(ValidationError) as caught:
+        Rules(
+            router=RouterRules(tier_order="descend", verify_cascade=True, verify_cascade_model="x"),
+            models=ModelsRules(overrides={"x": ModelOverride(tier="paid")}),
+        )
+    assert "top of the configured walk" in str(caught.value)

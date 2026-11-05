@@ -9,8 +9,9 @@
     5. classify errors  wall events feed the quota tracker; cascade to the next candidate
                         (bounded attempts; a stream only fails over BEFORE its first token)
     6. verify           registered verifiers, per the ``verify`` setting
-    7. escalate         ``EscalationPlugin`` when present; without one a failed check is reported
-    8. log              one decision row and one outcome row (metadata only)
+    7. escalate         up once: an ``EscalationPlugin`` or the core's one mandatory retry
+    8. cascade          down once, opt-in, only after a real check failure (HDW-517)
+    9. log              one decision row and one outcome row (metadata only)
 
 ``handle`` returns an awaitable ``RouteResult`` or, when ``request.stream`` is set, an async
 iterator of ``RouteEvent``; ``run`` and ``stream`` are the typed forms of the same thing.
@@ -19,8 +20,8 @@ Failure contract: ``ScopeError`` and ``NoRouteError`` (already structured) are r
 when the first decision cannot be made. Once attempts have been made, running out of candidates
 or attempts raises ``RouteFailed``. Local scope is fail-closed: candidates outside the effective
 scope never reach the policy's choice, the executor refuses cloud tiers again, and a failure is a
-structured error, never a cloud fallback. Streaming does not escalate (the caller already has the
-tokens); a failed check is reported on the final result.
+structured error, never a cloud fallback. Streaming does not escalate or cascade (the caller
+already has the tokens); a failed check is reported on the final result.
 
 Privacy: this module never logs or stores request text, only decision metadata.
 """
@@ -95,6 +96,7 @@ from headwaters.core.scope import (
     TierName,
     paid_scopes_available,
     resolve_scope,
+    tier_walk,
 )
 from headwaters.core.secrets_detect import ScanLimits, SecretDetector, SecretMatch
 from headwaters.core.state import Database
@@ -190,6 +192,8 @@ class Router:
             if verify is not None and verify.failed:
                 run.attempts.append(Attempt(decision.model, decision.tier, "verify_failed"))
                 nxt = self._escalate(run, decision, verify)
+                if nxt is None:
+                    nxt = self._cascade(run, decision, verify)
                 if nxt is not None:
                     decision = nxt
                     continue
@@ -654,6 +658,8 @@ class Router:
         last_error: Mapping[str, object] | None = None,
         *,
         stronger_than: float | None = None,
+        tier_below: TierName | None = None,
+        only_model: str | None = None,
     ) -> RouteDecision:
         """Decide again without the models already tried, using fresh walls and quotas.
 
@@ -663,6 +669,12 @@ class Router:
         agentic request the escalation also keeps tool-call strength (HDW-154, D10): a candidate
         whose ``agentic_tools`` score is *below* the failed model's is skipped, and when that
         filter is what empties the pool the note says so.
+
+        ``tier_below`` is the cascade's downward move (HDW-517), the one deliberate exception to
+        F10: it keeps only candidates from a strictly lower tier in the configured direction. It
+        is opt-in, one hop, and only after a real check failure, and it does not apply the tool
+        strength filter because a cheaper retry is expected to be weaker. ``only_model`` pins the
+        target when the user named one.
         """
         pool = [c for c in run.candidates if c.id not in run.excluded]
         escalation = self._escalation()
@@ -672,6 +684,14 @@ class Router:
             escalation = None
             if run.reqs.soft.agentic:
                 pool = self._keep_tool_strength(run, last, pool)
+        if tier_below is not None:
+            order = tier_walk(self._rules_source().router.tier_direction)
+            ranks = {tier: rank for rank, tier in enumerate(order)}
+            floor = ranks.get(tier_below)
+            pool = [c for c in pool if floor is not None and ranks.get(c.tier, -1) > floor]
+            escalation = None
+        if only_model is not None:
+            pool = [c for c in pool if c.id == only_model]
         fresh = self._with_live_availability(pool)
         # HDW-304: the explicit model was tried and did not answer, so an ordinary pass-through
         # request drops it here and fails over. A strict pin never reaches this point.
@@ -759,7 +779,9 @@ class Router:
         self, run: RouteRun, decision: RouteDecision, result: ExecResult
     ) -> VerifyOutcome | None:
         if not wants_verify(
-            run.scope.verify, agentic=run.reqs.soft.agentic, required=decision.verify_required
+            run.scope.verify,
+            agentic=run.reqs.soft.agentic,
+            required=decision.verify_required or self._cascade_gate(run),
         ):
             return None
         self._emit(run, "verifying", decision)
@@ -776,6 +798,19 @@ class Router:
             )
             return replace(outcome, unchecked=True)
         return outcome
+
+    def _cascade_gate(self, run: RouteRun) -> bool:
+        """True when an enabled cascade needs the gate even under ``verify: off`` (HDW-517).
+
+        A cascade with no gate could never fire, and silently never firing is worse than a wider
+        gate (D6). A pinned request never cascades, so its gate is not widened.
+        """
+        router = self._rules_source().router
+        if not router.verify_cascade:
+            return False
+        if run.request.pin or run.request.pin_strict:
+            return False
+        return run.reqs.soft.task in router.verify_cascade_tasks
 
     def _escalate(
         self, run: RouteRun, decision: RouteDecision, verify: VerifyOutcome
@@ -807,6 +842,42 @@ class Router:
         self._emit(run, "escalating", decision, "verify_failed")
         return nxt
 
+    def _cascade(
+        self, run: RouteRun, decision: RouteDecision, verify: VerifyOutcome
+    ) -> RouteDecision | None:
+        """The one downward retry after a failed check, or ``None`` to report it as it is."""
+        if not verify.failed:
+            return None
+        router = self._rules_source().router
+        if not router.verify_cascade:
+            return None
+        if run.reqs.soft.task not in router.verify_cascade_tasks:
+            return None
+        if run.cascades >= 1:
+            return None
+        if len(run.attempts) >= self._max_attempts():
+            return None
+        if run.request.pin or run.request.pin_strict:
+            return None
+        run.excluded.add(decision.model)
+        try:
+            nxt = self._redecide(
+                run,
+                decision,
+                tier_below=decision.tier,
+                only_model=router.verify_cascade_model or None,
+            )
+        except RouteFailed:
+            run.excluded.discard(decision.model)
+            run.notes.append(
+                f"{decision.model}: checks failed, no lower model available to cascade to"
+            )
+            return None
+        run.cascades += 1
+        run.notes.append(f"{decision.model}: checks failed, cascading to {nxt.model}")
+        self._emit(run, "cascading", decision, "verify_failed")
+        return nxt
+
     # ------------------------------------------------------------------ step 8
 
     def _finish(
@@ -827,6 +898,7 @@ class Router:
             else None
         )
         failed = verify is not None and verify.failed
+        cascaded = decision.model if run.cascades else None
         entry = self._entry(
             run,
             decision,
@@ -834,7 +906,12 @@ class Router:
             result=result,
             verify=verify,
             cost=cost,
-            escalated=decision.model if run.escalations and not failed else None,
+            # A cascade's target is never reported as an escalation: ``escalated_to`` means
+            # "spent more", and the ledger reads it that way (HDW-517).
+            escalated=(
+                decision.model if run.escalations and not run.cascades and not failed else None
+            ),
+            cascaded=cascaded,
         )
         decision_id = router_log.write(self._db, entry)
         router_log.notify_ledgers(self._ledgers(), entry, decision_id)
@@ -866,6 +943,7 @@ class Router:
         verify: VerifyOutcome | None = None,
         cost: float | None = None,
         escalated: str | None = None,
+        cascaded: str | None = None,
     ) -> LogEntry:
         return LogEntry(
             surface=run.request.surface,
@@ -884,6 +962,7 @@ class Router:
             verify=verify,
             cost_usd=cost,
             escalated_to=escalated,
+            cascade_to=cascaded,
         )
 
     def _log_failure(self, run: RouteRun, decision: RouteDecision, status: str) -> None:

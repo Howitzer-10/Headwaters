@@ -44,6 +44,9 @@ class LogEntry:
     verify: VerifyOutcome | None = None
     cost_usd: float | None = None
     escalated_to: str | None = None
+    # HDW-517: the downward target. Separate from ``escalated_to`` (which means "spent more")
+    # so the ledger's savings figure cannot read a cheaper answer as an escalation.
+    cascade_to: str | None = None
     extra_reasons: Sequence[str] = field(default=())
 
 
@@ -108,6 +111,7 @@ def write(db: Database, entry: LogEntry) -> int | None:
                 cost_usd=entry.cost_usd,
                 verify_result=verify_label(entry.verify),
                 escalated_to=entry.escalated_to,
+                cascade_to=entry.cascade_to,
             ),
         )
     except sqlite3.Error as exc:
@@ -133,6 +137,7 @@ def ledger_event(entry: LogEntry, decision_id: int | None) -> dict[str, object]:
         "cost_usd": entry.cost_usd,
         "attempts": len(entry.attempts),
         "verify": verify_label(entry.verify),
+        "cascade_to": entry.cascade_to,
     }
 
 

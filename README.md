@@ -118,4 +118,5 @@ password, and do not share or copy the profile folder.
 - [docs/RELEASE_EVIDENCE.md](docs/RELEASE_EVIDENCE.md): the gate, the evidence file and the exit codes, all Stage 2.
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) and [docs/RELEASE_CHECKLIST_LINUX.md](docs/RELEASE_CHECKLIST_LINUX.md): the runs a person has to do at Stage 2.
 - [docs/ITCH_STORE.md](docs/ITCH_STORE.md): the store copy, kept in the repo so it is reviewed.
+- [docs/VERIFY_CASCADE.md](docs/VERIFY_CASCADE.md): the one downward retry after a failed check, and what it explicitly does not detect.
 - [docs/DECISIONS.md](docs/DECISIONS.md): binding decisions, D1 onwards.

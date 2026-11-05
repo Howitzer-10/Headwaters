@@ -30,6 +30,7 @@ class RouteRun:
     failures: FailureMemory = field(default_factory=FailureMemory)  # HDW-513, this request only
     notes: list[str] = field(default_factory=list)
     escalations: int = 0
+    cascades: int = 0  # HDW-517: downward hand-offs after a failed check, at most one
 
     @property
     def excluded(self) -> set[str]:
