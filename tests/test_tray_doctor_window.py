@@ -108,7 +108,7 @@ def test_the_window_shows_plain_words_for_a_mapped_check() -> None:
     assert ollama.detail == OLLAMA_MEANING
     assert ollama.fix == OLLAMA_PLAIN_FIX
     assert OLLAMA_DETAIL not in ollama.detail
-    assert OLLAMA_FIX != ollama.fix
+    assert ollama.fix != OLLAMA_FIX
 
 
 def test_a_developer_check_keeps_its_raw_detail_for_the_log() -> None:

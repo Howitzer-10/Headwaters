@@ -107,6 +107,8 @@ Each of these cost time or nearly shipped a wrong claim. They are the reason for
 | The editor refused to create a file it was told to overwrite, and an 8 KB edit was rejected for size | Tool limits, not a bug | Create in chunks, then `insert_line`; keep edits under ~6000 characters |
 | `uv run pytest` on 16 files timed out at 30 s in the foreground | The 30 s shell limit | Named files only when quick; otherwise `Start-Process` and poll the log |
 | A crash's traceback was swallowed by PowerShell's error wrapping | stderr handling | `cmd /c "uv run python x.py > out.txt 2>&1"`, then read `out.txt` |
+| `uv run <anything>` failed with `failed to remove file ...Scripts/headwaters-mcp.exe ... being used by another process` while a daemon or shim was running | A live process holds the venv's script shim, so `uv` cannot sync | Use `.\.venv\Scripts\python.exe -m pytest`, `.\.venv\Scripts\ruff.exe` or `.\.venv\Scripts\mypy.exe` directly, or stop the daemon first |
+| `ruff check` failed at HEAD on `tests/test_tray_doctor_window.py` (SIM300), in a file from a ticket that was already committed | The ticket session's own `ruff check` step was missed, so a red trunk was left behind | The director runs `ruff check headwaters tests scripts` at every pick and fixes a one-line trunk break, saying so in the commit |
 
 ## Keeping this page honest
 
