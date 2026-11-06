@@ -1,14 +1,13 @@
 """``headwaters_status``: walls, scope, locks, GPU, warm model, pin and savings (HDW-205).
 
 Read-only and local: no model call, no network. Same facts as ``headwaters status`` (the CLI), read
-from the live rules, the live engine and the shared SQLite state. Savings appear only when a
-dashboard plugin of the ledger feature is registered and on.
+from the live rules, the live engine and the shared SQLite state. Savings appear only when an
+enabled dashboard plugin contributes a summary (HDW-501), and the caller never names the feature.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from typing import Any
 
 from headwaters.core.engine import Engine
@@ -33,7 +32,6 @@ from headwaters.mcp.tools.schemas_more import (
 __all__ = ["PIN_KEY", "build_status", "gpu_info", "scope_info", "walls_now"]
 
 PIN_KEY = "mcp.pinned_model"
-LEDGER_FEATURE = "ledger"
 
 
 def scope_info(engine: Engine | None, rules: Rules, project: ProjectConfig | None) -> ScopeInfo:
@@ -107,12 +105,14 @@ def _wall_info(tc: ToolContext, w: WallRow, now: float) -> WallInfo:
 
 
 def _savings(engine: Engine | None) -> dict[str, Any] | None:
-    if engine is None or not engine.registry.enabled(LEDGER_FEATURE):
+    """Whatever an enabled dashboard plugin summarises, or None when none is enabled (HDW-501).
+
+    Core asks the registry, never the ledger: deleting ``headwaters/features/ledger`` or setting
+    ``features: {ledger: false}`` leaves this answering with ``savings`` absent, not failing.
+    """
+    if engine is None:
         return None
-    for plugin in engine.registry.plugins_for("DashboardPlugin"):
-        summary: Mapping[str, Any] = plugin.render_summary()  # type: ignore[attr-defined]
-        return dict(summary)
-    return None
+    return engine.registry.dashboard_summary()
 
 
 def build_status(tc: ToolContext, project: ProjectConfig | None) -> StatusResult:

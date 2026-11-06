@@ -58,11 +58,23 @@ def verify_label(verify: VerifyOutcome | None) -> str | None:
     return None if verify is None else verify.status
 
 
-def cost_usd(price_in: float | None, price_out: float | None, result: ExecResult) -> float:
-    """Catalog prices are per million tokens; unpriced models cost 0."""
-    tokens_in = result.usage.prompt_tokens or 0
-    tokens_out = result.usage.completion_tokens or 0
+def tokens_cost(
+    price_in: float | None, price_out: float | None, tokens_in: int, tokens_out: int
+) -> float:
+    """Catalog prices are per million tokens. One formula, so the ledger's counterfactual and the
+    router's recorded spend can never disagree about the arithmetic."""
     return (tokens_in * (price_in or 0.0) + tokens_out * (price_out or 0.0)) / _TOKENS_PER_MILLION
+
+
+def cost_usd(price_in: float | None, price_out: float | None, result: ExecResult) -> float:
+    """What this call cost. A model with no rate comes back as 0 here; callers that must not
+    read "unpriced" as "free" check the rate first (the ledger does)."""
+    return tokens_cost(
+        price_in,
+        price_out,
+        result.usage.prompt_tokens or 0,
+        result.usage.completion_tokens or 0,
+    )
 
 
 def _alternatives(entry: LogEntry) -> list[Any]:

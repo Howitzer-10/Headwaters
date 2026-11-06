@@ -349,6 +349,17 @@ class DashboardRules(_Model):
     port: int = Field(default=4001, ge=1, le=65535)
 
 
+class LedgerRules(_Model):
+    """HDW-501: what the savings estimate is measured against, and over which window."""
+
+    # The model the counterfactual prices against. Empty = the catalog's most expensive priced
+    # model, so an install with no opinion still gets an honest reference. A name the catalog
+    # does not carry is reported as unpriced, never defaulted to a different model.
+    reference_model: str = ""
+    # The window the totals and the day rows cover. The week section is always the last 7 days.
+    window_days: int = Field(default=30, ge=1, le=365)
+
+
 class McpRules(_Model):
     transport: Literal["stdio"] = "stdio"
     async_threshold_s: float = Field(default=20, ge=0)
@@ -480,6 +491,7 @@ class Rules(_Model):
     router: RouterRules = Field(default_factory=RouterRules)
     gateway: GatewayRules = Field(default_factory=GatewayRules)
     dashboard: DashboardRules = Field(default_factory=DashboardRules)
+    ledger: LedgerRules = Field(default_factory=LedgerRules)
     mcp: McpRules = Field(default_factory=McpRules)
     workspace: WorkspaceRules = Field(default_factory=WorkspaceRules)
     attribution: AttributionRules = Field(default_factory=AttributionRules)

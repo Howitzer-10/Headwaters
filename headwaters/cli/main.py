@@ -20,6 +20,7 @@ from headwaters.cli import (
     cmd_models,
     cmd_pick,
     cmd_release,
+    cmd_savings,
     cmd_scope,
     cmd_status,
     cmd_tray,
@@ -78,6 +79,7 @@ cmd_install.register(app)
 cmd_release.register(app)
 cmd_scope.register(app)
 cmd_features.register(app)
+cmd_savings.register(app)
 cmd_tray.register(app)
 cmd_models.register(models_app)
 cmd_catalog.register(catalog_app)

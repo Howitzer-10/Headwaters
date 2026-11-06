@@ -456,6 +456,26 @@
       "title": "HostsRules",
       "type": "object"
     },
+    "LedgerRules": {
+      "additionalProperties": false,
+      "description": "HDW-501: what the savings estimate is measured against, and over which window.",
+      "properties": {
+        "reference_model": {
+          "default": "",
+          "title": "Reference Model",
+          "type": "string"
+        },
+        "window_days": {
+          "default": 30,
+          "maximum": 365,
+          "minimum": 1,
+          "title": "Window Days",
+          "type": "integer"
+        }
+      },
+      "title": "LedgerRules",
+      "type": "object"
+    },
     "LocalTier": {
       "additionalProperties": false,
       "properties": {
@@ -1297,6 +1317,9 @@
     },
     "hosts": {
       "$ref": "#/$defs/HostsRules"
+    },
+    "ledger": {
+      "$ref": "#/$defs/LedgerRules"
     },
     "mcp": {
       "$ref": "#/$defs/McpRules"

@@ -66,8 +66,8 @@ def hardware_state(rules: Rules) -> HardwareState | None:
         return None
 
 
-def _registry(rules: Rules) -> FeatureRegistry:
-    registry = FeatureRegistry()
+def _registry(rules: Rules, db: Database, catalog: Catalog) -> FeatureRegistry:
+    registry = FeatureRegistry(services={"db": db, "catalog": catalog, "rules": rules})
     discover_features(registry)
     registry.set_flags(rules.features)
     return registry
@@ -97,14 +97,15 @@ def load_runtime(*, as_json: bool = False) -> Runtime:
             exit_code=EXIT_CONFIG,
             as_json=as_json,
         )
+    database = open_database()
     return Runtime(
         rules=rules,
         catalog=catalog,
         catalog_source=source,
-        db=open_database(),
+        db=database,
         project=project,
         project_path=project_path,
-        registry=_registry(rules),
+        registry=_registry(rules, database, catalog),
     )
 
 

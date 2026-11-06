@@ -491,13 +491,26 @@ class Daemon:
         return None if engine is None else engine.router
 
     def feature_registry(self) -> FeatureRegistry:
-        """The registry the status page shows: discovered once, flags re-read from live rules."""
+        """The registry the status page shows: discovered once, flags and services re-read live.
+
+        The services are refreshed on every call because the engine behind them is rebuilt when
+        rules or the catalog change; a plugin that cached one would keep answering from the old
+        ones (HDW-501). The catalog is absent while no engine exists yet, which a plugin reports
+        as a stated reason rather than working around.
+        """
+        rules = self.live_rules
+        engine = self.live_engine()
+        services: dict[str, object] = {"db": self.db, "rules": rules}
+        if engine is not None:
+            services["catalog"] = engine.catalog
         registry = self._registry
         if registry is None:
-            registry = FeatureRegistry()
+            registry = FeatureRegistry(services=services)
             discover_features(registry)
             self._registry = registry
-        registry.set_flags(self.live_rules.features)
+        else:
+            registry.provide_services(services)
+        registry.set_flags(rules.features)
         return registry
 
     def dashboard_page(self, section: str | None = None, error: str | None = None) -> str:

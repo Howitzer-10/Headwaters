@@ -237,7 +237,8 @@ def build_engine(
         else KeyStore(rules, env=env, registry=Registry.from_catalog(catalog))
     )
     targets = TargetBuilder(rules, env, key_store=keys, registry=Registry.from_catalog(catalog))
-    registry = FeatureRegistry()
+    # HDW-501: a ★ plugin asks for these by name instead of importing core wiring.
+    registry = FeatureRegistry(services={"db": db, "catalog": catalog, "rules": rules})
     discover_features(registry)
     registry.set_flags(rules.features)
     read_hardware = hardware or hardware_reader(rules, catalog.gpu_profiles)

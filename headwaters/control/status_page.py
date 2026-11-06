@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import html
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -139,6 +139,9 @@ class StatusPage:
     core: Sequence[tuple[str, str]] = CORE_FEATURES
     stars: Sequence[tuple[str, str, bool]] = ()
     legend: str = STAR_LEGEND
+    # HDW-501: whatever a DashboardPlugin contributes, or None when no feature contributes one.
+    # The page never names a feature, so a deleted feature folder means no section, not an error.
+    savings: dict[str, object] | None = None
     catalog: str | None = None
     keys: Sequence[PageProvider] = ()
     csrf: str = ""  # the dashboard's per-start token; empty when the page has no key store
@@ -287,6 +290,7 @@ def build_page(
         decisions=_decisions(db, limit),
         tier_order=tier_order_label(rules.router.tier_order, rules.router.tier_direction),
         stars=_stars(registry),
+        savings=registry.dashboard_summary(),
         catalog=catalog,
         keys=groups,
         csrf=csrf,
@@ -427,6 +431,56 @@ def _decisions_section(page: StatusPage) -> str:
     return "<h2>Recent decisions</h2>" + _table(
         ["Time", "Surface", "Scope", "Model", "Score / floor", "Offload", "Status", "Reasons"], rows
     )
+
+
+def _savings_section(page: StatusPage) -> str:
+    """The dashboard plugin's summary, labelled with whatever words the plugin supplied.
+
+    The heading says estimate, and the plugin's own sentence carries the reference model, its
+    dated rate and how many requests the figure covers: the page adds no number of its own, so it
+    cannot state a figure the plugin did not stand behind (D7, HDW-501).
+    """
+    summary = page.savings
+    if not summary:
+        return ""
+    label = _e(str(summary.get("label", "")))
+    if not summary.get("available"):
+        return f'<h2>Savings estimate</h2><p class="muted">{label}</p>'
+    totals = summary.get("totals") or {}
+    if not isinstance(totals, Mapping):
+        return f'<h2>Savings estimate</h2><p class="muted">{label}</p>'
+    rows = [
+        ["Requests", str(totals.get("requests", 0))],
+        ["Priced", str(totals.get("priced_requests", 0))],
+        ["Unpriced (excluded)", str(totals.get("unpriced_requests", 0))],
+        ["Free or local", str(totals.get("free_or_local_requests", 0))],
+        ["Actual spend", f"${totals.get('actual_usd', 0.0):.6f}"],
+        ["Reference model would charge", f"${totals.get('counterfactual_usd', 0.0):.6f}"],
+        ["Estimated difference", f"${totals.get('estimated_savings_usd', 0.0):.6f}"],
+    ]
+    days = summary.get("by_day") or ()
+    day_rows = [
+        [
+            _e(str(day.get("day", ""))),
+            str(day.get("requests", 0)),
+            f"${day.get('actual_usd', 0.0):.6f}",
+            f"${day.get('counterfactual_usd', 0.0):.6f}",
+            f"${day.get('estimated_savings_usd', 0.0):.6f}",
+        ]
+        for day in days
+        if isinstance(day, Mapping)
+    ]
+    section = (
+        "<h2>Savings estimate</h2>"
+        + _table(["Measure", "Value"], rows)
+        + (
+            ""
+            if not day_rows
+            else _table(["Day (UTC)", "Requests", "Actual", "Reference", "Difference"], day_rows)
+        )
+        + f'<p class="muted">{label}</p>'
+    )
+    return section
 
 
 def _features_section(page: StatusPage) -> str:
@@ -639,6 +693,7 @@ def render_html(page: StatusPage, *, section: str | None = None, error: str | No
         + _walls_section(page)
         + _warm_section(page)
         + _decisions_section(page)
+        + _savings_section(page)
         + _features_section(page)
     )
     return (

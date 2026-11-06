@@ -71,14 +71,16 @@ def test_status_shows_the_project_rule_from_the_callers_folder(tmp_path: Path) -
     assert "project_rule" in data["scope"]["locks"]
 
 
-def test_status_shows_no_savings_without_the_ledger(tmp_path: Path) -> None:
-    data = structured(asyncio.run(Rig(tmp_path).call("headwaters_status", {})))
+def test_status_shows_no_savings_when_the_ledger_is_disabled(tmp_path: Path) -> None:
+    """HDW-501: the ledger ships with the product, so no savings means the flag is off."""
+    rig = Rig(tmp_path, rules=Rules(features={"ledger": False}))
+    data = structured(asyncio.run(rig.call("headwaters_status", {})))
     assert data["savings"] is None
 
 
 def test_status_shows_savings_when_a_ledger_dashboard_is_registered(tmp_path: Path) -> None:
-    rig = Rig(tmp_path)
-    spec = FeatureSpec("ledger", True, "Ledger", ("DashboardPlugin",))
+    rig = Rig(tmp_path, rules=Rules(features={"ledger": False}))
+    spec = FeatureSpec("stub_dashboard", True, "Stub", ("DashboardPlugin",))
     rig.engine.registry.register(spec, {"DashboardPlugin": Dashboard()})
     data = structured(asyncio.run(rig.call("headwaters_status", {})))
     assert data["savings"] == {"saved_usd": 1.25}

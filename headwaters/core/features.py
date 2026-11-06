@@ -66,10 +66,23 @@ class FeatureSpec:
 
 
 class FeatureRegistry:
-    def __init__(self, flags: Mapping[str, bool] | None = None) -> None:
+    def __init__(
+        self,
+        flags: Mapping[str, bool] | None = None,
+        services: Mapping[str, object] | None = None,
+    ) -> None:
         self._specs: dict[str, FeatureSpec] = {}
         self._plugins: dict[str, list[tuple[str, object]]] = {}
         self._flags: dict[str, bool] = dict(flags or {})
+        # HDW-501: the core objects a plugin asked for by name (``db``, ``catalog``, ``rules``).
+        # Passed in rather than imported, so a feature package never has to know how the engine
+        # wires itself and core keeps no static dependency on it.
+        self.services: dict[str, object] = dict(services or {})
+
+    def provide_services(self, services: Mapping[str, object]) -> None:
+        """Record or refresh core services. A caller does this when the object behind one changes
+        (the daemon re-reads rules), so a plugin never caches a handle it does not own."""
+        self.services.update(services)
 
     def register(self, spec: FeatureSpec, plugins: Mapping[str, object] | None = None) -> None:
         """Register a feature and the plugin instance it provides for each interface.
@@ -116,6 +129,18 @@ class FeatureRegistry:
                 continue
             found.extend(p for name, p in self._plugins[spec.id] if name == interface)
         return found
+
+    def dashboard_summary(self) -> dict[str, object] | None:
+        """The first enabled ``DashboardPlugin``'s summary, or ``None`` when none contributes one.
+
+        Callers reach dashboard plugins only through this method, never by feature id, so a
+        deleted feature folder or ``features: {<id>: false}`` leaves the caller working with no
+        section instead of an error (HDW-501).
+        """
+        for plugin in self.plugins_for("DashboardPlugin"):
+            summary = plugin.render_summary()  # type: ignore[attr-defined]
+            return dict(summary)
+        return None
 
     def clear(self) -> None:
         self._specs.clear()
