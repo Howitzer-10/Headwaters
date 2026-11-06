@@ -27,6 +27,21 @@ def has_rate(entry: ModelEntry) -> bool:
     return entry.price_in is not None and entry.price_out is not None
 
 
+def priced_models(catalog: Catalog) -> frozenset[str]:
+    """Every catalog id and alias that carries a rate, lowercased.
+
+    ``outcomes.cost_usd`` stores ``0.0`` for a model with no rate, so the stored spend cannot on
+    its own separate "priced at zero" from "unpriced". This set is how a caller tells them apart
+    without inventing a rate for the model it is asking about.
+    """
+    names: set[str] = set()
+    for entry in catalog.models:
+        if has_rate(entry):
+            names.add(entry.id.lower())
+            names.update(alias.lower() for alias in entry.aliases)
+    return frozenset(names)
+
+
 def find_entry(catalog: Catalog, name: str) -> ModelEntry | None:
     """The catalog entry for an id or one of its aliases, case-insensitively."""
     wanted = name.strip().lower()

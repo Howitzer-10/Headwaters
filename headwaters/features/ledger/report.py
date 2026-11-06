@@ -7,8 +7,10 @@ in ``router_log`` so the two numbers can never disagree about arithmetic.
 Three rules the figures obey (D7):
 
 * every figure is labelled an estimate of what another model *would* have charged;
-* a request with no comparable rate (unknown model, missing outcome, missing token counts) is left
-  out of the money total and counted, so a total reads "across N of M requests";
+* a request with no comparable rate (unknown model, missing outcome, missing token counts, or a
+  paid model the catalog does not rate — whose stored spend is indistinguishable from free) is left
+  out of the money total and counted, and the label names the models, so a total reads
+  "across N of M requests";
 * nothing is rounded finer than a micro-dollar, and no rate is ever defaulted.
 """
 
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -24,7 +26,7 @@ from headwaters.core.catalog.schema import Catalog
 from headwaters.core.router_log import tokens_cost
 from headwaters.core.rules import LedgerRules, Rules
 from headwaters.core.state import Database
-from headwaters.features.ledger.rates import ReferenceRate, resolve_reference
+from headwaters.features.ledger.rates import ReferenceRate, priced_models, resolve_reference
 
 FEATURE = "ledger"
 DAY_BASIS = "utc"
@@ -82,10 +84,30 @@ def read_requests(db: Database, *, since: float) -> list[RequestRow]:
         ]
 
 
-def _priceable(row: RequestRow) -> bool:
+def _rateable(row: RequestRow, rated: Collection[str]) -> bool:
+    """Whether a stored spend means what it says.
+
+    ``outcomes.cost_usd`` is ``0.0`` both for a model priced at zero and for a model with no rate
+    at all (``router_log.cost_usd`` substitutes 0 for a missing price), so the column alone cannot
+    answer this. A free tier is zero for real and counts — that is the product's whole win and its
+    requests must still produce savings. Anything else counts only when the catalog actually rates
+    the model, which is why the catalog's rated set is consulted rather than assumed.
+    """
+    if row.tier in FREE_TIERS:
+        return True
+    model = (row.model or "").strip().lower()
+    return bool(model) and model in rated
+
+
+def _priceable(row: RequestRow, rated: Collection[str]) -> bool:
     """Both sides must be known: a spend the router could not price and a counterfactual with no
     token counts are equally unusable, so both are reported as unpriced rather than as zero."""
-    return row.cost_usd is not None and row.tokens_in is not None and row.tokens_out is not None
+    return (
+        row.cost_usd is not None
+        and row.tokens_in is not None
+        and row.tokens_out is not None
+        and _rateable(row, rated)
+    )
 
 
 def _counterfactual(row: RequestRow, rate: ReferenceRate) -> float:
@@ -111,9 +133,11 @@ def _by_tier(rows: Sequence[RequestRow]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def bucket(rows: Sequence[RequestRow], rate: ReferenceRate) -> dict[str, object]:
+def bucket(
+    rows: Sequence[RequestRow], rate: ReferenceRate, rated: Collection[str]
+) -> dict[str, object]:
     """Totals for one group of requests, with unpriced ones counted and excluded from the money."""
-    priced = [row for row in rows if _priceable(row)]
+    priced = [row for row in rows if _priceable(row, rated)]
     actual = sum(row.cost_usd or 0.0 for row in priced)
     counterfactual = sum(_counterfactual(row, rate) for row in priced)
     free = sum(1 for row in rows if row.tier in FREE_TIERS)
@@ -130,7 +154,12 @@ def bucket(rows: Sequence[RequestRow], rate: ReferenceRate) -> dict[str, object]
     }
 
 
-def _label(rate: ReferenceRate, totals: Mapping[str, object]) -> str:
+def _unpriced_models(rows: Sequence[RequestRow], rated: Collection[str]) -> list[str]:
+    """Which models were left out, so a reader can see the gap rather than trust the total."""
+    return sorted({row.model or MODEL_UNROUTED for row in rows if not _priceable(row, rated)})
+
+
+def _label(rate: ReferenceRate, totals: Mapping[str, object], unpriced: Sequence[str] = ()) -> str:
     """The sentence a person reads, which must carry the estimate's basis and its coverage."""
     when = f"catalog rates dated {rate.price_date}" if rate.price_date else "undated catalog rates"
     priced = int(totals["priced_requests"])  # type: ignore[arg-type]
@@ -138,9 +167,11 @@ def _label(rate: ReferenceRate, totals: Mapping[str, object]) -> str:
     if requests == 0:
         return f"No routed request in the window; nothing to price against {rate.model} ({when})."
     missing = requests - priced
-    tail = (
-        "" if missing == 0 else f"; {missing} had no comparable rate and are left out of the total"
-    )
+    tail = ""
+    if missing:
+        tail = f"; {missing} had no comparable rate and are left out of the total"
+        if unpriced:
+            tail += f" (no catalog rate for {', '.join(unpriced)})"
     return (
         f"Estimate, not money in hand: what {rate.model} would have charged for the same tokens "
         f"at {when}. The estimate covers {priced} of {requests} requests{tail}."
@@ -165,11 +196,13 @@ def build_report(
     *,
     now: float,
     window_days: int,
+    rated: Collection[str],
     week_days: int = WEEK_DAYS,
 ) -> dict[str, object]:
     """The whole summary: totals for the window, the last week, and a breakdown by day and model.
 
-    ``rows`` are already limited to the window by ``read_requests``.
+    ``rows`` are already limited to the window by ``read_requests``; ``rated`` is the catalog's
+    rated ids and aliases (``rates.priced_models``), which the money rules need.
     """
     week_rows = [row for row in rows if row.ts >= now - week_days * DAY]
     by_day: dict[str, list[RequestRow]] = {}
@@ -177,8 +210,8 @@ def build_report(
     for row in rows:
         by_day.setdefault(_day(row.ts), []).append(row)
         by_model.setdefault(row.model or MODEL_UNROUTED, []).append(row)
-    totals = bucket(rows, rate)
-    models = [{"model": model, **bucket(group, rate)} for model, group in by_model.items()]
+    totals = bucket(rows, rate, rated)
+    models = [{"model": model, **bucket(group, rate, rated)} for model, group in by_model.items()]
     models.sort(key=lambda entry: (-float(entry["estimated_savings_usd"]), str(entry["model"])))
     return {
         "available": True,
@@ -195,10 +228,12 @@ def build_report(
         "week_days": week_days,
         "day_basis": DAY_BASIS,
         "totals": totals,
-        "week": bucket(week_rows, rate),
-        "by_day": [{"day": day, **bucket(group, rate)} for day, group in sorted(by_day.items())],
+        "week": bucket(week_rows, rate, rated),
+        "by_day": [
+            {"day": day, **bucket(group, rate, rated)} for day, group in sorted(by_day.items())
+        ],
         "by_model": models,
-        "label": _label(rate, totals),
+        "label": _label(rate, totals, _unpriced_models(rows, rated)),
     }
 
 
@@ -227,4 +262,10 @@ def render_summary(
         rows = read_requests(db, since=moment - settings.window_days * DAY)
     except sqlite3.Error as exc:
         return unavailable(f"the state database could not be read ({exc})")
-    return build_report(rows, rate, now=moment, window_days=settings.window_days)
+    return build_report(
+        rows,
+        rate,
+        now=moment,
+        window_days=settings.window_days,
+        rated=priced_models(catalog),
+    )

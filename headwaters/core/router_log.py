@@ -67,8 +67,14 @@ def tokens_cost(
 
 
 def cost_usd(price_in: float | None, price_out: float | None, result: ExecResult) -> float:
-    """What this call cost. A model with no rate comes back as 0 here; callers that must not
-    read "unpriced" as "free" check the rate first (the ledger does)."""
+    """What this call cost, from catalog prices and the result's token counts.
+
+    A model with no rate comes back as ``0.0``, exactly as a genuinely free model does: the number
+    this returns cannot tell a caller which of the two it is looking at, and neither can the
+    ``outcomes.cost_usd`` column it is stored in. A caller that must distinguish them has to check
+    the rate itself — the ledger does, by treating a free tier as zero-for-real and requiring the
+    catalog to rate every other model before counting it.
+    """
     return tokens_cost(
         price_in,
         price_out,
