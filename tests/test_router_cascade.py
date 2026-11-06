@@ -15,6 +15,7 @@ from headwaters.core.quotas import model_subject
 from headwaters.core.router import RouterConfig
 from headwaters.core.router_types import VerifyOutcome
 from headwaters.core.rules import RouterRules, Rules
+from headwaters.core.scope import PAID_TIERS, tier_walk
 from headwaters.core.state_decisions import get_outcome, recent_decisions
 from headwaters.core.state_limits import record_wall
 from headwaters.core.verify_basic import BasicVerifier
@@ -39,13 +40,11 @@ BAD_AGAIN = [Delta(content="bad once more"), Delta(finish_reason="stop")]
 PROBLEM = "bad_output: contains the word bad"
 
 
-def cascade_rules(
-    *, model: str = "", tasks: list[str] | None = None, direction: str = "cloud_first"
-) -> Rules:
+def cascade_rules(*, model: str = "", tasks: list[str] | None = None) -> Rules:
     return Rules(
         router=RouterRules(
             tier_order="descend",
-            tier_direction=direction,  # type: ignore[arg-type]
+            tier_direction="cloud_first",
             verify_cascade=True,
             verify_cascade_model=model,
             verify_cascade_tasks=["code"] if tasks is None else tasks,
@@ -132,23 +131,25 @@ def test_cascade_targets_strictly_lower_tier(tmp_path: Path) -> None:
 def test_cascade_runs_after_escalation_returns_none(tmp_path: Path) -> None:
     """Upward wins: a plugin escalation is used instead of a cascade."""
     pool = [
-        candidate(LOCAL, "local", 90.0),
-        candidate(DRAFTER, "free_cloud", 95.0),  # higher task score, lower tier
+        candidate(DRAFTER, "free_cloud", 90.0),
+        # A higher score in the tier the walk reaches last, so the draft comes from free_cloud
+        # and the escalation can go up (D10's stronger_than) without leaving the free tiers.
+        candidate(LOCAL, "local", 95.0),
     ]
     rig = Rig(
         tmp_path,
-        {LOCAL: BAD, DRAFTER: OK},
+        {DRAFTER: BAD, SIBLING: OK, LOCAL: OK},
         pool,
-        rules=cascade_rules(direction="local_first"),
+        rules=cascade_rules(),
         verifiers=[Verifier()],
         registry=registry_with(escalation=Escalator()),
     )
     result = rig.run(verify="always")
-    assert rig.dispatch.calls == [LOCAL, DRAFTER]
+    assert rig.dispatch.calls == [DRAFTER, LOCAL]
     assert not result.verify_failed
     outcome = get_outcome(rig.db, result.decision_id or 0)
     assert outcome is not None
-    assert (outcome.escalated_to, outcome.cascade_to) == (DRAFTER, None)
+    assert (outcome.escalated_to, outcome.cascade_to) == (LOCAL, None)
 
 
 def test_cascade_single_hop(tmp_path: Path) -> None:
@@ -274,16 +275,19 @@ def test_cascade_to_logged_separately_from_escalated_to(tmp_path: Path) -> None:
     (tmp_path / "escalation").mkdir()
     escalated = Rig(
         tmp_path / "escalation",
-        {LOCAL: BAD, DRAFTER: OK},
-        [candidate(LOCAL, "local", 90.0), candidate(DRAFTER, "free_cloud", 95.0)],
-        rules=cascade_rules(direction="local_first"),
+        {DRAFTER: BAD, SIBLING: OK, LOCAL: OK},
+        [
+            candidate(DRAFTER, "free_cloud", 90.0),
+            candidate(LOCAL, "local", 95.0),
+        ],
+        rules=cascade_rules(),
         verifiers=[Verifier()],
         registry=registry_with(escalation=Escalator(), ledger=escalated_ledger),
     )
     result = escalated.run(verify="always")
     outcome = get_outcome(escalated.db, result.decision_id or 0)
     assert outcome is not None
-    assert (outcome.escalated_to, outcome.cascade_to) == (DRAFTER, None)
+    assert (outcome.escalated_to, outcome.cascade_to) == (LOCAL, None)
     assert escalated_ledger.events[0]["cascade_to"] is None
 
 
@@ -371,6 +375,19 @@ def test_cascade_reports_the_first_choice(tmp_path: Path) -> None:
     result = rig.run(verify="always")
     assert result.first_choice == DRAFTER
     assert result.decision.model == LOCAL
+
+
+def test_cascade_can_only_move_toward_a_tier_that_does_not_charge() -> None:
+    """D7: on the only walk a cascade may use, nothing below free_cloud costs money.
+
+    The load-time rule refuses ``verify_cascade`` outside ``cloud_first`` (see
+    ``tests/test_rules.py::test_cascade_requires_cloud_first``); this pins the property that
+    makes that rule sufficient: every tier below ``free_cloud`` in this walk is free.
+    """
+    walk = tier_walk("cloud_first")
+    floor_rank = walk.index("free_cloud")
+    assert not PAID_TIERS & set(walk[floor_rank + 1 :])
+    assert set(walk[:floor_rank]) <= PAID_TIERS
 
 
 def test_no_quality_score_field() -> None:

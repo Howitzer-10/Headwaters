@@ -319,3 +319,19 @@ def test_cascade_model_must_not_be_the_top_tier() -> None:
             models=ModelsRules(overrides={"x": ModelOverride(tier="paid")}),
         )
     assert "top of the configured walk" in str(caught.value)
+
+
+def test_cascade_requires_cloud_first() -> None:
+    """D7: a cascade may only move toward the cheap end, so local_first is refused.
+
+    Under ``local_first`` the walk starts at ``local`` and the next tier up charges money, so a
+    cascading free_cloud draft would land in a paid tier while the row recorded it as a cascade
+    (``cascade_to``), not as spending more (``escalated_to``).
+    """
+    with pytest.raises(ValidationError) as caught:
+        Rules(
+            router=RouterRules(
+                tier_order="descend", tier_direction="local_first", verify_cascade=True
+            )
+        )
+    assert "tier_direction: cloud_first" in str(caught.value)

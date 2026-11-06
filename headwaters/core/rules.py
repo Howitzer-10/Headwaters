@@ -513,11 +513,22 @@ class Rules(_Model):
                 "router.verify_cascade_tasks is empty, so the cascade could never fire; list "
                 "at least one task or set router.verify_cascade: false"
             )
+        # D7: a cascade may only move toward the cheap end. Under ``local_first`` the walk starts
+        # at the cheap end already, so "lower" means a paid tier and the row would record money
+        # spent in ``cascade_to``, a field that is not the escalation one precisely because it
+        # means "spent less" (HDW-517).
+        if router.tier_direction != "cloud_first":
+            raise ValueError(
+                "router.verify_cascade needs router.tier_direction: cloud_first, because a "
+                "cascade may only move toward the cheap end; under local_first the walk already "
+                "starts there and the next tier charges money, so set tier_direction: "
+                "cloud_first or turn verify_cascade off"
+            )
         if router.verify_cascade_model:
             # The tier of an arbitrary catalog model is not known to the rules document; an
             # override is. The runtime strictly-lower check covers the rest (HDW-517 report).
             override = self.models.overrides.get(router.verify_cascade_model)
-            top = "paid" if router.tier_direction == "cloud_first" else "local"
+            top = "paid"  # the top of the only walk a cascade may use (cloud_first, above)
             if override is not None and override.tier == top:
                 raise ValueError(
                     f"router.verify_cascade_model {router.verify_cascade_model!r} is in the "

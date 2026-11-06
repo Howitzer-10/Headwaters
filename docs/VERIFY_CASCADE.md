@@ -29,7 +29,8 @@ would let an ordinary follow-up silently downgrade the next answer.
 
 ```yaml
 router:
-  tier_order: descend   # required: round-robin repeats a tier before it descends
+  tier_order: descend        # required: round-robin repeats a tier before it descends
+  tier_direction: cloud_first  # required: a cascade may only move toward the cheap end
   verify_cascade: true
   # verify_cascade_model: "qwen3:8b"   # optional: that model or no cascade at all
   # verify_cascade_tasks: [code]       # which task classes may cascade (default: code)
@@ -37,8 +38,14 @@ router:
 
 `tier_order: descend` is required because the cascade targets a candidate from a **strictly lower**
 tier than the model that drafted; round-robin ordering can hand a tier a second attempt before any
-tier descends, which is the opposite of what a cascade needs. An invalid combination is refused at
-load time with a message naming the fix.
+tier descends, which is the opposite of what a cascade needs.
+
+`tier_direction: cloud_first` is required for the same reason aimed at money: a cascade may only
+move toward the cheap end, and under `local_first` the walk already starts there, so the next tier
+down the walk is `openrouter_auto` or `paid` — a cascade that charges. Refusing it at load time
+keeps `cascade_to` honest, since that column is separate from `escalated_to` precisely because it
+means "did not spend more". An invalid combination is refused at load time with a message naming
+the fix.
 
 Cascading on a task is decided by `verify_cascade_tasks`, using the same task vocabulary as the
 score table. When the cascade is enabled for a task, the gate runs for that task even under
@@ -60,6 +67,9 @@ wider gate.
 - **No failure-memory record.** A malformed answer is not a provider outage; the drafting model is
   not remembered as failed.
 - **No streaming.** A stream does not retry or cascade; the caller already has the tokens.
+- **Downward, never toward money.** A cascade may not target a tier that charges money when the
+  failed model's tier did not, so `tier_direction: local_first` is refused at load time; on the
+  `cloud_first` walk everything below the drafting tier's `free_cloud` floor is free.
 - **Honest logging.** The outcome row records `cascade_to` separately from `escalated_to`, because
   `escalated_to` means "spent more" and the ledger reads it as such.
 
