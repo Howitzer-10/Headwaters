@@ -102,6 +102,9 @@ async def build_outcome(
     d = result.decision
     if d.below_floor:
         notes.insert(0, BELOW_FLOOR_WARNING)
+    # HDW-502: the ★ feature's handback line names a way forward, so it leads the notes.
+    if d.advisory:
+        notes.insert(0, d.advisory)
     if want == "diff" and not extracted.diffs:
         notes.append("No diff was found in the model's answer.")
     uri = result_uri(tc.store.put(_detail(tool, result, extracted, files)))

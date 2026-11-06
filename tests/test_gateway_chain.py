@@ -5,8 +5,9 @@ catalog's wall patterns; only the providers are mocked, one script per model id:
 
 (a) ``headwaters/free`` after the host refused the request: the free model 429s and the local
     model answers, twice, completing an agent-mode tool loop with the tool result sent back;
-(b) the same chain in ``headwaters/auto`` with the ★ paid-scopes feature registered: the paid key
-    answers 402 (credit balance too low), then the free 429, then the local tool loop;
+(b) the same chain in ``headwaters/auto`` with the ★ paid-scopes feature switched on
+    (``features: {paid_scopes: true}``): the paid key answers 402 (credit balance too low), then
+    the free 429, then the local tool loop;
 (c) the request shape a Copilot BYOK client sends: a system prompt, ``tools`` with
     ``tool_choice``, ``temperature``, ``max_tokens``, ``stream`` and ``x-session-id``;
 (d) the default (flag-off) ``auto`` behaviour, which must not change: the paid key is never in
@@ -28,7 +29,6 @@ from starlette.types import ASGIApp
 
 from headwaters.core.executor.errors import ProviderError
 from headwaters.core.executor.types import Delta, ToolCallDelta
-from headwaters.core.features import FeatureRegistry, FeatureSpec, discover_features
 from headwaters.gateway.openai_routes import build_gateway_app
 from tests.cli_support import add_model
 from tests.rebuild_support import TOKEN, DaemonRig, ProgrammableProvider
@@ -67,6 +67,17 @@ tiers:
     models: ["{PAID}"]
 """
 
+# HDW-502: the paid tier is a ★ feature, so its switch is what separates (b) from (d). Both are
+# written out rather than relying on the beta default: this file is the regression pin for it.
+STAR = """
+features:
+  paid_scopes: true
+"""
+NON_STAR = """
+features:
+  paid_scopes: false
+"""
+
 
 def call(path: str = "a.py") -> Delta:
     """The assistant turn that asks for a tool."""
@@ -76,27 +87,8 @@ def call(path: str = "a.py") -> Delta:
     return Delta(tool_calls=(fragment,), finish_reason="tool_calls")
 
 
-def star_paid_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Register the ★ paid-scopes feature the way its package does (``headwaters/features``).
-
-    That package is not built yet, and ``FeatureRegistry.enabled`` is False for a feature that
-    was never registered however the flags read, so the suite stands in for it. Nothing else in
-    routing changes: the feature id is the one ``core.scope`` asks for.
-    """
-    real = discover_features
-
-    def discover(registry: FeatureRegistry, *args: Any, **kw: Any) -> Any:
-        found = real(registry, *args, **kw)
-        registry.register(FeatureSpec("paid_scopes", star=True, title="Paid scopes"))
-        return found
-
-    monkeypatch.setattr("headwaters.core.engine.discover_features", discover)
-
-
 def make_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, star: bool = False) -> DaemonRig:
     """The HDW-148 rig with a paid primary in the catalog and one programmed provider."""
-    if star:
-        star_paid_scopes(monkeypatch)
     provider = ProgrammableProvider()
     rig = DaemonRig(tmp_path, monkeypatch, cloud=True, provider=provider)
     # Real providers, so the catalog's own wall patterns classify these failures as walls.
@@ -112,7 +104,7 @@ def make_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, star: bool = Fa
         price_in=3,
         price_out=15,
     )
-    rig.save(PRIMARY)
+    rig.save(PRIMARY + (STAR if star else NON_STAR))
     assert rig.manager.reload() is True
     assert rig.manager.last_error is None
     return rig

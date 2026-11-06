@@ -22,12 +22,21 @@ from tests.fixtures.features._example import ExampleLedger
 
 EXAMPLE_PACKAGE = "tests.fixtures.features"
 
+# Every ★ package that ships in ``headwaters/features``, in discovery order. HDW-502: this
+# assertion was written (HDW-126) when nothing shipped there and went stale when the ledger, the
+# tray and the paid scopes landed; naming the packages is what keeps it meaningful.
+PRODUCTION = [
+    "headwaters.features.ledger",
+    "headwaters.features.paid_scopes",
+    "headwaters.features.tray",
+]
+
 
 def test_production_discovery_registers_no_example() -> None:
     """HDW-126 / P8: the dummy feature must never be registered in production."""
     reg = FeatureRegistry()
-    assert discover_features(reg) == []
-    assert reg.all() == []
+    assert discover_features(reg) == PRODUCTION
+    assert all(not spec.id.startswith("_") for spec in reg.all())
     assert reg.plugins_for("VerifierPlugin") == []
     assert reg.plugins_for("LedgerPlugin") == []
 

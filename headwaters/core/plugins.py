@@ -12,6 +12,7 @@ keep ``SUPPORTED_API_VERSIONS`` listing every version core still accepts.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 CURRENT_API_VERSION = 1
@@ -94,6 +95,56 @@ class EscalationPlugin(Protocol):
     def should_escalate(self, attempt: int, problems: Sequence[str]) -> bool: ...
 
 
+@dataclass(frozen=True)
+class BudgetCheck:
+    """What a ``BudgetPlugin`` answers: may this paid call go ahead, and why not.
+
+    ``reason`` is a fixed, text-free explanation the router can put in the decision's reasons
+    when the paid tier is withheld; ``None`` when the call is allowed.
+    """
+
+    allowed: bool
+    spent_usd: float = 0.0
+    cap_usd: float | None = None
+    reason: str | None = None
+
+
+@runtime_checkable
+class BudgetPlugin(Protocol):
+    """Decides whether one more paid call fits the spend the user allowed for the day.
+
+    Core asks this only for a decision that landed on a paid tier, so a plugin that is absent
+    (or switched off) leaves the paid tier exactly as the policy ladder built it (HDW-502).
+    """
+
+    api_version: int
+
+    def check(self, *, model: str, tier: str, estimated_usd: float) -> BudgetCheck: ...
+
+
+@runtime_checkable
+class AdvicePlugin(Protocol):
+    """Adds a handback advisory when a decision could only be served below the quality floor.
+
+    Returns the line to show (or ``None``). Every argument is decision metadata: a model id, a
+    tier, scores and the session key. Never request text (HDW-502).
+    """
+
+    api_version: int
+
+    def advise(
+        self,
+        *,
+        model: str,
+        tier: str,
+        below_floor: bool,
+        floor: float,
+        score: float,
+        scope_tiers: Sequence[str],
+        session: str,
+    ) -> str | None: ...
+
+
 INTERFACES: dict[str, type] = {
     "SurfacePlugin": SurfacePlugin,
     "VerifierPlugin": VerifierPlugin,
@@ -103,6 +154,8 @@ INTERFACES: dict[str, type] = {
     "LedgerPlugin": LedgerPlugin,
     "ClassifierLayerPlugin": ClassifierLayerPlugin,
     "EscalationPlugin": EscalationPlugin,
+    "BudgetPlugin": BudgetPlugin,
+    "AdvicePlugin": AdvicePlugin,
 }
 
 

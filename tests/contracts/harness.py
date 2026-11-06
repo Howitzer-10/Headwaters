@@ -61,6 +61,27 @@ def _escalation(p: object) -> None:
     assert isinstance(p.should_escalate(1, ["syntax error"]), bool)  # type: ignore[attr-defined]
 
 
+def _budget(p: object) -> None:
+    check = p.check(model="vendor/paid", tier="paid", estimated_usd=0.0)  # type: ignore[attr-defined]
+    assert isinstance(check.allowed, bool)
+    assert check.cap_usd is None or check.cap_usd >= 0
+    # A plugin that refuses must say why: the reason goes into the decision's reasons.
+    assert check.allowed or bool(check.reason)
+
+
+def _advice(p: object) -> None:
+    line = p.advise(  # type: ignore[attr-defined]
+        model="qwen:14b",
+        tier="local",
+        below_floor=True,
+        floor=70.0,
+        score=20.0,
+        scope_tiers=("local",),
+        session="contract",
+    )
+    assert line is None or isinstance(line, str)
+
+
 BEHAVIOUR: dict[str, Callable[[object], None]] = {
     "SurfacePlugin": _surface,
     "VerifierPlugin": _verifier,
@@ -70,6 +91,8 @@ BEHAVIOUR: dict[str, Callable[[object], None]] = {
     "LedgerPlugin": _ledger,
     "ClassifierLayerPlugin": _classifier,
     "EscalationPlugin": _escalation,
+    "BudgetPlugin": _budget,
+    "AdvicePlugin": _advice,
 }
 
 

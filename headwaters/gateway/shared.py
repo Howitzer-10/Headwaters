@@ -147,6 +147,9 @@ def advice_note(
     if decision is None or rules.advice == "off":
         return None
     parts: list[str] = []
+    # HDW-502: the ★ feature's handback line leads, since it is the one that names a way forward.
+    if decision.advisory:
+        parts.append(decision.advisory)
     if decision.below_floor:
         parts.append(BELOW_FLOOR_WARNING)
     if pending:

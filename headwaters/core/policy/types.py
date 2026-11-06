@@ -63,6 +63,9 @@ class RouteDecision:
     # without re-reading the rules (``headwaters pick``, status).
     tier_order: TierOrder = "interleave"
     tier_direction: TierDirection = "cloud_first"
+    # HDW-502: the ★ paid-scopes feature's handback line for an answer that had to be served
+    # below the floor with no paid tier. ``None`` without the feature, so no surface prints one.
+    advisory: str | None = None
 
 
 Entry = tuple[Candidate, ScoreBreakdown, Rung]

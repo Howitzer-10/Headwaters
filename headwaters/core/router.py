@@ -44,6 +44,7 @@ from headwaters.core.executor.types import ExecResult
 from headwaters.core.features import FeatureRegistry, get_registry
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.model_overrides import apply_overrides
+from headwaters.core.paid_scopes import advice_plugin, budget_plugin, withhold_paid
 from headwaters.core.plugins import EscalationPlugin, LedgerPlugin, VerifierPlugin
 from headwaters.core.policy.decide import decide
 from headwaters.core.policy.errors import NoRouteError, Suggestion
@@ -91,6 +92,7 @@ from headwaters.core.router_types import (
 from headwaters.core.router_verify import run_verifiers, wants_verify
 from headwaters.core.rules import Rules, RulesProvider, as_provider
 from headwaters.core.scope import (
+    PAID_TIERS,
     ScopeDecision,
     ScopeError,
     TierName,
@@ -108,6 +110,10 @@ CandidateSource = Callable[[Requirements], Sequence[Candidate]]
 
 # HDW-511: the rejection reasons that mean "the window is too small", never "pull a model".
 _CONTEXT_REASONS = frozenset({"ctx_too_small", "ctx_unknown", "no_fit_context_too_large"})
+
+# HDW-502: recorded in the reasons when the ★ feature's daily cap removes the paid tier, so an
+# answer served by a free or local model explains why it is not the paid one.
+PAID_WITHHELD_REASON = "paid tier withheld: the daily paid-tier budget is spent"
 
 
 class RequirementsAnalyzer(Protocol):
@@ -371,7 +377,72 @@ class Router:
             PolicyRequest(reqs, scope, request.pin, request.force),
             PolicyContext(candidates, rules, hw, self._escalation(), hint),
         )
+        # HDW-502: the paid-scopes ★ feature may veto the paid tier (daily cap) and then has the
+        # last word on the advice for a below-floor answer. Without the feature both calls
+        # return at once, so the decision is exactly the ladder's.
+        scope, first = self._within_budget(request, reqs, rules, candidates, hw, hint, scope, first)
+        first = self._with_advice(first, key)
         return _Selection(rules, scope, candidates, hw, first)
+
+    def _within_budget(
+        self,
+        request: RouteRequest,
+        reqs: Requirements,
+        rules: Rules,
+        candidates: Sequence[Candidate],
+        hw: HardwareState | None,
+        hint: str | None,
+        scope: ScopeDecision,
+        first: RouteDecision,
+    ) -> tuple[ScopeDecision, RouteDecision]:
+        """HDW-502: ask the ★ feature whether the paid tier this decision chose is affordable.
+
+        Only a paid decision is checked, so a free or local answer costs no extra work. When the
+        cap refuses, the request is decided again without the paid tiers: a free or local model
+        that can serve it wins, and the reasons say why the paid tier went away.
+        """
+        plugin = budget_plugin(self._registry)
+        if plugin is None or first.tier not in PAID_TIERS:
+            return scope, first
+        check = plugin.check(
+            model=first.model, tier=first.tier, estimated_usd=first.breakdown.cost_usd
+        )
+        if check.allowed:
+            return scope, first
+        narrowed = withhold_paid(scope, check.reason or PAID_WITHHELD_REASON)
+        try:
+            again = decide(
+                PolicyRequest(reqs, narrowed, request.pin, request.force),
+                PolicyContext(candidates, rules, hw, self._escalation(), hint),
+            )
+        except NoRouteError as exc:
+            if exc.code == "pin_rejected":  # a pinned model that cannot serve says why already
+                raise
+            raise NoRouteError(
+                "budget_exhausted",
+                "The paid-tier budget for today is spent and no free or local model can serve this "
+                "request.",
+                etas=exc.etas,
+                suggestions=exc.suggestions,
+                rejected=exc.rejected,
+            ) from None
+        return narrowed, again
+
+    def _with_advice(self, decision: RouteDecision, key: str) -> RouteDecision:
+        """HDW-502: attach the ★ feature's handback line, if it has one for this decision."""
+        plugin = advice_plugin(self._registry)
+        if plugin is None:
+            return decision
+        text = plugin.advise(
+            model=decision.model,
+            tier=decision.tier,
+            below_floor=decision.below_floor,
+            floor=decision.floor,
+            score=decision.score,
+            scope_tiers=tuple(sorted(decision.scope.tiers)),
+            session=key,
+        )
+        return replace(decision, advisory=text) if text else decision
 
     # ------------------------------------------------- HDW-511: tool-cost diagnosis
 

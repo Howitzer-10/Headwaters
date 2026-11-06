@@ -14,7 +14,6 @@ from typing import Any
 
 from mcp import Client, types
 
-from headwaters.core.features import FeatureSpec
 from headwaters.core.rules import Rules
 from headwaters.core.state_misc import get_job
 from headwaters.mcp.tools.context import ToolSettings
@@ -56,21 +55,25 @@ def cold_rig(tmp_path: Path, *, threshold_s: float = 20, **settings: Any) -> Rig
     return rig
 
 
+# HDW-502: the paid tier is a ★ feature and it spends real money, so this rig asks for it in the
+# rules instead of leaning on the beta default — the confirm gate is what is under test here, not
+# the daily budget, so the cap is set high enough that it cannot interfere.
+def _paid_rules(limit: float) -> dict[str, Any]:
+    return {
+        "strategy": "primary_first",  # the user's own paid model is tried first
+        "budget": {"confirm_above_usd": limit, "paid_daily_usd": 50.0},
+        "tiers": {"paid": {"models": [PAID]}},
+        "features": {"paid_scopes": True},
+    }
+
+
 def paid_rig(tmp_path: Path, *, price_out: float = 5000.0, limit: float = 0.25) -> Rig:
     """A rig with a paid model that is clearly the best pick and costs real money per token.
 
     Prices are per million tokens: 5000 per million for a ~400-token answer is about $2 a call.
     """
-    rules = Rules.model_validate(
-        {
-            "strategy": "primary_first",  # the user's own paid model is tried first
-            "budget": {"confirm_above_usd": limit},
-            "tiers": {"paid": {"models": [PAID]}},
-        }
-    )
+    rules = Rules.model_validate(_paid_rules(limit))
     rig = Rig(tmp_path, rules=rules)
-    # Core alone never routes to a paid tier: ``paid_scopes`` is a ★ feature. Switch it on here.
-    rig.engine.registry.register(FeatureSpec("paid_scopes", True, "Paid scopes"))
     add_model(rig.db, PAID, "paid", 99.0, agentic=99.0, ctx=200_000)
     with rig.db.write() as c:
         c.execute(

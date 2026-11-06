@@ -194,6 +194,22 @@ def latest_handoff_id(db: Database, session: str) -> int | None:
     return None if r is None or r["id"] is None else int(r["id"])
 
 
+def link_handoff(db: Database, session: str, handoff_id: int) -> bool:
+    """Point a stored session at the handoff packet it should resume from (HDW-502).
+
+    False when the session has no row yet: a session is only stored once it has been pinned or
+    switched, and the packet is still reachable through ``latest_handoff_id``.
+    """
+    with db.write() as c:
+        return (
+            c.execute(
+                "UPDATE sessions SET handoff_packet_id = ? WHERE session_key = ?",
+                (handoff_id, session),
+            ).rowcount
+            > 0
+        )
+
+
 # ---------------------------------------------------------------- kv
 
 
