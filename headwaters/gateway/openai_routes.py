@@ -27,6 +27,8 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
+from headwaters.core.catalog.schema import Catalog
+from headwaters.core.catalog.updater import load_active
 from headwaters.core.executor.types import ExecOptions, ExecResult, ToolCall
 from headwaters.core.logging import get_logger
 from headwaters.core.router_types import RouteEvent, RouteRequest, RouteResult
@@ -41,7 +43,7 @@ from headwaters.gateway.anthropic_routes import (
     messages,
 )
 from headwaters.gateway.footer import footer_text, with_footer
-from headwaters.gateway.models import card, find, listed
+from headwaters.gateway.models import card, declared, find, listed
 from headwaters.gateway.server import HEALTH_PATH, GuardedApp
 from headwaters.gateway.shared import (
     ADVICE_HEADER,
@@ -78,29 +80,49 @@ CHUNK_OBJECT = "chat.completion.chunk"
 _log = get_logger("gateway")
 
 
+def _active_catalog() -> Catalog:
+    """The catalog on disk (cache, previous, or bundled seed), read with no network access."""
+    return load_active()[0]
+
+
 def build_gateway_app(
     *,
     token: str,
     router: Callable[[], RouterLike | None],
     rules: Callable[[], Rules],
+    catalog: Callable[[], Catalog] | None = None,
 ) -> ASGIApp:
-    """The OpenAI-compatible app, guarded exactly like the daemon's API (loopback + token)."""
+    """The OpenAI-compatible app, guarded exactly like the daemon's API (loopback + token).
+
+    ``catalog`` feeds the declared capability floor on ``/v1/models`` (HDW-506); it defaults to
+    the active catalog on disk, read per request so a refreshed catalog shows up without a
+    restart. ``RouterLike`` remains the only thing that decides what serves a request.
+    """
+    read_catalog = catalog if catalog is not None else _active_catalog
 
     async def get_health(_request: Request) -> Response:
         return JSONResponse({"ok": True, "gateway": "openai"})
 
     async def get_models(_request: Request) -> Response:
-        show_extras = rules().picker.show_extras
+        live_rules = rules()
+        live_catalog = read_catalog()
         return JSONResponse(
-            {"object": "list", "data": [card(model) for model in listed(show_extras)]}
+            {
+                "object": "list",
+                "data": [
+                    card(model, declared(model.scope, live_catalog, live_rules))
+                    for model in listed(live_rules.picker.show_extras)
+                ],
+            }
         )
 
     async def get_model(request: Request) -> Response:
         wanted = request.path_params["model_id"]
-        found = find(wanted, rules().picker.show_extras)
+        live_rules = rules()
+        found = find(wanted, live_rules.picker.show_extras)
         if found is None:
             return error_response(404, "model_not_found", f"There is no model {wanted!r}.")
-        return JSONResponse(card(found))
+        return JSONResponse(card(found, declared(found.scope, read_catalog(), live_rules)))
 
     async def post_chat(request: Request) -> Response:
         return await _chat(request, router, rules)

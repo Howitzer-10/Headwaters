@@ -1,0 +1,49 @@
+{
+  "name": "headwaters-vscode",
+  "displayName": "Headwaters",
+  "description": "Headwaters virtual models (auto, free, local, cloud) as VS Code language models, served by the Headwaters daemon on this machine.",
+  "version": "0.1.0",
+  "publisher": "headwaters",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "headwaters",
+        "displayName": "Headwaters"
+      }
+    ],
+    "commands": [
+      {
+        "command": "headwaters.refreshModels",
+        "title": "Headwaters: Refresh Models",
+        "category": "Headwaters"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest": "npm run compile",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "1.104.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "typescript": "~5.9.3"
+  }
+}
