@@ -36,6 +36,7 @@ from headwaters.core.state_decisions import get_outcome, latest_decision_ts, rec
 from headwaters.core.state_limits import active_walls
 from headwaters.core.state_models import get_model, list_models
 from headwaters.core.usage_report import send_due_report
+from headwaters.daemon.wizard_backend import WizardBackend
 from headwaters.features import tray as tray_feature
 from headwaters.gateway.openai_routes import build_gateway_app
 from headwaters.gateway.server import HttpServer, build_app, build_status_page_app
@@ -520,7 +521,13 @@ class Daemon:
         """
         rules = self.live_rules
         engine = self.live_engine()
-        services: dict[str, object] = {"db": self.db, "rules": rules}
+        services: dict[str, object] = {
+            "db": self.db,
+            "rules": rules,
+            # The port this dashboard really bound, so the wizard's self-test can fetch its own
+            # page on loopback instead of being told a number that might not be the one in use.
+            "dashboard_port": self.ports.dashboard,
+        }
         if engine is not None:
             services["catalog"] = engine.catalog
             services["hardware"] = engine.hardware
@@ -602,6 +609,7 @@ class Daemon:
                 # The port the socket really bound, not ``rules.dashboard.port`` (FU-201-6): the
                 # write guard compares the Host against the port a person can actually reach.
                 port=self.ports.dashboard,
+                wizard=WizardBackend(self.feature_registry),
             )
             self._dashboard_server = HttpServer(page, self.dashboard_sock)
             servers.append(self._dashboard_server)

@@ -178,6 +178,39 @@ class ReportPlugin(Protocol):
         ...
 
 
+@runtime_checkable
+class WizardPlugin(Protocol):
+    """The setup wizard's eight steps (HDW-505): describe them, render them, act on one.
+
+    Rendering and acting are separate because consent is concrete: ``page`` shows the diff, the
+    payload or the target, and ``act`` performs exactly one enumerated action afterwards. Every
+    method works while the feature is switched off, so a surface can say what is off and why
+    instead of hiding the wizard. Nothing here ever returns a secret: no key value, no provider
+    key variable name and no token reach a page (D18).
+    """
+
+    api_version: int
+
+    def status(self) -> dict[str, object]:
+        """The eight steps, the recorded state of each, and what is missing. No writes."""
+        ...
+
+    def page(
+        self,
+        *,
+        csrf: str = "",
+        step: int | None = None,
+        error: str | None = None,
+        notice: str | None = None,
+    ) -> str:
+        """The whole wizard page, read live from this machine. Writes nothing."""
+        ...
+
+    def act(self, action: str, form: Mapping[str, str]) -> dict[str, object]:
+        """One enumerated action. Returns ``{"ok", "step", "notice", "error"}``."""
+        ...
+
+
 INTERFACES: dict[str, type] = {
     "SurfacePlugin": SurfacePlugin,
     "VerifierPlugin": VerifierPlugin,
@@ -190,6 +223,7 @@ INTERFACES: dict[str, type] = {
     "BudgetPlugin": BudgetPlugin,
     "AdvicePlugin": AdvicePlugin,
     "ReportPlugin": ReportPlugin,
+    "WizardPlugin": WizardPlugin,
 }
 
 

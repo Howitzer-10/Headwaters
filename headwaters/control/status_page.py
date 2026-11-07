@@ -47,6 +47,7 @@ from headwaters.core.state_key_tests import KeyTestRow, key_tests
 from headwaters.core.state_limits import active_walls
 from headwaters.core.state_models import list_models
 from headwaters.core.usage_report import REPORT_FLAG, REPORT_TITLE
+from headwaters.core.wizard import WIZARD_FLAG
 
 __all__ = [
     "KEYS_SECTION",
@@ -713,7 +714,8 @@ def render_html(page: StatusPage, *, section: str | None = None, error: str | No
         "<title>Headwaters status</title>"
         f"<style>{_CSS}</style></head><body>"
         f"<h1>Headwaters status</h1>"
-        f'<p class="muted">Local dashboard · version {_e(page.version or "unknown")}'
+        + _wizard_link(page)
+        + f'<p class="muted">Local dashboard · version {_e(page.version or "unknown")}'
         f" · {_e(generated)}{catalog}</p>"
         + _editing_note(page)
         + ("" if error is None else f'<p class="error">{_e(error)}</p>')
@@ -729,4 +731,19 @@ def _editing_note(page: StatusPage) -> str:
     return (
         '<p class="muted">This page shows local state. The Keys section can save, replace, remove '
         "and test a key, or test every saved key; nothing else here changes anything.</p>"
+    )
+
+
+def _wizard_link(page: StatusPage) -> str:
+    """One link to the setup wizard, while the ★ package is installed and switched on (HDW-505).
+
+    Derived from ``page.stars`` rather than the registry, so this page keeps its rule: rendering
+    decides nothing and asks nothing. A deleted or switched-off package means no link, not a
+    broken one — the wizard is reached at ``/wizard`` and says why there is nothing there.
+    """
+    if not any(feature_id == WIZARD_FLAG and enabled for feature_id, _, enabled in page.stars):
+        return ""
+    return (
+        '<p class="muted">Setting up? <a href="/wizard">Open the setup wizard</a> — eight steps, '
+        "each one skippable, and nothing is written until you have seen it.</p>"
     )

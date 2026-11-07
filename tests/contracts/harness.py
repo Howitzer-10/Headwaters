@@ -83,6 +83,20 @@ def _report(p: object) -> None:
     assert isinstance(p.survey(), (dict, type(None)))  # type: ignore[attr-defined]
 
 
+def _wizard(p: object) -> None:
+    # Describe and render only: ``act`` is left out of the contract on purpose, so running the
+    # harness can never write to the machine it runs on (HDW-505).
+    described = p.status()  # type: ignore[attr-defined]
+    assert isinstance(described, dict)
+    steps = described.get("steps")
+    assert isinstance(steps, list)
+    assert steps
+    assert all(isinstance(step.get("n"), int) for step in steps)
+    rendered = p.page()  # type: ignore[attr-defined]
+    assert isinstance(rendered, str)
+    assert rendered
+
+
 def _advice(p: object) -> None:
     line = p.advise(  # type: ignore[attr-defined]
         model="qwen:14b",
@@ -108,6 +122,7 @@ BEHAVIOUR: dict[str, Callable[[object], None]] = {
     "BudgetPlugin": _budget,
     "AdvicePlugin": _advice,
     "ReportPlugin": _report,
+    "WizardPlugin": _wizard,
 }
 
 

@@ -30,6 +30,7 @@ PRODUCTION = [
     "headwaters.features.paid_scopes",
     "headwaters.features.tray",
     "headwaters.features.usage_report",
+    "headwaters.features.wizard",
 ]
 
 

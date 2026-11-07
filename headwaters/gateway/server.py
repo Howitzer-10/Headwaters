@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import secrets
 import socket
-from collections.abc import AsyncIterator, Callable, Collection, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 from urllib.parse import parse_qs, quote, urlsplit
@@ -29,14 +30,17 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from headwaters.core.catalog.http import is_loopback_host
 from headwaters.core.keys import KeyStoreError
+from headwaters.core.wizard import WIZARD_PAGE, WIZARD_PATHS
 
 __all__ = [
     "KEYS_PATH",
     "SCOPE_PATH",
+    "WIZARD_PAGE_PATH",
     "GuardedApp",
     "HttpServer",
     "KeysActions",
     "LoopbackOnlyApp",
+    "WizardActions",
     "build_app",
     "build_status_page_app",
     "is_dashboard_authority",
@@ -61,6 +65,11 @@ KEYS_PATHS: dict[str, str] = {
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
 MAX_FORM_BYTES = 8 * 1024
 KEYS_SECTION = "keys"
+# The wizard (HDW-505) is one GET plus the nine writes ``core.wizard`` enumerates. The table is
+# imported rather than repeated: the ★ package renders forms that post to it, so there is one list
+# with two readers and no drift. A path outside it is a 404, never a proxy for arbitrary work.
+WIZARD_PAGE_PATH = WIZARD_PAGE
+MAX_FLASH = 8
 PAGE_FAILED = (
     "<!doctype html><title>Headwaters status</title>"
     "<h1>Headwaters status</h1><p>The page could not be built; the daemon log has the error.</p>"
@@ -90,6 +99,31 @@ class KeysActions(Protocol):
 
     def test_all(self) -> str:
         """Test every saved key; returns "" - no one provider section is the target."""
+        ...
+
+
+class WizardActions(Protocol):
+    """What the dashboard needs for the wizard: one page, and one enumerated action at a time.
+
+    ``page`` renders (it writes nothing, so a reload is always safe) and ``act`` performs exactly
+    one write. ``act`` never receives a value the person was not shown: the form carries what the
+    page displayed - a fingerprint, a choice, a catalog model name - and the backend re-plans and
+    refuses a mismatch. The sentences an action returns are shown once, on the page.
+    """
+
+    def page(
+        self,
+        *,
+        csrf: str = "",
+        step: int | None = None,
+        error: str | None = None,
+        notice: str | None = None,
+    ) -> str:
+        """The whole wizard HTML for one step, or a page saying why there is none."""
+        ...
+
+    def act(self, action: str, form: Mapping[str, str]) -> Mapping[str, object]:
+        """Run one enumerated action; ``{"ok", "step", "notice", "error"}`` comes back."""
         ...
 
 
@@ -337,12 +371,112 @@ class _KeysRoute:
         return HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
 
 
+class _WizardRoute:
+    """``GET /wizard`` and one ``POST /wizard/<action>`` per enumerated action (HDW-505).
+
+    The guards are the key writes' guards, applied to the widest write surface in the product:
+    ``Host`` must be loopback *on this dashboard's port*, any ``Origin``/``Referer`` must be
+    loopback, the body must be a small urlencoded form, and the CSRF token is compared in constant
+    time. D22 stands and is not hidden: that stops a page on another origin, not another program
+    running as the same user.
+
+    A POST never puts its sentence in a URL. It stores the one line under a single-use token and
+    redirects to ``GET /wizard?token=...``, so a refusal is shown once and a page's text is never
+    reflected into a query string or a redirect target.
+    """
+
+    def __init__(self, *, wizard: WizardActions, csrf: str, port: int) -> None:
+        self._wizard = wizard
+        self._csrf = csrf
+        self._port = port
+        self._flash: dict[str, tuple[str, str]] = {}
+
+    def handler(self, action: str) -> Callable[[Request], Awaitable[Response]]:
+        """A Starlette handler for one action: the path decides the action, not the form."""
+
+        async def handle(request: Request) -> Response:
+            return await self._handle(request, action)
+
+        return handle
+
+    async def page(self, request: Request) -> Response:
+        notice, error = self._recall(request.query_params.get("token", ""))
+        try:
+            body = await asyncio.to_thread(
+                self._wizard.page,
+                csrf=self._csrf,
+                step=_as_step(request.query_params.get("step")),
+                error=error,
+                notice=notice,
+            )
+        except Exception:
+            return HTMLResponse(PAGE_FAILED, status_code=500)
+        return HTMLResponse(body, headers={"Cache-Control": "no-store"})
+
+    async def _handle(self, request: Request, action: str) -> Response:
+        headers = request.headers
+        if not is_dashboard_authority(headers.get("host", ""), self._port):
+            return _refused(403, "bad_host")
+        origin = headers.get("origin") or headers.get("referer")
+        if origin is not None and not is_dashboard_origin(origin, self._port):
+            return _refused(403, "bad_origin")
+        media = headers.get("content-type", "").split(";")[0].strip().lower()
+        if media != FORM_MEDIA_TYPE:
+            return _refused(415, "unsupported_media_type")
+        body = await _form_body(request)
+        if body is None:
+            return _refused(413, "body_too_large")
+        try:
+            form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+        except UnicodeDecodeError:
+            return _refused(400, "bad_form")
+        if not self._csrf or not hmac.compare_digest(
+            _first(form, "csrf").encode("utf-8"), self._csrf.encode("utf-8")
+        ):
+            return _refused(403, "bad_csrf")
+        try:
+            outcome = await asyncio.to_thread(
+                self._wizard.act, action, {key: values[0] for key, values in form.items()}
+            )
+        except Exception:
+            return _refused(500, "action_failed")
+        token = self._remember(_one_line(outcome.get("notice")), _one_line(outcome.get("error")))
+        target = f"{WIZARD_PAGE_PATH}?token={quote(token, safe='')}"
+        step = outcome.get("step")
+        if isinstance(step, int) and not isinstance(step, bool) and step > 0:
+            target += f"&step={step}"
+        return RedirectResponse(target, status_code=303)
+
+    def _remember(self, notice: str, error: str) -> str:
+        token = secrets.token_hex(8)
+        self._flash[token] = (notice, error)
+        while len(self._flash) > MAX_FLASH:
+            self._flash.pop(next(iter(self._flash)))
+        return token
+
+    def _recall(self, token: str) -> tuple[str | None, str | None]:
+        notice, error = self._flash.pop(token, ("", "")) if token else ("", "")
+        return (notice or None, error or None)
+
+
+def _one_line(value: object) -> str:
+    return "" if value is None else " ".join(str(value).split())[:500]
+
+
+def _as_step(value: str | None) -> int | None:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_status_page_app(
     *,
     render: Callable[[str | None, str | None], str],
     keys: KeysActions | None = None,
     csrf: str = "",
     port: int | None = None,
+    wizard: WizardActions | None = None,
 ) -> ASGIApp:
     """The dashboard: the page on ``GET /`` plus its four key writes on ``POST /keys/*`` (HDW-503).
 
@@ -351,6 +485,12 @@ def build_status_page_app(
     when a write was refused. It runs off the event loop: it reads rules and the shared SQLite
     state. The writes are registered only when a backend *and* this dashboard's port are given,
     because the guard needs the port the socket really bound.
+
+    ``wizard`` adds the setup wizard (HDW-505): ``GET /wizard`` and the nine enumerated writes in
+    ``core.wizard.WIZARD_PATHS``. It is served from this same app rather than a listener of its
+    own (D14: the daemon is the composition root), so it shares the one CSRF token, the one origin
+    check and the one port guard. The consequence is stated in its report and on its own page: while
+    the daemon is down there is no wizard, so it cannot be the surface that starts the daemon.
     """
 
     async def get_page(request: Request) -> HTMLResponse:
@@ -361,12 +501,20 @@ def build_status_page_app(
         return HTMLResponse(body, headers={"Cache-Control": "no-store"})
 
     routes: list[Route] = [Route(path, get_page, methods=["GET"]) for path in STATUS_PAGE_PATHS]
-    write_paths: tuple[str, ...] = ()
+    write_paths: list[str] = []
     if keys is not None and port is not None:
-        write_paths = tuple(KEYS_PATHS)
+        write_paths += list(KEYS_PATHS)
         routes += [
             Route(path, _KeysRoute(action, keys, csrf, port, render).handle, methods=["POST"])
             for path, action in KEYS_PATHS.items()
+        ]
+    if wizard is not None and port is not None:
+        wizard_route = _WizardRoute(wizard=wizard, csrf=csrf, port=port)
+        write_paths += list(WIZARD_PATHS)
+        routes.append(Route(WIZARD_PAGE_PATH, wizard_route.page, methods=["GET"]))
+        routes += [
+            Route(path, wizard_route.handler(action), methods=["POST"])
+            for path, action in WIZARD_PATHS.items()
         ]
     return LoopbackOnlyApp(Starlette(routes=routes), write_paths=write_paths)
 
