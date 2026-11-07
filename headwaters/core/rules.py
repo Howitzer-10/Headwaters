@@ -470,6 +470,35 @@ class HostsRules(_Model):
     subscription: dict[str, bool] = Field(default_factory=dict)
 
 
+class ReportRules(_Model):
+    """HDW-508: the opt-in usage report. Nothing here turns it on.
+
+    ``endpoint`` is the collector the report is POSTed to. It is ``None`` in a fresh install on
+    purpose: the switch lives in ``features: {usage_report: true}`` and one of the two must stay
+    unset for the feature to be silently inert, so a shipped install has no address to send to
+    and no consent to send it. There is no default URL to inherit (D4 of the ticket assumes a
+    collector exists; this build ships the client for one, not an operator).
+    """
+
+    endpoint: str | None = None
+    interval_days: int = Field(default=7, ge=1, le=90)
+    timeout_s: float = Field(default=10.0, ge=1.0, le=60.0)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _endpoint_is_https(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if not text.startswith("https://"):
+            raise ValueError(
+                "report.endpoint must be an https:// URL: a report is never sent plain"
+            )
+        return text
+
+
 class Rules(_Model):
     """The whole ``rules.yaml`` document."""
 
@@ -492,6 +521,7 @@ class Rules(_Model):
     gateway: GatewayRules = Field(default_factory=GatewayRules)
     dashboard: DashboardRules = Field(default_factory=DashboardRules)
     ledger: LedgerRules = Field(default_factory=LedgerRules)
+    report: ReportRules = Field(default_factory=ReportRules)
     mcp: McpRules = Field(default_factory=McpRules)
     workspace: WorkspaceRules = Field(default_factory=WorkspaceRules)
     attribution: AttributionRules = Field(default_factory=AttributionRules)

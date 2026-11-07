@@ -145,6 +145,39 @@ class AdvicePlugin(Protocol):
     ) -> str | None: ...
 
 
+@runtime_checkable
+class ReportPlugin(Protocol):
+    """Builds, previews and sends the opt-in usage report (HDW-508).
+
+    Every method works while the feature is switched off: a switch whose payload cannot be seen
+    before it is turned on cannot be consented to. Only ``send_due`` and ``send_now`` may open a
+    socket, and each is gated in one place (``headwaters/features/usage_report/send.py``).
+    Nothing here ever sees request text, prompts, outputs, file names, paths or keys.
+    """
+
+    api_version: int
+
+    def status(self) -> dict[str, object]:
+        """The switch, the endpoint state, when it last sent and when it is next due. No I/O."""
+        ...
+
+    def preview(self) -> dict[str, object]:
+        """Exactly the payload a send would POST, built but not sent."""
+        ...
+
+    def send_due(self, *, now: float | None = None) -> dict[str, object]:
+        """Send only when the feature is on and the interval has elapsed; never otherwise."""
+        ...
+
+    def send_now(self, *, now: float | None = None) -> dict[str, object]:
+        """One-shot send at the user's explicit request. Does not turn the feature on."""
+        ...
+
+    def survey(self) -> dict[str, object] | None:
+        """The product-feedback prompt that is owed now, or ``None``. Reads state, posts nothing."""
+        ...
+
+
 INTERFACES: dict[str, type] = {
     "SurfacePlugin": SurfacePlugin,
     "VerifierPlugin": VerifierPlugin,
@@ -156,6 +189,7 @@ INTERFACES: dict[str, type] = {
     "EscalationPlugin": EscalationPlugin,
     "BudgetPlugin": BudgetPlugin,
     "AdvicePlugin": AdvicePlugin,
+    "ReportPlugin": ReportPlugin,
 }
 
 

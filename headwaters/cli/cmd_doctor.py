@@ -20,7 +20,7 @@ from headwaters.cli.output import (
     make_console,
     table,
 )
-from headwaters.cli.runtime import hardware_state, load_rules_or_exit
+from headwaters.cli.runtime import feature_registry, hardware_state, load_rules_or_exit
 from headwaters.control.bundle import build_bundle
 from headwaters.control.doctor import HOSTS, Report, run_doctor
 from headwaters.core.daemon_info import read_token
@@ -80,7 +80,12 @@ def register(app: typer.Typer) -> None:
                 as_json=as_json,
             )
         rules = load_rules_or_exit()
-        report = run_doctor(rules, host=host, hardware=hardware_state(rules))
+        report = run_doctor(
+            rules,
+            host=host,
+            hardware=hardware_state(rules),
+            registry=feature_registry(rules),
+        )
         payload = report.as_dict()
         written: str | None = None
         if bundle:

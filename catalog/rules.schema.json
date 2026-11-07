@@ -816,6 +816,40 @@
       "title": "PremiumTier",
       "type": "object"
     },
+    "ReportRules": {
+      "additionalProperties": false,
+      "description": "HDW-508: the opt-in usage report. Nothing here turns it on.\n\n``endpoint`` is the collector the report is POSTed to. It is ``None`` in a fresh install on\npurpose: the switch lives in ``features: {usage_report: true}`` and one of the two must stay\nunset for the feature to be silently inert, so a shipped install has no address to send to\nand no consent to send it. There is no default URL to inherit (D4 of the ticket assumes a\ncollector exists; this build ships the client for one, not an operator).",
+      "properties": {
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "interval_days": {
+          "default": 7,
+          "maximum": 90,
+          "minimum": 1,
+          "title": "Interval Days",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "default": 10.0,
+          "maximum": 60.0,
+          "minimum": 1.0,
+          "title": "Timeout S",
+          "type": "number"
+        }
+      },
+      "title": "ReportRules",
+      "type": "object"
+    },
     "RouterRules": {
       "additionalProperties": false,
       "properties": {
@@ -1334,6 +1368,9 @@
       "default": false,
       "title": "Private Lock",
       "type": "boolean"
+    },
+    "report": {
+      "$ref": "#/$defs/ReportRules"
     },
     "router": {
       "$ref": "#/$defs/RouterRules"

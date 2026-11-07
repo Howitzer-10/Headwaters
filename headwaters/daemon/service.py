@@ -35,6 +35,7 @@ from headwaters.core.state import Database
 from headwaters.core.state_decisions import get_outcome, latest_decision_ts, recent_decisions
 from headwaters.core.state_limits import active_walls
 from headwaters.core.state_models import get_model, list_models
+from headwaters.core.usage_report import send_due_report
 from headwaters.features import tray as tray_feature
 from headwaters.gateway.openai_routes import build_gateway_app
 from headwaters.gateway.server import HttpServer, build_app, build_status_page_app
@@ -46,6 +47,9 @@ __all__ = ["Daemon", "pick_ports", "run_in_daemon_thread"]
 
 KEEP_WARM_TIMEOUT_S = 120.0
 KEY_POLL_TIMEOUT_S = 15.0
+# How often the daemon asks whether the opt-in usage report is due (HDW-508). The plugin compares
+# `report.interval_days` against its own last-send record, so this only bounds how late it can be.
+REPORT_SWEEP_S = 900.0
 # How long after a spawn the daemon looks for a tray that died on its first tick, and how often.
 TRAY_START_GRACE_S = 1.0
 TRAY_POLL_INTERVAL_S = 0.05
@@ -457,6 +461,22 @@ class Daemon:
     def refresh_interval(self) -> float:
         return max(60.0, self.live_rules.models.refresh_ttl_s)
 
+    def report_interval(self) -> float:
+        """How often the daemon asks whether a report is due; a coarse sweep, not the interval.
+
+        The plugin decides with ``report.interval_days`` and its own last-send time, so the sweep
+        only has to be frequent enough that a weekly send is not late. It runs whether or not the
+        report is on: off is answered "nothing to do" without opening a socket (HDW-508).
+        """
+        return REPORT_SWEEP_S
+
+    def report_once(self) -> dict[str, object] | None:
+        """One sweep of the opt-in report: sends only if it was turned on and is due."""
+        outcome = send_due_report(self.feature_registry())
+        if outcome is not None and outcome.get("sent"):
+            _log.info("usage report sent", extra={"reason": outcome.get("reason")})
+        return outcome
+
     async def _every(self, seconds: Callable[[], float], work: Callable[[], object]) -> None:
         stop = self._stop
         assert stop is not None
@@ -503,6 +523,7 @@ class Daemon:
         services: dict[str, object] = {"db": self.db, "rules": rules}
         if engine is not None:
             services["catalog"] = engine.catalog
+            services["hardware"] = engine.hardware
         registry = self._registry
         if registry is None:
             registry = FeatureRegistry(services=services)
@@ -591,6 +612,7 @@ class Daemon:
             asyncio.create_task(self._every(self.refresh_interval, self.refresh_once)),
             asyncio.create_task(self._every(self.keep_warm_interval, self.keep_warm_once)),
             asyncio.create_task(self._every(self.key_poll_interval, self.key_poll_once)),
+            asyncio.create_task(self._every(self.report_interval, self.report_once)),
         ]
         try:
             await asyncio.gather(*serving)

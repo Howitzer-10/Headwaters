@@ -46,6 +46,7 @@ from headwaters.core.state_decisions import get_outcome, recent_decisions
 from headwaters.core.state_key_tests import KeyTestRow, key_tests
 from headwaters.core.state_limits import active_walls
 from headwaters.core.state_models import list_models
+from headwaters.core.usage_report import REPORT_FLAG, REPORT_TITLE
 
 __all__ = [
     "KEYS_SECTION",
@@ -186,12 +187,20 @@ def _decisions(db: Database, limit: int) -> list[PageDecision]:
 
 
 def _stars(registry: FeatureRegistry) -> list[tuple[str, str, bool]]:
-    """Registered ★ features, minus internal example ones (ids starting with ``_``)."""
-    return [
+    """Registered ★ features, minus internal example ones (ids starting with ``_``).
+
+    The usage report is listed even when its package is missing, and says so (HDW-508):
+    PRIVACY.md promises the toggle is visible, and a row that only appears after the switch is on
+    could not be used to decide about the switch.
+    """
+    found = [
         (spec.id, spec.label, registry.enabled(spec.id))
         for spec in registry.all()
         if spec.star and not spec.id.startswith("_")
     ]
+    if not any(feature_id == REPORT_FLAG for feature_id, _label, _on in found):
+        found.append((REPORT_FLAG, f"{REPORT_TITLE} (package not installed)", False))
+    return found
 
 
 def _key_groups(store: KeyStore, tested: dict[str, KeyTestRow]) -> list[PageProvider]:

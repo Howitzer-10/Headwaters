@@ -33,11 +33,13 @@ from headwaters.core.catalog.http import SourceError, UrllibHttp
 from headwaters.core.catalog.updater import CatalogStatus
 from headwaters.core.daemon_client import DaemonClient, DaemonError, find_running
 from headwaters.core.daemon_info import DEFAULT_API_PORT, read_info, read_token, token_path
+from headwaters.core.features import FeatureRegistry, discover_features
 from headwaters.core.hardware.state import HardwareState
 from headwaters.core.hardware.sysmem import SYSMEM_HINT
 from headwaters.core.keys import KeyStore
 from headwaters.core.mcp_launch import launch_options
 from headwaters.core.rules import Rules
+from headwaters.core.usage_report import REPORT_TITLE, report_status
 from headwaters.installer import verify as host_verify
 from headwaters.installer.context import default_context
 from headwaters.packaging.layout import installed_root, update_mode
@@ -362,6 +364,7 @@ class Doctor:
     platform: str | None = None
     executable: str | None = None
     now: float | None = None
+    registry: FeatureRegistry | None = None
     _client: DaemonClient | None = field(default=None, init=False, repr=False)
     _found: bool = field(default=False, init=False, repr=False)
 
@@ -382,6 +385,18 @@ class Doctor:
 
     def _clock(self) -> float:
         return time.time() if self.now is None else self.now
+
+    def _feature_registry(self) -> FeatureRegistry:
+        """The registry the report row reads: the caller's, or one discovered here.
+
+        A registry built here has no services, which the report plugin already answers with stated
+        reasons rather than exceptions — the row must render even when nothing else is available.
+        """
+        if self.registry is None:
+            registry = FeatureRegistry(self.rules.features)
+            discover_features(registry)
+            self.registry = registry
+        return self.registry
 
     def _env(self) -> dict[str, str]:
         if self.env is not None:
@@ -879,6 +894,63 @@ class Doctor:
             )
         return checks
 
+    def _usage_report(self) -> Check:
+        """Always rendered, on or off, installed or not (HDW-508, PRIVACY.md's promise).
+
+        The report is off by default and ships with no endpoint, so "off" is the healthy state and
+        says so in full: the switch, the payload shape and where it would go. A row that appeared
+        only after the report was switched on could not be used to decide whether to switch it on.
+        """
+        described = report_status(self._feature_registry())
+        endpoint = str(described.get("endpoint") or "")
+        if not described.get("discovered"):
+            detail = str(
+                described.get("note")
+                or "the ★ report package is not installed, so no payload can be built or sent"
+            )
+            return Check("usage_report", REPORT_TITLE, OK, detail)
+        version = described.get("payload_version")
+        fields = described.get("fields")
+        shape = (
+            f"payload version {version}, {fields} counted fields, none free text"
+            if version
+            else "no payload can be built right now"
+        )
+        where = f"endpoint {endpoint}" if described.get("endpoint_set") else "no endpoint"
+        if described.get("enabled") and not described.get("endpoint_set"):
+            return Check(
+                "usage_report",
+                REPORT_TITLE,
+                WARN,
+                f"on, but {where}, so nothing is sent; {shape}",
+                fix="Set an endpoint with `headwaters report endpoint`, or `headwaters report "
+                "disable`.",
+            )
+        if described.get("enabled"):
+            if not described.get("consent_current"):
+                return Check(
+                    "usage_report",
+                    REPORT_TITLE,
+                    WARN,
+                    f"on and consented at a different payload version; {shape}",
+                    fix="Run `headwaters report preview`, then enable it again.",
+                )
+            interval = described.get("interval_days")
+            every = f"about every {interval} days" if interval else "on its interval"
+            return Check(
+                "usage_report",
+                REPORT_TITLE,
+                OK,
+                f"on, {every} to {where}; {shape}",
+            )
+        return Check(
+            "usage_report",
+            REPORT_TITLE,
+            OK,
+            f"off (the default, nothing is sent); {where}; {shape}. "
+            "`headwaters report preview` shows the exact payload before you decide.",
+        )
+
     def run(self) -> Report:
         self._client_for()
         checks = [
@@ -896,6 +968,7 @@ class Doctor:
             self._git(),
             self._mcp_launch(),
             self._host_configs(),
+            self._usage_report(),
         ]
         if self.host:
             checks.extend(self._host_checks())

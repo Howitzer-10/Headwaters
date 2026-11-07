@@ -66,11 +66,30 @@ def hardware_state(rules: Rules) -> HardwareState | None:
         return None
 
 
-def _registry(rules: Rules, db: Database, catalog: Catalog) -> FeatureRegistry:
-    registry = FeatureRegistry(services={"db": db, "catalog": catalog, "rules": rules})
+def feature_registry(
+    rules: Rules, *, db: Database | None = None, catalog: Catalog | None = None
+) -> FeatureRegistry:
+    """A discovered registry. ``db`` and ``catalog`` are optional for read-only surfaces.
+
+    ``headwaters doctor`` needs the report row (HDW-508) but not a database it would otherwise
+    never open; a plugin that needs a missing service states the reason instead of raising.
+    """
+    services: dict[str, object] = {
+        "rules": rules,
+        "hardware": lambda: hardware_state(rules),
+    }
+    if db is not None:
+        services["db"] = db
+    if catalog is not None:
+        services["catalog"] = catalog
+    registry = FeatureRegistry(services=services)
     discover_features(registry)
     registry.set_flags(rules.features)
     return registry
+
+
+def _registry(rules: Rules, db: Database, catalog: Catalog) -> FeatureRegistry:
+    return feature_registry(rules, db=db, catalog=catalog)
 
 
 @dataclass(frozen=True)

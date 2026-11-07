@@ -69,6 +69,20 @@ def _budget(p: object) -> None:
     assert check.allowed or bool(check.reason)
 
 
+def _report(p: object) -> None:
+    # Describing itself must never send: ``send_due``/``send_now`` are left out of the contract
+    # on purpose, so running the harness can never open a socket (HDW-508).
+    described = p.status()  # type: ignore[attr-defined]
+    assert isinstance(described, dict)
+    assert "enabled" in described
+    assert "payload_version" in described
+    preview = p.preview()  # type: ignore[attr-defined]
+    assert isinstance(preview, dict)
+    assert isinstance(preview.get("json"), str)
+    assert isinstance(preview.get("shape"), list)
+    assert isinstance(p.survey(), (dict, type(None)))  # type: ignore[attr-defined]
+
+
 def _advice(p: object) -> None:
     line = p.advise(  # type: ignore[attr-defined]
         model="qwen:14b",
@@ -93,6 +107,7 @@ BEHAVIOUR: dict[str, Callable[[object], None]] = {
     "EscalationPlugin": _escalation,
     "BudgetPlugin": _budget,
     "AdvicePlugin": _advice,
+    "ReportPlugin": _report,
 }
 
 

@@ -130,6 +130,22 @@ class FeatureRegistry:
             found.extend(p for name, p in self._plugins[spec.id] if name == interface)
         return found
 
+    def plugin(self, feature_id: str, interface: str) -> object | None:
+        """The implementation ``feature_id`` registered for ``interface``, even while it is off.
+
+        ``plugins_for`` is the on-only path, because everything that acts on a request must stop
+        when the user switches a feature off. A switch whose payload cannot be inspected before
+        consent is a different problem (HDW-508): the usage report has to be previewable, and
+        ``headwaters doctor`` has to show it, while the flag is still false. Returns ``None`` when
+        the feature is not registered at all, which is what a removed ★ package looks like.
+        """
+        if interface not in INTERFACES:
+            raise ValueError(f"unknown plugin interface: {interface!r}")
+        for name, plugin in self._plugins.get(feature_id, []):
+            if name == interface:
+                return plugin
+        return None
+
     def dashboard_summary(self) -> dict[str, object] | None:
         """The first enabled ``DashboardPlugin``'s summary, or ``None`` when none contributes one.
 

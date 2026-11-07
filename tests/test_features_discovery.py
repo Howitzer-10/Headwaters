@@ -29,6 +29,7 @@ PRODUCTION = [
     "headwaters.features.ledger",
     "headwaters.features.paid_scopes",
     "headwaters.features.tray",
+    "headwaters.features.usage_report",
 ]
 
 

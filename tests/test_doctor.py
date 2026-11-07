@@ -494,6 +494,7 @@ def test_run_covers_every_check_and_adds_the_host_rows(cli_home: Path) -> None:
         "git",
         "mcp_launch",
         "host_configs",
+        "usage_report",
     ]
     assert report.ok  # warnings do not fail it
     payload = report.as_dict()
