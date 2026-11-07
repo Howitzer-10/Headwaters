@@ -1,17 +1,32 @@
 {
   "name": "headwaters-vscode",
   "displayName": "Headwaters",
-  "description": "Headwaters virtual models (auto, free, local, cloud) as VS Code language models, served by the Headwaters daemon on this machine.",
+  "description": "Headwaters virtual models (auto, free, local, cloud) as VS Code language models, plus a status bar for tier, walls, savings and Private Mode — served by the Headwaters daemon on this machine.",
   "version": "0.1.0",
   "publisher": "headwaters",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Howitzer-10/Headwaters.git",
+    "directory": "vscode-extension"
+  },
   "engines": {
     "vscode": "^1.104.0"
   },
   "categories": [
-    "AI",
-    "Chat"
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "language model",
+    "local model",
+    "cost",
+    "headwaters"
+  ],
+  "extensionKind": [
+    "workspace"
   ],
   "main": "./out/src/extension.js",
   "activationEvents": [
@@ -26,8 +41,43 @@
     ],
     "commands": [
       {
+        "command": "headwaters.refreshStatus",
+        "title": "Refresh Status",
+        "category": "Headwaters"
+      },
+      {
+        "command": "headwaters.setScope",
+        "title": "Set Scope…",
+        "category": "Headwaters"
+      },
+      {
+        "command": "headwaters.togglePrivateLock",
+        "title": "Toggle Private Mode",
+        "category": "Headwaters"
+      },
+      {
+        "command": "headwaters.pinModel",
+        "title": "Pin Model…",
+        "category": "Headwaters"
+      },
+      {
+        "command": "headwaters.createHandoff",
+        "title": "Create Handoff Packet…",
+        "category": "Headwaters"
+      },
+      {
+        "command": "headwaters.runDoctor",
+        "title": "Run Doctor",
+        "category": "Headwaters"
+      },
+      {
+        "command": "headwaters.openDashboard",
+        "title": "Open Dashboard",
+        "category": "Headwaters"
+      },
+      {
         "command": "headwaters.refreshModels",
-        "title": "Headwaters: Refresh Models",
+        "title": "Refresh Models",
         "category": "Headwaters"
       }
     ]
@@ -35,6 +85,8 @@
   "scripts": {
     "compile": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package",
     "pretest": "npm run compile",
     "test": "vscode-test"
   },
@@ -44,6 +96,7 @@
     "@types/vscode": "1.104.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.0",
     "typescript": "~5.9.3"
   }
 }

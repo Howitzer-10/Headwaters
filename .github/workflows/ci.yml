@@ -56,3 +56,29 @@ jobs:
       - run: uv run ruff check headwaters tests scripts bench
       - run: uv run mypy
       - run: uv run pytest --no-cov -q
+
+  # Builds the extension VSIX so a broken manifest or an unpackable tree fails here, not at
+  # publish time. Deliberately no publish step: `vsce publish` needs a Marketplace PAT and
+  # `ovsx publish` needs an Eclipse token, and neither exists in this repository. See
+  # docs/reports/HDW-507.md (FU-507-2).
+  vscode-extension:
+    name: vscode-extension / package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: headwaters-vscode-vsix
+          path: vscode-extension/*.vsix
+          if-no-files-found: error

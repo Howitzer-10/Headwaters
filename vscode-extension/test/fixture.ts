@@ -23,7 +23,12 @@ export class TempHome {
   }
 
   /** Write `daemon.json` and `daemon.token` the way a running daemon would. */
-  writeDaemon(port: number | null, token: string, version = '9.9.9-mock'): void {
+  writeDaemon(
+    port: number | null,
+    token: string,
+    version = '9.9.9-mock',
+    ports: { api?: number | null; gateway?: number | null; dashboard?: number | null } = {},
+  ): void {
     fs.mkdirSync(this.stateDir, { recursive: true });
     const info = {
       schema: 1,
@@ -32,7 +37,11 @@ export class TempHome {
       version,
       host: '127.0.0.1',
       mcp_path: '/mcp',
-      ports: { api: port, gateway: port, dashboard: port },
+      ports: {
+        api: ports.api === undefined ? port : ports.api,
+        gateway: ports.gateway === undefined ? port : ports.gateway,
+        dashboard: ports.dashboard === undefined ? port : ports.dashboard,
+      },
     };
     fs.writeFileSync(path.join(this.stateDir, 'daemon.json'), JSON.stringify(info, null, 2), 'utf8');
     fs.writeFileSync(path.join(this.stateDir, 'daemon.token'), `${token}\n`, 'utf8');

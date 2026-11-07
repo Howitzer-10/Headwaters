@@ -22,6 +22,9 @@ const STATE_SCHEMA = 1;
 const APP_DIR = 'Headwaters';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
+/** `daemon.json` writes `mcp_path`; this is the documented default (`headwaters/core/daemon_info.py`). */
+const DEFAULT_MCP_PATH = '/mcp';
+
 /** An address the extension will talk to: loopback only, never anything else. */
 export interface Gateway {
   /** e.g. `http://127.0.0.1:41337`, always loopback. */
@@ -29,6 +32,28 @@ export interface Gateway {
   /** The daemon's own bearer token. Never logged, never sent anywhere but loopback. */
   readonly token: string;
   /** The daemon version from the state file, used as the models' opaque `version` string. */
+  readonly version: string;
+}
+
+/**
+ * The other daemon listeners (HDW-507), read from the same `daemon.json`.
+ *
+ * The API port carries `GET /v1/status`, `POST /v1/scope` and the MCP endpoint (`headwaters/
+ * gateway/server.py` mounts the MCP app on that port); the dashboard port carries the browser page.
+ * Either can be unbound, which is why they are nullable here instead of throwing: a status bar has
+ * to say "not bound" rather than pretend the daemon is missing.
+ */
+export interface DaemonSurfaces {
+  /** The loopback host from the state file, e.g. `127.0.0.1`. */
+  readonly host: string;
+  /** e.g. `http://127.0.0.1:41338`, or null when `ports.api` is not bound. */
+  readonly apiUrl: string | null;
+  /** e.g. `http://127.0.0.1:41339/`, or null when `ports.dashboard` is not bound. */
+  readonly dashboardUrl: string | null;
+  /** The MCP path on the API port (`daemon.json`'s `mcp_path`, `/mcp` by default). */
+  readonly mcpPath: string;
+  /** The daemon's own bearer token, shared by every loopback route. */
+  readonly token: string;
   readonly version: string;
 }
 
@@ -80,6 +105,55 @@ export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {
  * Callers must treat every reason as "no gateway right now": no prompts, no modals, no retries.
  */
 export async function readGateway(env: NodeJS.ProcessEnv = process.env): Promise<Gateway> {
+  const state = await readState(env);
+  const port = portNamed(state.info['ports'], 'gateway');
+  if (port === undefined) {
+    throw new GatewayUnavailable(
+      'gateway-not-bound',
+      'The daemon has not bound its gateway port yet; the state file has no ports.gateway.',
+    );
+  }
+  return {
+    url: originOf(state.host, port),
+    token: await readToken(path.join(state.directory, 'daemon.token')),
+    version: state.version,
+  };
+}
+
+/**
+ * Read the API and dashboard listeners (HDW-507). Throws the same {@link GatewayUnavailable} as
+ * {@link readGateway} when the daemon is not running or wrote something unusable, but an unbound
+ * `ports.api`/`ports.dashboard` is reported as null rather than thrown: the daemon is up, that
+ * listener is not, and the status bar has to say so.
+ *
+ * This is the same file and the same token as {@link readGateway} — one state source, not two.
+ */
+export async function readDaemon(env: NodeJS.ProcessEnv = process.env): Promise<DaemonSurfaces> {
+  const state = await readState(env);
+  const api = portNamed(state.info['ports'], 'api');
+  const dashboard = portNamed(state.info['ports'], 'dashboard');
+  const rawPath = state.info['mcp_path'];
+  const mcpPath =
+    typeof rawPath === 'string' && rawPath.startsWith('/') ? rawPath : DEFAULT_MCP_PATH;
+  return {
+    host: state.host,
+    apiUrl: api === undefined ? null : originOf(state.host, api),
+    dashboardUrl: dashboard === undefined ? null : `${originOf(state.host, dashboard)}/`,
+    mcpPath,
+    token: await readToken(path.join(state.directory, 'daemon.token')),
+    version: state.version,
+  };
+}
+
+interface DaemonState {
+  readonly directory: string;
+  readonly info: Record<string, unknown>;
+  readonly host: string;
+  readonly version: string;
+}
+
+/** The validated state file every reader above shares: schema, loopback host, version. */
+async function readState(env: NodeJS.ProcessEnv): Promise<DaemonState> {
   const directory = stateDirectory(env);
   const info = await readStateFile(path.join(directory, 'daemon.json'));
 
@@ -100,20 +174,11 @@ export async function readGateway(env: NodeJS.ProcessEnv = process.env): Promise
     );
   }
 
-  const port = gatewayPort(info['ports']);
-  if (port === undefined) {
-    throw new GatewayUnavailable(
-      'gateway-not-bound',
-      'The daemon has not bound its gateway port yet; the state file has no ports.gateway.',
-    );
-  }
-
-  const version = typeof info['version'] === 'string' ? info['version'] : '';
-
   return {
-    url: `http://${host === '::1' ? '[::1]' : host}:${port}`,
-    token: await readToken(path.join(directory, 'daemon.token')),
-    version,
+    directory,
+    info,
+    host,
+    version: typeof info['version'] === 'string' ? info['version'] : '',
   };
 }
 
@@ -148,14 +213,18 @@ async function readStateFile(file: string): Promise<Record<string, unknown>> {
   return parsed as Record<string, unknown>;
 }
 
-function gatewayPort(ports: unknown): number | undefined {
+function portNamed(ports: unknown, name: string): number | undefined {
   if (typeof ports !== 'object' || ports === null) {
     return undefined;
   }
-  const value = (ports as Record<string, unknown>)['gateway'];
+  const value = (ports as Record<string, unknown>)[name];
   return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 65535
     ? value
     : undefined;
+}
+
+function originOf(host: string, port: number): string {
+  return `http://${host === '::1' ? '[::1]' : host}:${port}`;
 }
 
 async function readToken(file: string): Promise<string> {

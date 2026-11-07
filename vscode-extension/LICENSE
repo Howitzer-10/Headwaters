@@ -1,0 +1,9 @@
+Copyright (c) 2026 Headwaters. All rights reserved.
+
+This package is proprietary. No licence is granted to copy, modify, redistribute,
+sublicense or sell it, in source or in packaged form, until Headwaters adopts a
+distribution licence.
+
+The repository root `LICENSE` is a placeholder that grants nothing (docs/DECISIONS.md,
+D1). This file does not loosen that: it restates it for the packaged extension so the
+Marketplace listing and the VSIX carry an explicit statement instead of an empty one.
