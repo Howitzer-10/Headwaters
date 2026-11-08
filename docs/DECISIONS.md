@@ -26,9 +26,10 @@
 | D22 | Dashboard CSRF scope, accepted: **the token defends against a page on another origin, not against a process on the same machine.** Any local process that can read the loopback page can also read the token, so it is not a defence against local software. Accepted for a single-user loopback tool; a second user on one machine is out of scope until the listening socket carries an OS-level ACL. Why: the threat model is cross-origin web pages, and claiming more would imply a boundary the socket does not have. Closes FU-503-1. | Decided (2026-11-03, owner) |
 | D23 | A zero price is not free access: **a model listed at $0 whose use consumes an entitlement or allowance is `free_access: "plan"`, never `"all"`.** `"all"` means any caller with a key can use it at no cost and with no allowance. Applied to the OpenCode Go provider row, whose two $0 ids (`beam-free`, `iceman-contributor-free`) are included in the Go plan; the catalog carries `free_access` per provider, not per model. `plan` classifies as free in `_registry_tier` (it returns `free_cloud` for both `"all"` and `"plan"`), and for a $0 row this carries no billing risk; FU-519-4 stays open for providers whose `plan` scope can actually be billed. Why: `"all"` would claim the use is free of any allowance, which is false for a subscription. Closes FU-515-12. | Decided (2026-11-03, owner) |
 | D24 | `licence` is documentation only, permanently: **no runtime path reads it and no non-commercial gate will be built.** A gate would need commercial intent from the caller, which the catalog cannot supply, so `licence` stays a note to a person. `test_licence_is_documentation_only` stays as it is. Why: a gate built on a field that cannot see the caller's intent would be theatre and would risk blocking legitimate use. Closes FU-519-8. | Decided (2026-11-03, owner) |
+| D25 | Direction: **the niche is the best router and discoverer of free cloud provider models, plus the best use of local Ollama models on the person's own GPU.** Paid-model routing is out of scope for new work; existing paid code (budgets, paid scopes, the ledger's savings counterfactual) stays in place and de-prioritised, and the counterfactual is now a pitch rather than a cost centre. Every future ticket is judged through this lens. Qualifies D1/D6 (what a 1.0 split would even be) and does not reverse any decision; D16, D19 and D23 stay in force. See the detail section below. | Decided (2026-11-07, owner) |
 
 Numbering note: decision numbers are permanent — never reused, renumbered or handed to another
-decision — and this file is the consolidated copy of D1-D24. The owner resolved the D17 collision:
+decision — and this file is the consolidated copy of D1-D25. The owner resolved the D17 collision:
 D17 is HDW-513's per-request failure memory and tier turn-taking, D20 is HDW-512's behaviour over
 advertisement, and `howitzer-10-refactored-umbrella` was not renumbered (that branch keeps its own text).
 
@@ -339,3 +340,55 @@ answer's `cost` is priced from the catalog and reads `unknown` when the catalog 
 a routing-cost hint, not a bill.
 
 **Tickets.** HDW-512. The composition-honest error text stays HDW-511's.
+
+## D25 detail: the free-only niche
+
+**Decision (owner, 2026-11-07, verbatim):**
+
+> Before we run phase six, I'm making what might be a somewhat different direction of the
+> application's goal. The space of routing paid models is too competitive to their owners, I can't
+> compete. So I want to ONLY consider this product to be the smartest router / and discoverer of
+> free cloud llm provider / models, and best use of local ollama models that can work on the user's
+> graphics card. That will be my niche, and it needs to be done like nothing does today.
+
+**What changes.** New work aims at two things and nothing else: finding and routing the best free
+cloud provider models, and making local Ollama models on the person's own GPU do as much of the work
+as they can. Paid-model routing leaves the scope of new tickets. Nothing already built is removed:
+budgets, paid scopes, the ledger's savings counterfactual and the paid tier vocabulary stay where
+they are, de-prioritised, and D19 still governs how the word "paid" is written. The savings
+counterfactual changes job rather than code: it stops being a cost centre to defend and becomes part
+of the pitch ("what this would have cost you").
+
+**How a future ticket is judged.** Three questions, in order: does it find, verify or route a free
+provider model better; does it make a local model on the person's GPU more useful; does it keep the
+catalog true? A ticket that answers none of them, or that exists only to route a paid model, is out
+of scope for new work. Where a ticket mixes the two (as HDW-606's escalation loop does), the free and
+local halves are kept and the paid half is dropped or deferred — see
+[reports/FREE-ONLY-TRIAGE.md](reports/FREE-ONLY-TRIAGE.md).
+
+**What it rests on (verified on master at `4aa66e3`).** The provider registry is catalog data
+(`headwaters/core/providers.py`, `ProviderEntry` in `headwaters/core/catalog/schema.py`), and
+`catalog/seed_catalog.json` now carries 11 provider rows and 6 `free_limits` clause rows (HDW-514
+landed the first seven rows; HDW-519 added gemini, groq, cerebras and cohere and turned `free_limits`
+into clauses). `QuotaTracker` (`headwaters/core/quotas.py`) consumes those clauses as advisory
+ranking. The downward cascade (`descend_tiers` in `headwaters/core/policy/ladder.py`, HDW-516/517)
+only ever steps to a strictly lower tier, and is off by default.
+
+**What it does not yet have.** There is no living discovery mechanism for *providers*. Discovery
+(`headwaters/core/catalog/discovery.py`) lists models for providers already in the catalog; a new
+provider is added by hand, following "Add a provider as data" in `docs/PROVIDERS.md`. The catalog
+signature trust anchor is still empty (`EMBEDDED_PUBLIC_KEY_B64 = ""` in
+`headwaters/core/catalog/trust.py`), so a downloaded catalog cannot be accepted yet. Both are recorded
+as the next work in [reports/FREE-ONLY-TRIAGE.md](reports/FREE-ONLY-TRIAGE.md), not as an assumption
+that they already exist.
+
+**What it does not change.** D16 (Stage 1 dogfooding, Stage 2 distribution later) stands, and so does
+the red release gate with it. D1 and D6 are qualified, not reversed: a possible 1.0 Lite/Pro split is
+still a decision the owner makes at 1.0, it is simply a smaller question now. D9 (MCP sampling
+deferred), D13 (Ollama cloud models never routable), D19, D21, D22, D23 and D24 are untouched. The
+forward note under "Decided, not yet built" that a credits wall stops rather than silently
+downgrading a person to free also stands: D25 narrows what new work targets, it does not make a paid
+tier unreachable or change what happens when one hits a credits wall. No existing ticket is cancelled
+by this decision; the re-triage that applies it is a recommendation in the report, and the backlog
+and packets are edited only after the owner approves that step.
+
