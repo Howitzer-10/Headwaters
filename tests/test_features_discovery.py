@@ -26,6 +26,7 @@ EXAMPLE_PACKAGE = "tests.fixtures.features"
 # assertion was written (HDW-126) when nothing shipped there and went stale when the ledger, the
 # tray and the paid scopes landed; naming the packages is what keeps it meaningful.
 PRODUCTION = [
+    "headwaters.features.context_engine",
     "headwaters.features.ledger",
     "headwaters.features.paid_scopes",
     "headwaters.features.tray",

@@ -30,6 +30,30 @@ def estimate_tokens(text: str, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN)
     return math.ceil(len(text) / chars_per_token) if text else 0
 
 
+def estimate_tokens_for_bytes(size: int, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> int:
+    """Token estimate for a file of ``size`` bytes without reading it.
+
+    Characters never outnumber bytes, so this is an upper bound on ``estimate_tokens`` for the
+    file's text - which is what a budget check needs.
+    """
+    return math.ceil(size / chars_per_token) if size > 0 else 0
+
+
+def probe_file(resolved: ResolvedPath) -> tuple[int, FileStatus | None]:
+    """``(size_bytes, problem)`` from one ``stat``, with no read of the file's contents."""
+    target = long_safe(resolved.path)
+    try:
+        if target.is_dir():
+            return 0, "directory"
+        if not target.is_file():
+            return 0, "missing"
+        return target.stat().st_size, None
+    except FileNotFoundError:
+        return 0, "missing"
+    except OSError:
+        return 0, "unreadable"
+
+
 @dataclass(frozen=True)
 class FileEntry:
     """One requested path and what happened to it. ``text`` is empty unless it was included."""
@@ -43,16 +67,26 @@ class FileEntry:
     detail: str = ""
 
 
-def read_text(resolved: ResolvedPath, max_bytes: int) -> tuple[str, FileStatus | None]:
-    """``(text, problem)``: ``problem`` is a status when the file cannot be used."""
+def read_text(
+    resolved: ResolvedPath,
+    max_bytes: int,
+    *,
+    read_limit: int | None = None,
+) -> tuple[str, FileStatus | None]:
+    """``(text, problem)``: ``problem`` is a status when the file cannot be used.
+
+    ``read_limit`` caps how many bytes are read even when the file is smaller than ``max_bytes``;
+    a caller uses it to look at a prefix of a file that cannot fit its budget (HDW-601, FU-203-7).
+    """
     target = long_safe(resolved.path)
+    limit = max_bytes if read_limit is None else min(read_limit, max_bytes)
     try:
         if target.is_dir():
             return "", "directory"
         if not target.is_file():
             return "", "missing"
         with target.open("rb") as handle:
-            data = handle.read(max_bytes + 1)
+            data = handle.read(limit + 1)
     except FileNotFoundError:
         return "", "missing"
     except OSError:

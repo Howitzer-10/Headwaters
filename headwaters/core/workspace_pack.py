@@ -5,26 +5,39 @@ skips ignored, missing, binary, oversized and directory paths (reporting why, ne
 and fills a token budget: each file goes in whole while it fits; the first file that does not fit
 is cut at a line boundary and every later file is reported as ``budget``. This stays the core
 packer until the (★) context engine replaces it through ``ContextPlugin``.
+
+Sizes come first (HDW-601, FU-203-7): a ``stat`` decides ``too_large``, and a file that cannot
+fit the remaining budget is read as a bounded prefix instead of up to a megabyte. Since a UTF-8
+character is at most 4 bytes, four bytes of file per character the budget allows always covers
+enough text to decide, so the prefix is never too short and the file is not read twice.
+``total_tokens`` of a file that was not read whole is a size-based upper bound, not an exact count.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from headwaters.core.workspace_files import (
     DEFAULT_CHARS_PER_TOKEN,
     DEFAULT_MAX_FILE_BYTES,
+    TRUNCATION_MARK,
     FileEntry,
     FileStatus,
     TokenCounter,
     estimate_tokens,
+    estimate_tokens_for_bytes,
+    probe_file,
     read_text,
     truncate_to_tokens,
 )
 from headwaters.core.workspace_ignore import IgnoreMatcher
 from headwaters.core.workspace_paths import WorkspaceError
 from headwaters.core.workspace_roots import WorkspaceRoots
+
+#: Bytes to read past a 4-byte-per-character estimate so the cut can always place its marker.
+_PREFIX_SLACK_BYTES = 4 * (len(TRUNCATION_MARK) + 256)
 
 
 @dataclass(frozen=True)
@@ -82,12 +95,28 @@ def pack_files(
         if matcher.is_ignored(resolved.rel):
             entries.append(FileEntry(item, "ignored", resolved.display))
             continue
-        text, problem = read_text(resolved, max_file_bytes)
+        size, problem = probe_file(resolved)
         if problem is not None:
             entries.append(FileEntry(item, problem, resolved.display))
             continue
+        if size > max_file_bytes:
+            entries.append(FileEntry(item, "too_large", resolved.display))
+            continue
+        estimated = estimate_tokens_for_bytes(size, chars_per_token)
+        if full:
+            entries.append(FileEntry(item, "budget", resolved.display, 0, estimated))
+            continue
+        room_chars = (budget_tokens - used) * chars_per_token
+        read_limit: int | None = None
+        if token_counter is None and size > room_chars:
+            read_limit = math.ceil(room_chars * 4) + _PREFIX_SLACK_BYTES
+        text, problem = read_text(resolved, max_file_bytes, read_limit=read_limit)
+        if problem is not None:
+            entries.append(FileEntry(item, problem, resolved.display))
+            continue
+        complete = read_limit is None or read_limit >= size
         total = count(text)
-        if not full and total <= budget_tokens - used:
+        if complete and total <= budget_tokens - used:
             entries.append(FileEntry(item, "included", resolved.display, total, total, text))
             used += total
             continue
@@ -95,8 +124,17 @@ def pack_files(
         full = True
         if cut:
             tokens = count(cut)
-            entries.append(FileEntry(item, "truncated", resolved.display, tokens, total, cut))
+            entries.append(
+                FileEntry(
+                    item,
+                    "truncated",
+                    resolved.display,
+                    tokens,
+                    total if complete else estimated,
+                    cut,
+                )
+            )
             used += tokens
         else:
-            entries.append(FileEntry(item, "budget", resolved.display, 0, total))
+            entries.append(FileEntry(item, "budget", resolved.display, 0, estimated))
     return PackResult(tuple(entries), budget_tokens, used)

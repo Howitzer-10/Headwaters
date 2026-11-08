@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from headwaters.core.catalog.schema import Catalog
-from headwaters.core.workspace_ignore import IgnoreMatcher
+from headwaters.core.workspace_ignore import IgnoreMatcher, _cached_git_config
 
 _SEED = Path(__file__).resolve().parents[1] / "catalog" / "seed_catalog.json"
 
@@ -116,3 +116,99 @@ def test_ignore_file_cannot_be_a_directory(tmp_path: Path) -> None:
 
 def test_seed_catalog_defaults_validate() -> None:
     assert ".env" in _defaults()
+
+
+# -- HDW-601 (FU-203-4): git's other exclude sources -----------------------------------
+
+
+@pytest.fixture
+def git_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point git at a throwaway global config so the developer's real excludes never leak in."""
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / "gitconfig"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
+    _cached_git_config.cache_clear()
+    yield home
+    _cached_git_config.cache_clear()
+
+
+def test_core_excludes_file_from_git_config_is_honoured(tmp_path: Path, git_env: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    global_ignore = tmp_path / "global-ignore"
+    _write(global_ignore, "*.log\n")
+    _write(git_env / "gitconfig", f"[core]\n\texcludesFile = {global_ignore.as_posix()}\n")
+    _cached_git_config.cache_clear()
+    m = IgnoreMatcher(repo)
+    assert m.is_ignored("debug.log")
+    assert m.is_ignored("a/b/debug.log")
+    assert not m.is_ignored("debug.py")
+
+
+def test_git_default_xdg_ignore_file_is_honoured(tmp_path: Path, git_env: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    _write(git_env / "xdg" / "git" / "ignore", "*.bak\n")
+    assert IgnoreMatcher(repo).is_ignored("old.bak")
+
+
+def test_info_exclude_is_honoured(tmp_path: Path, git_env: Path) -> None:
+    repo = tmp_path / "repo"
+    _write(repo / ".git" / "info" / "exclude", "scratch/\n*.tmp\n")
+    m = IgnoreMatcher(repo)
+    assert m.is_ignored("notes.tmp")
+    assert m.is_ignored("scratch/deep/file.py")
+
+
+def test_linked_worktree_reads_the_shared_info_exclude(tmp_path: Path, git_env: Path) -> None:
+    main = tmp_path / "main"
+    _write(main / ".git" / "info" / "exclude", "*.snap\n")
+    _write(main / ".git" / "worktrees" / "wt" / "commondir", "../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    _write(worktree / ".git", "gitdir: ../main/.git/worktrees/wt\n")
+    assert IgnoreMatcher(worktree).is_ignored("shot.snap")
+
+
+def test_ignore_files_above_the_root_apply_to_it(tmp_path: Path, git_env: Path) -> None:
+    sandbox = tmp_path / "sandbox"
+    (sandbox / ".git").mkdir(parents=True)
+    _write(sandbox / ".gitignore", "*.log\n")
+    root = sandbox / "pkg"
+    root.mkdir()
+    m = IgnoreMatcher(root)
+    assert m.is_ignored("x/debug.log")
+    assert not m.is_ignored("keep.py")
+
+
+def test_a_root_ignore_file_overrides_one_above_it(tmp_path: Path, git_env: Path) -> None:
+    sandbox = tmp_path / "sandbox"
+    (sandbox / ".git").mkdir(parents=True)
+    _write(sandbox / ".gitignore", "*.log\n")
+    root = sandbox / "pkg"
+    _write(root / ".gitignore", "!keep.log\n")
+    m = IgnoreMatcher(root)
+    assert m.is_ignored("debug.log")
+    assert not m.is_ignored("keep.log")
+
+
+def test_git_extras_can_be_switched_off(tmp_path: Path, git_env: Path) -> None:
+    sandbox = tmp_path / "sandbox"
+    _write(sandbox / ".git" / "info" / "exclude", "*.log\n")
+    _write(sandbox / ".gitignore", "*.bak\n")
+    root = sandbox / "pkg"
+    root.mkdir()
+    m = IgnoreMatcher(root, _defaults(), use_git_excludes=False)
+    assert not m.is_ignored("debug.log")
+    assert not m.is_ignored("old.bak")
+    assert m.is_ignored(".env")
+
+
+def test_the_xdg_ignore_file_is_ignored_outside_a_work_tree(tmp_path: Path, git_env: Path) -> None:
+    _write(git_env / "xdg" / "git" / "ignore", "*.bak\n")
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    assert not IgnoreMatcher(loose).is_ignored("old.bak")

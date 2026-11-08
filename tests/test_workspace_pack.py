@@ -1,10 +1,15 @@
+import math
 import os
 from pathlib import Path
 
 import pytest
 
 from headwaters.core.plugins import ContextPlugin
-from headwaters.core.workspace_files import TRUNCATION_MARK, estimate_tokens
+from headwaters.core.workspace_files import (
+    DEFAULT_CHARS_PER_TOKEN,
+    TRUNCATION_MARK,
+    estimate_tokens,
+)
 from headwaters.core.workspace_pack import pack_files
 from headwaters.core.workspace_select import resolve_roots
 
@@ -107,3 +112,66 @@ def test_pack_can_back_a_context_plugin(tmp_path: Path) -> None:
     plugin = Packer()
     assert isinstance(plugin, ContextPlugin)
     assert plugin.build_context("a.py", 50) == "### a.py\na\n"
+
+
+# -- HDW-601 (FU-203-7): sizes are decided before a large file is read -------------------
+
+
+def test_a_file_over_the_size_cap_is_rejected_from_one_stat(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    _put(ws / "big.py", "x" * 2000)
+    result = pack_files(resolve_roots([ws]), ["big.py"], 10_000, max_file_bytes=1000)
+    entry = result.entries[0]
+    assert entry.status == "too_large"
+    assert (entry.tokens, entry.text) == (0, "")
+
+
+def test_a_file_that_cannot_fit_is_cut_cheaply_and_reports_a_size_bound(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    size = 20_000
+    _put(ws / "big.py", "line\n" * 4000)
+    result = pack_files(resolve_roots([ws]), ["big.py"], 50)
+    entry = result.entries[0]
+    assert entry.status == "truncated"
+    assert 0 < entry.tokens <= 50
+    # not read whole: total_tokens is the byte ceiling, the safe direction for a budget
+    assert entry.total_tokens == math.ceil(size / DEFAULT_CHARS_PER_TOKEN)
+
+
+def test_files_after_the_cut_report_their_own_size_bound(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    _put(ws / "first.py", "line\n" * 4000)
+    _put(ws / "second.py", "y\n" * 500)
+    result = pack_files(resolve_roots([ws]), ["first.py", "second.py"], 20)
+    assert [e.status for e in result.entries] == ["truncated", "budget"]
+    second = result.entries[1]
+    assert (second.tokens, second.text) == (0, "")
+    assert second.total_tokens == math.ceil(1000 / DEFAULT_CHARS_PER_TOKEN)
+
+
+def test_a_wide_character_file_that_fits_is_still_included(tmp_path: Path) -> None:
+    """2000 four-byte characters read as 8000 bytes but cost 2000 characters, not 8000."""
+    ws = _ws(tmp_path)
+    body = "\U0001F600" * 2000 + "\n"
+    _put(ws / "emoji.py", body)
+    result = pack_files(resolve_roots([ws]), ["emoji.py"], 700)
+    entry = result.entries[0]
+    assert entry.status == "included"
+    assert entry.tokens == entry.total_tokens
+    assert entry.text == body
+
+
+def test_a_token_counter_still_reads_the_whole_file(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    body = "line\n" * 4000
+    _put(ws / "big.py", body)
+    seen: list[str] = []
+
+    def counter(text: str) -> int:
+        seen.append(text)
+        return len(text)
+
+    result = pack_files(resolve_roots([ws]), ["big.py"], 25_000, token_counter=counter)
+    assert result.entries[0].status == "included"
+    assert seen
+    assert seen[0] == body
